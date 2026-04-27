@@ -6,7 +6,7 @@ AudioForge Unity 端对接开发文档（第一期）
 0. 当前状态
 
 - 当前工具端适用目标：UI / SFX / BGM 为主、事件驱动为主、接受轻量 SDK 的手游休闲项目。
-- 最近一次仓库内验证结果：`pytest` 59 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过。
+- 最近一次仓库内验证结果：`pytest` 62 项通过；真实 WAV 烟雾工程 PASS；全链路检查通过。
 - 当前参考运行时定位：开发参考实现，可直接用于空项目联调与生产版 SDK 的起步实现，不等于最终生产版音频系统。
 
 1. 文档定位
@@ -16,8 +16,9 @@ AudioForge Unity 端对接开发文档（第一期）
 如果你是第一次接手该 SDK，推荐阅读顺序固定为：
 
 1. 先通读本文档，明确边界、输入输出和最小验收标准。
-2. 再阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
-3. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
+2. 再阅读 `unity_package/README.md`，明确独立包与验证镜像的维护边界。
+3. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
+4. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
 
 本期交接的核心原则只有一条：Unity 端只依赖导出产物，不依赖工具源码，不读取 `.afproj`，也不要求在 Unity 项目中嵌入 Python 运行环境。
 
@@ -29,9 +30,16 @@ AudioForge Unity 端对接开发文档（第一期）
 - `Export/AudioManifest.json`
 - `Export/AudioEventID.cs`
 - `Export/Assets/**`
-- `unity_validation/Assets/AudioForgeRuntime/**`
+- `unity_package/Assets/AudioForgeRuntime/**`
 - `unity_validation/README.md`
+- `unity_package/README.md`
 - `docs/internal/internal_release_execution_plan.md`
+
+如果希望像 Wwise 集成包一样直接给 Unity 程序一个版本化压缩包，可直接执行：
+
+`python tools/package_unity_integration_package.py`
+
+该命令会在 `dist/` 下生成版本化目录包和 zip。
 
 建议同时附带以下验证产物给 Unity 程序：
 
@@ -52,7 +60,7 @@ Assets/
 				...导出的音频资源...
 ```
 
-当前仓库根目录 `Export/` 样例里，默认可直接拿来验证的事件枚举已同步为：`sfx_level_check_02`、`sfx_level_check_03`、`sfx_tile_hint_02`、`sfx_tile_undo_02`、`sfx_tile_undo_03`。`unity_validation` 里的默认 `AudioForgeBootstrap` / `AudioForgeEventPlayer` 也已对齐到 `sfx_level_check_02`，避免空项目验证仍指向旧样例事件。
+当前仓库根目录 `Export/` 样例里，默认可直接拿来验证的事件枚举已同步为：`sfx_level_check_02`、`sfx_level_check_03`、`sfx_tile_hint_02`、`sfx_tile_undo_02`、`sfx_tile_undo_03`。当前 Unity 运行时代码统一维护在 `unity_package`，`unity_validation` 里的 `AudioForgeBootstrap` / `AudioForgeEventPlayer` 镜像也已对齐到 `sfx_level_check_02`，避免空项目验证仍指向旧样例事件。
 
 3. 工具端与 Unity 端边界
 
@@ -90,7 +98,7 @@ Assets/
 - `IAudioForgeResourceProvider`：负责根据 `AssetKey` 加载 `AudioClip`。
 - `AudioForgeBusState`：维护总线音量、静音和扩展状态。
 
-当前仓库自带的 `unity_validation/Assets/AudioForgeRuntime/Scripts/AudioForgeRuntime.cs` 已补充一套参考实现：当 `useReferenceTimePreservingPitch = true` 时，会优先对运行时加载到的 `AudioClip` 生成保时长变调版本，并缓存后再交给 `AudioSource` 播放。对应算法入口位于 `AudioForgeTimePreservingPitchProcessor.cs`，可直接作为 Unity 端开发的参考起点。
+当前仓库自带的 `unity_package/Assets/AudioForgeRuntime/Scripts/AudioForgeRuntime.cs` 已补充一套参考实现：当 `useReferenceTimePreservingPitch = true` 时，会优先对运行时加载到的 `AudioClip` 生成保时长变调版本，并缓存后再交给 `AudioSource` 播放。对应算法入口位于 `AudioForgeTimePreservingPitchProcessor.cs`，可直接作为 Unity 端开发的参考起点。
 同时，仓库中已经给出完整参考脚本分工：`IAudioForgeResourceProvider.cs` 与 `AudioForgeStreamingAssetsProvider.cs` 负责资源加载抽象，`AudioForgeEventPlayer.cs` 与 `AudioForgeBootstrap.cs` 负责场景触发与验证引导，`AudioForgeRuntimeDebugPanel.cs` 用于联调观察运行时状态。
 当前参考调试面板除了基础事件/总线状态外，还会展示最近事件触发记录、总音高、是否走保时长变调、处理后 Clip 缓存是否命中、当前资源提供器类型、运行时音频格式，以及最近总线状态变化历史，便于 Unity 开发直接定位行为差异。
 

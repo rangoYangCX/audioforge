@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from audioforge.app.utils.constants import APP_VERSION
+
+
+def main() -> int:
+    workspace = Path(__file__).resolve().parents[1]
+    dist_root = workspace / "dist"
+    build_root = workspace / "build"
+    release_root = dist_root / f"AudioForge-{APP_VERSION}-windows"
+
+    for path in (release_root, build_root / "pyinstaller"):
+        if path.exists():
+            shutil.rmtree(path)
+
+    icon_source = workspace / "audioforge" / "app" / "assets" / "icons" / "app.ico"
+    add_data = f"{workspace / 'audioforge' / 'app' / 'assets'};audioforge/app/assets"
+    command = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--windowed",
+        "--name",
+        "AudioForge",
+        "--distpath",
+        str(dist_root),
+        "--workpath",
+        str(build_root / "pyinstaller"),
+        "--specpath",
+        str(build_root / "pyinstaller"),
+        "--add-data",
+        add_data,
+        str(workspace / "audioforge" / "main.py"),
+    ]
+
+    if icon_source.exists():
+        command[10:10] = ["--icon", str(icon_source)]
+
+    completed = subprocess.run(command, cwd=workspace)
+    if completed.returncode != 0:
+        return completed.returncode
+
+    built_dir = dist_root / "AudioForge"
+    if release_root.exists():
+        shutil.rmtree(release_root)
+    built_dir.rename(release_root)
+    archive_path = dist_root / f"AudioForge-{APP_VERSION}-windows.zip"
+    if archive_path.exists():
+        archive_path.unlink()
+    shutil.make_archive(str(release_root), "zip", root_dir=dist_root, base_dir=release_root.name)
+    print(f"Packaged build created at: {release_root}")
+    print(f"Packaged zip created at: {archive_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

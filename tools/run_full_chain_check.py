@@ -26,6 +26,11 @@ REQUIRED_UNITY_RUNTIME_FILES = (
     "Assets/AudioForgeRuntime/Scripts/AudioForgeBootstrap.cs",
     "Assets/AudioForgeRuntime/Scripts/MiniJson.cs",
     "Assets/AudioForgeRuntime/Scripts/AudioEventID.cs",
+    "Assets/AudioForgeRuntime/Editor/AudioForgeEventIdSearchInspector.cs",
+    "Assets/AudioForgeRuntime/Editor/AudioForgeEventIdEditorUtility.cs",
+    "Assets/AudioForgeRuntime/Editor/AudioForgeBootstrapEditor.cs",
+    "Assets/AudioForgeRuntime/Editor/AudioForgeEventPlayerEditor.cs",
+    "Assets/AudioForgeRuntime/Editor/AudioForgeRuntimeEditor.cs",
     "Assets/AudioForgeRuntime/Editor/AudioForgeMissingScriptCleaner.cs",
 )
 
@@ -48,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run AudioForge full-chain checks and generate a report.")
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--export-dir", type=Path)
+    parser.add_argument("--unity-package-dir", type=Path)
     parser.add_argument("--unity-validation-dir", type=Path)
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--skip-pytest", action="store_true")
@@ -58,6 +64,7 @@ def main() -> int:
     args = parse_args()
     workspace = args.workspace.resolve()
     export_dir = (args.export_dir or (workspace / "Export")).resolve()
+    unity_package_dir = (args.unity_package_dir or (workspace / "unity_package")).resolve()
     unity_validation_dir = (args.unity_validation_dir or (workspace / "unity_validation")).resolve()
     report_dir = (args.report_dir or (workspace / "reports")).resolve()
 
@@ -69,9 +76,9 @@ def main() -> int:
 
     results.append(check_export_bundle(export_dir))
     results.append(check_runtime_contract(export_dir))
-    results.append(check_unity_validation_package(unity_validation_dir))
+    results.append(check_unity_integration_package(unity_package_dir, unity_validation_dir))
 
-    report = build_report(workspace, export_dir, unity_validation_dir, results)
+    report = build_report(workspace, export_dir, unity_package_dir, unity_validation_dir, results)
     write_reports(report_dir, report)
 
     print(render_console_summary(report, report_dir))
@@ -236,39 +243,64 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
     return CheckResult("runtime_contract", passed, details)
 
 
-def check_unity_validation_package(unity_validation_dir: Path) -> CheckResult:
-    details: list[str] = [f"unity_validation_dir={unity_validation_dir}"]
-    missing_files: list[str] = []
-    missing_meta: list[str] = []
+def check_unity_integration_package(unity_package_dir: Path, unity_validation_dir: Path) -> CheckResult:
+    details: list[str] = [f"unity_package_dir={unity_package_dir}", f"unity_validation_dir={unity_validation_dir}"]
+    missing_package_files: list[str] = []
+    missing_validation_files: list[str] = []
+    missing_package_meta: list[str] = []
+    missing_validation_meta: list[str] = []
+    mirror_mismatches: list[str] = []
 
     for relative_path in REQUIRED_UNITY_RUNTIME_FILES:
-        file_path = unity_validation_dir / relative_path
-        if not file_path.exists():
-            missing_files.append(relative_path)
+        package_file_path = unity_package_dir / relative_path
+        validation_file_path = unity_validation_dir / relative_path
+        if not package_file_path.exists():
+            missing_package_files.append(relative_path)
             continue
-        meta_path = file_path.with_name(file_path.name + ".meta")
-        if not meta_path.exists():
-            missing_meta.append(str(Path(relative_path).with_name(Path(relative_path).name + ".meta")).replace("\\", "/"))
+        if not validation_file_path.exists():
+            missing_validation_files.append(relative_path)
+            continue
+        package_meta_path = package_file_path.with_name(package_file_path.name + ".meta")
+        validation_meta_path = validation_file_path.with_name(validation_file_path.name + ".meta")
+        relative_meta_path = str(Path(relative_path).with_name(Path(relative_path).name + ".meta")).replace("\\", "/")
+        if not package_meta_path.exists():
+            missing_package_meta.append(relative_meta_path)
+        if not validation_meta_path.exists():
+            missing_validation_meta.append(relative_meta_path)
+        if package_file_path.read_bytes() != validation_file_path.read_bytes():
+            mirror_mismatches.append(relative_path)
+        if package_meta_path.exists() and validation_meta_path.exists() and package_meta_path.read_bytes() != validation_meta_path.read_bytes():
+            mirror_mismatches.append(relative_meta_path)
 
     folder_meta_targets = (
-        unity_validation_dir / "Assets/AudioForgeRuntime.meta",
-        unity_validation_dir / "Assets/AudioForgeRuntime/Scripts.meta",
-        unity_validation_dir / "Assets/AudioForgeRuntime/Editor.meta",
+        "Assets/AudioForgeRuntime.meta",
+        "Assets/AudioForgeRuntime/Scripts.meta",
+        "Assets/AudioForgeRuntime/Editor.meta",
     )
-    for meta_path in folder_meta_targets:
-        if not meta_path.exists():
-            missing_meta.append(str(meta_path.relative_to(unity_validation_dir)).replace("\\", "/"))
+    for relative_path in folder_meta_targets:
+        package_meta_path = unity_package_dir / relative_path
+        validation_meta_path = unity_validation_dir / relative_path
+        if not package_meta_path.exists():
+            missing_package_meta.append(relative_path)
+        if not validation_meta_path.exists():
+            missing_validation_meta.append(relative_path)
+        if package_meta_path.exists() and validation_meta_path.exists() and package_meta_path.read_bytes() != validation_meta_path.read_bytes():
+            mirror_mismatches.append(relative_path)
 
-    passed = not missing_files and not missing_meta
-    details.extend(f"missing_file={item}" for item in missing_files)
-    details.extend(f"missing_meta={item}" for item in missing_meta)
+    passed = not missing_package_files and not missing_validation_files and not missing_package_meta and not missing_validation_meta and not mirror_mismatches
+    details.extend(f"missing_package_file={item}" for item in missing_package_files)
+    details.extend(f"missing_validation_file={item}" for item in missing_validation_files)
+    details.extend(f"missing_package_meta={item}" for item in missing_package_meta)
+    details.extend(f"missing_validation_meta={item}" for item in missing_validation_meta)
+    details.extend(f"mirror_mismatch={item}" for item in sorted(set(mirror_mismatches)))
     details.append(f"runtime_files_checked={len(REQUIRED_UNITY_RUNTIME_FILES)}")
-    return CheckResult("unity_validation_package", passed, details)
+    return CheckResult("unity_integration_package", passed, details)
 
 
 def build_report(
     workspace: Path,
     export_dir: Path,
+    unity_package_dir: Path,
     unity_validation_dir: Path,
     results: list[CheckResult],
 ) -> dict[str, Any]:
@@ -278,6 +310,7 @@ def build_report(
         "generated_at": timestamp,
         "workspace": str(workspace),
         "export_dir": str(export_dir),
+        "unity_package_dir": str(unity_package_dir),
         "unity_validation_dir": str(unity_validation_dir),
         "passed": passed,
         "summary": {
@@ -317,6 +350,7 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         f"- Overall: {'PASS' if report['passed'] else 'FAIL'}",
         f"- Workspace: {report['workspace']}",
         f"- Export Dir: {report['export_dir']}",
+        f"- Unity Package Dir: {report['unity_package_dir']}",
         f"- Unity Validation Dir: {report['unity_validation_dir']}",
         "",
         "## Summary",

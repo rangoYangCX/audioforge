@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+import sys
 
 from PySide6.QtGui import QIcon
 
 
-ICON_ROOT = Path(__file__).resolve().parents[1] / "assets" / "icons"
+def _resolve_icon_root() -> Path:
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        bundled_icons = bundle_root / "audioforge" / "app" / "assets" / "icons"
+        if bundled_icons.exists():
+            return bundled_icons
+    return Path(__file__).resolve().parents[1] / "assets" / "icons"
+
+
+ICON_ROOT = _resolve_icon_root()
 
 
 @lru_cache(maxsize=None)

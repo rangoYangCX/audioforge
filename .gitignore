@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+build/
+dist/
+Export/
+Export.zip
+reports/checks/
+reports/full_chain_report.json
+reports/full_chain_report.md
+reports/unity_package_release/

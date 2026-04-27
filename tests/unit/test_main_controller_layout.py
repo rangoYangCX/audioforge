@@ -142,6 +142,67 @@ def test_switching_project_bus_selection_commits_previous_bus_editor(monkeypatch
     controller.window.close()
 
 
+def test_export_root_browse_updates_project_settings(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    selected_path = str(tmp_path / "BuildOutput")
+    monkeypatch.setattr(controller.window, "ask_export_root_path", lambda initial_path: selected_path)
+
+    controller.window.export_root_browse_button.click()
+    QApplication.processEvents()
+
+    assert controller.window.export_root_edit.text() == selected_path
+    assert controller.project.settings.export_root == selected_path
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_settings_dialog_shows_recent_projects(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.set_recent_projects(["C:/AudioForge/Demo.afproj"])
+
+    controller.window.open_settings_dialog()
+    QApplication.processEvents()
+
+    assert controller.window.settings_dialog.isVisible()
+    assert controller.window.recent_projects_combo.count() == 1
+    assert controller.window.recent_projects_combo.currentText() == "C:/AudioForge/Demo.afproj"
+
+    controller.window.settings_dialog.close()
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_settings_dialog_import_template_defaults_flow_into_ui_preferences(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    bus_index = controller.window.import_template_bus_combo.findData("UI")
+
+    controller.window.open_settings_dialog()
+    controller.window.import_template_bus_combo.setCurrentIndex(bus_index)
+    controller.window.import_template_asset_prefix_edit.setText("ui/default")
+    controller.window.import_template_asset_prefix_edit.editingFinished.emit()
+    controller.window.import_template_tags_edit.setText("ui, default")
+    controller.window.import_template_tags_edit.editingFinished.emit()
+    QApplication.processEvents()
+
+    preferences = controller.window.ui_preferences()
+    assert preferences["event_import_template"] == {
+        "bus_name": "UI",
+        "asset_prefix": "ui/default",
+        "tags": ["ui", "default"],
+    }
+
+    controller.window.settings_dialog.close()
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_refresh_ui_keeps_manual_project_bus_selection(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFrame,
     QFileDialog,
@@ -271,6 +272,7 @@ class MainWindow(QMainWindow):
         self.preview_bus_effective_label = QLabel("有效输出：100%")
         self.export_root_edit = QLineEdit()
         self.export_root_edit.setPlaceholderText("./Export")
+        self.export_root_browse_button = QPushButton("选择目录")
         self.buses_edit = QLineEdit()
         self.buses_edit.setPlaceholderText("BGM, SFX, UI")
         self.volume_spin = QDoubleSpinBox()
@@ -421,6 +423,13 @@ class MainWindow(QMainWindow):
         self.open_recent_project_button = QPushButton("打开最近工程")
         self.recent_projects_list = QListWidget()
         self.recent_projects_list.setMaximumHeight(120)
+        self.import_template_bus_combo = QComboBox()
+        self.import_template_asset_prefix_edit = QLineEdit()
+        self.import_template_asset_prefix_edit.setPlaceholderText("ui/click")
+        self.import_template_tags_edit = QLineEdit()
+        self.import_template_tags_edit.setPlaceholderText("ui, click")
+        self.import_template_hint_label = QLabel("树上“批量导入音频为事件”会默认读取这里的模板。")
+        self.import_template_hint_label.setWordWrap(True)
 
         self.project_badge = QLabel("AudioForge 工程台")
         self.project_title_label = QLabel("未命名工程")
@@ -445,6 +454,7 @@ class MainWindow(QMainWindow):
         self.zoom_reset_button = QToolButton()
         self.zoom_in_button = QToolButton()
         self.reset_layout_button = QToolButton()
+        self.settings_button = QPushButton("设置")
         self.scale_status_label = QLabel("100%")
         self.new_folder_button = QPushButton("新建文件夹")
         self.new_event_button = QPushButton("新建事件")
@@ -504,6 +514,9 @@ class MainWindow(QMainWindow):
         self.main_toolbar.addWidget(self.zoom_in_button)
         self.main_toolbar.addWidget(self.scale_status_label)
         self.main_toolbar.addWidget(self.reset_layout_button)
+        self.main_toolbar.addSeparator()
+        self.main_toolbar.addWidget(self._build_toolbar_section_label("设置"))
+        self.main_toolbar.addWidget(self.settings_button)
         toolbar_spacer = QWidget()
         toolbar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.main_toolbar.addWidget(toolbar_spacer)
@@ -701,7 +714,12 @@ class MainWindow(QMainWindow):
 
         generation_settings_group = QGroupBox("生成设置")
         generation_settings_layout = QFormLayout(generation_settings_group)
-        generation_settings_layout.addRow("导出目录", self.export_root_edit)
+        export_root_row = QHBoxLayout()
+        export_root_row.setContentsMargins(0, 0, 0, 0)
+        export_root_row.setSpacing(8)
+        export_root_row.addWidget(self.export_root_edit, 1)
+        export_root_row.addWidget(self.export_root_browse_button)
+        generation_settings_layout.addRow("导出目录", export_root_row)
         generation_settings_layout.addRow("源格式", self.source_audio_format_combo)
         generation_settings_layout.addRow("运行时格式", self.runtime_audio_format_combo)
 
@@ -743,29 +761,12 @@ class MainWindow(QMainWindow):
         project_bus_overview_layout.addWidget(self.project_bus_summary_label)
         project_bus_overview_layout.addWidget(self.project_bus_focus_audio_button)
 
-        preview_bus_group = QGroupBox("试听总线")
-        preview_bus_layout = QFormLayout(preview_bus_group)
-        preview_bus_layout.addRow("目标总线", self.preview_bus_combo)
-        preview_bus_layout.addRow("预览音量", self.preview_bus_volume_spin)
-        preview_bus_layout.addRow("静音", self.preview_bus_mute_check)
-        preview_bus_layout.addRow("有效输出", self.preview_bus_effective_label)
-
-        recent_group = QGroupBox("最近工程")
-        recent_layout = QVBoxLayout(recent_group)
-        recent_top_layout = QHBoxLayout()
-        recent_top_layout.addWidget(self.recent_projects_combo)
-        recent_top_layout.addWidget(self.open_recent_project_button)
-        recent_layout.addLayout(recent_top_layout)
-        recent_layout.addWidget(self.recent_projects_list)
-
         project_right_panel = QWidget()
         project_right_layout = QVBoxLayout(project_right_panel)
         project_right_layout.setContentsMargins(0, 0, 0, 0)
         project_right_layout.addWidget(master_bus_group)
         project_right_layout.addWidget(project_settings_group)
         project_right_layout.addWidget(project_bus_overview_group)
-        project_right_layout.addWidget(preview_bus_group)
-        project_right_layout.addWidget(recent_group)
         project_right_layout.addStretch(1)
 
         project_splitter = QSplitter()
@@ -981,6 +982,88 @@ class MainWindow(QMainWindow):
         container_layout.addWidget(self.workspace_status_bar)
         container_layout.addWidget(self.workspace_splitter)
         self.setCentralWidget(container)
+        self._build_settings_dialog()
+
+    def _build_settings_dialog(self) -> None:
+        self.settings_dialog = QDialog(self)
+        self.settings_dialog.setWindowTitle("设置")
+        self.settings_dialog.resize(760, 620)
+
+        intro_label = QLabel("把低频的应用级控制集中收纳到这里，避免工程首页堆叠。")
+        intro_label.setWordWrap(True)
+
+        preview_bus_group = QGroupBox("试听总线")
+        preview_bus_layout = QFormLayout(preview_bus_group)
+        preview_bus_layout.addRow("目标总线", self.preview_bus_combo)
+        preview_bus_layout.addRow("预览音量", self.preview_bus_volume_spin)
+        preview_bus_layout.addRow("静音", self.preview_bus_mute_check)
+        preview_bus_layout.addRow("有效输出", self.preview_bus_effective_label)
+
+        import_template_group = QGroupBox("导入模板默认值")
+        import_template_layout = QFormLayout(import_template_group)
+        import_template_layout.addRow("默认总线", self.import_template_bus_combo)
+        import_template_layout.addRow("资源前缀", self.import_template_asset_prefix_edit)
+        import_template_layout.addRow("默认标签", self.import_template_tags_edit)
+        import_template_layout.addRow("说明", self.import_template_hint_label)
+
+        recent_group = QGroupBox("最近工程")
+        recent_layout = QVBoxLayout(recent_group)
+        recent_top_layout = QHBoxLayout()
+        recent_top_layout.addWidget(self.recent_projects_combo)
+        recent_top_layout.addWidget(self.open_recent_project_button)
+        recent_layout.addLayout(recent_top_layout)
+        recent_layout.addWidget(self.recent_projects_list)
+
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.settings_dialog.close)
+        footer_layout = QHBoxLayout()
+        footer_layout.addStretch(1)
+        footer_layout.addWidget(close_button)
+
+        dialog_layout = QVBoxLayout(self.settings_dialog)
+        dialog_layout.setContentsMargins(16, 16, 16, 16)
+        dialog_layout.setSpacing(12)
+        dialog_layout.addWidget(intro_label)
+        dialog_layout.addWidget(preview_bus_group)
+        dialog_layout.addWidget(import_template_group)
+        dialog_layout.addWidget(recent_group)
+        dialog_layout.addLayout(footer_layout)
+
+    def open_settings_dialog(self) -> None:
+        self.settings_dialog.show()
+        self.settings_dialog.raise_()
+        self.settings_dialog.activateWindow()
+
+    def current_event_import_template_defaults(self) -> dict[str, object]:
+        selected_bus = self.import_template_bus_combo.currentData()
+        bus_name = str(selected_bus) if selected_bus is not None else str(self._event_import_template_defaults.get("bus_name", ""))
+        return {
+            "bus_name": bus_name,
+            "asset_prefix": self.import_template_asset_prefix_edit.text().strip().strip("/"),
+            "tags": [tag.strip() for tag in self.import_template_tags_edit.text().split(",") if tag.strip()],
+        }
+
+    def _sync_event_import_template_controls(self, buses: list[str] | None = None) -> None:
+        available_buses = list(buses) if buses is not None else [self.default_bus_combo.itemText(i) for i in range(self.default_bus_combo.count())]
+        remembered_bus_name = str(self._event_import_template_defaults.get("bus_name", ""))
+        self.import_template_bus_combo.blockSignals(True)
+        self.import_template_asset_prefix_edit.blockSignals(True)
+        self.import_template_tags_edit.blockSignals(True)
+        self.import_template_bus_combo.clear()
+        self.import_template_bus_combo.addItem("自动选择", "")
+        for bus_name in available_buses:
+            self.import_template_bus_combo.addItem(bus_name, bus_name)
+        target_bus_name = remembered_bus_name if remembered_bus_name in available_buses else ""
+        target_index = self.import_template_bus_combo.findData(target_bus_name)
+        self.import_template_bus_combo.setCurrentIndex(target_index if target_index >= 0 else 0)
+        self.import_template_asset_prefix_edit.setText(str(self._event_import_template_defaults.get("asset_prefix", "")))
+        self.import_template_tags_edit.setText(", ".join(str(tag) for tag in self._event_import_template_defaults.get("tags", [])))
+        self.import_template_bus_combo.blockSignals(False)
+        self.import_template_asset_prefix_edit.blockSignals(False)
+        self.import_template_tags_edit.blockSignals(False)
+
+    def _update_event_import_template_defaults_from_controls(self) -> None:
+        self._event_import_template_defaults = self.current_event_import_template_defaults()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1916,6 +1999,9 @@ class MainWindow(QMainWindow):
         )
         return file_path
 
+    def ask_export_root_path(self, initial_path: str) -> str:
+        return QFileDialog.getExistingDirectory(self, "选择导出目录", initial_path or "")
+
     def set_project_title(self, project_name: str, file_path: str | None) -> None:
         suffix = file_path if file_path else "未保存"
         self.project_title_label.setText(project_name)
@@ -1931,11 +2017,7 @@ class MainWindow(QMainWindow):
             "inspector_splitter_sizes": None,
             "content_top_splitter_sizes": self.content_top_splitter.sizes(),
             "active_contents_tab": self.contents_tabs.currentIndex(),
-            "event_import_template": {
-                "bus_name": str(self._event_import_template_defaults.get("bus_name", "")),
-                "asset_prefix": str(self._event_import_template_defaults.get("asset_prefix", "")),
-                "tags": list(self._event_import_template_defaults.get("tags", [])),
-            },
+            "event_import_template": self.current_event_import_template_defaults(),
         }
 
     def apply_ui_preferences(self, preferences: dict[str, object]) -> None:
@@ -1963,6 +2045,7 @@ class MainWindow(QMainWindow):
                 "asset_prefix": str(event_import_template.get("asset_prefix", "")),
                 "tags": [str(tag) for tag in event_import_template.get("tags", [])],
             }
+        self._sync_event_import_template_controls()
 
     def set_dirty_state(self, is_dirty: bool) -> None:
         text = "未保存更改" if is_dirty else "已保存"
@@ -1989,6 +2072,7 @@ class MainWindow(QMainWindow):
         self.source_audio_format_combo.setCurrentText(settings.source_audio_format)
         self.runtime_audio_format_combo.setCurrentText(settings.runtime_audio_format)
         self.project_bus_default_label.setText(f"默认总线：{settings.default_bus}")
+        self._sync_event_import_template_controls(settings.buses)
         self._load_selected_project_bus_details()
         self._loading_event = False
 
@@ -2826,6 +2910,7 @@ class MainWindow(QMainWindow):
             "asset_prefix": str(template["asset_prefix"]),
             "tags": list(template["tags"]),
         }
+        self._sync_event_import_template_controls()
         return template
 
     def ask_new_folder_name(self) -> str:
@@ -3144,6 +3229,7 @@ class MainWindow(QMainWindow):
         self.zoom_out_button.clicked.connect(self.decrease_ui_scale)
         self.zoom_reset_button.clicked.connect(self.reset_ui_scale)
         self.reset_layout_button.clicked.connect(self.restore_default_layout)
+        self.settings_button.clicked.connect(self.open_settings_dialog)
         self.object_parent_button.clicked.connect(self.navigateParentRequested.emit)
         self.reference_parent_value_button.clicked.connect(self.navigateParentRequested.emit)
         self.reference_bus_value_button.clicked.connect(lambda: self.set_active_property_category("事件"))
@@ -3189,6 +3275,10 @@ class MainWindow(QMainWindow):
         self.preview_bus_combo.currentIndexChanged.connect(self.previewBusSelectionChanged.emit)
         self.preview_bus_volume_spin.valueChanged.connect(self._emit_preview_bus_state_changed)
         self.preview_bus_mute_check.checkStateChanged.connect(self._emit_preview_bus_state_changed)
+        self.import_template_bus_combo.currentIndexChanged.connect(self._update_event_import_template_defaults_from_controls)
+        self.import_template_asset_prefix_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
+        self.import_template_tags_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
+        self.export_root_browse_button.clicked.connect(self._request_export_root_browse)
         self.export_root_edit.editingFinished.connect(self._emit_project_settings_changed)
         self.volume_spin.valueChanged.connect(self._emit_event_properties_changed)
         self.volume_rand_min_spin.valueChanged.connect(self._emit_event_properties_changed)
@@ -3485,6 +3575,13 @@ class MainWindow(QMainWindow):
         file_path = self.recent_projects_combo.currentText().strip()
         if file_path:
             self.openRecentProjectRequested.emit(file_path)
+
+    def _request_export_root_browse(self) -> None:
+        selected_path = self.ask_export_root_path(self.export_root_edit.text().strip())
+        if not selected_path:
+            return
+        self.export_root_edit.setText(selected_path)
+        self._emit_project_settings_changed()
 
     def _build_toolbar_section_label(self, title: str) -> QLabel:
         label = QLabel(title)

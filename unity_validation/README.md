@@ -5,7 +5,7 @@
 
 ## 当前验证状态
 
-- 当前仓库内最近一次基线验证结果：`pytest` 59 项通过。
+- 当前仓库内最近一次基线验证结果：`pytest` 62 项通过。
 - 真实 WAV 烟雾工程验证结果：PASS。
 - 最近一次全链路检查结果：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 验证包完整性。
 
@@ -13,7 +13,14 @@
 
 当前仓库没有检测到本机可用的 Unity 或 Unity Hub 命令行入口，因此无法在此环境里自动创建真实 Unity 空项目。
 
-已经准备好的内容位于本目录。你只需要在 Unity Hub 里手动新建一个空项目，再把 `Assets/AudioForgeRuntime` 目录整体复制进去，就可以开始验证。
+已经准备好的内容位于仓库中的独立包目录。你只需要在 Unity Hub 里手动新建一个空项目，再把 `unity_package/Assets/AudioForgeRuntime` 目录整体复制进去，就可以开始验证。
+
+当前 `unity_validation` 目录本身已经整理成更接近示例工程骨架的结构：
+
+1. `Assets/AudioForgeRuntime`：从独立包同步过来的运行时代码镜像。
+2. `Assets/AudioForgeValidationSample`：示例说明层，描述最小验证对象和目录职责。
+3. `Assets/Scenes`：验证场景入口约定。
+4. `Assets/StreamingAssets/AudioForge`：导出 JSON 与音频资源的放置位置说明。
 
 当前 `AudioForgeRuntime` 里已经附带一套保时长变调参考实现，默认由 `AudioForgeRuntime` 组件上的 `Use Reference Time Preserving Pitch` 开关控制，开启后会优先使用参考代码生成保时长音高版本的 `AudioClip` 再播放。
 
@@ -30,6 +37,23 @@
 7. `AudioForgeRuntimeDebugPanel.cs`：轻量调试面板，方便直接观察事件、总线和活动声部状态。
 8. `Editor/AudioForgeValidationRunner.cs`：一键跑当前场景验证并输出报告。
 9. `Editor/AudioForgeMissingScriptCleaner.cs`：清理场景里残留的 Missing Script。
+10. `Editor` 下还包含事件 ID 搜索/刷新和 Runtime 自定义 Inspector，用于更快配置事件和 Unity AudioMixer。
+
+## 当前示例工程骨架
+
+仓库里的 `unity_validation` 目前建议按下面的职责来理解：
+
+```text
+unity_validation/
+	Assets/
+		AudioForgeRuntime/
+		AudioForgeValidationSample/
+		Scenes/
+		StreamingAssets/
+			AudioForge/
+```
+
+其中 `AudioForgeRuntime` 只做运行时代码镜像，其他三个目录分别负责示例说明、场景入口和导出资源落位说明。
 
 ## 目标
 
@@ -75,11 +99,14 @@
 
 ## 第二步：导入 Runtime 脚本
 
-1. 打开这个仓库下的 `unity_validation/Assets/AudioForgeRuntime`。
+1. 打开这个仓库下的 `unity_package/Assets/AudioForgeRuntime`。
 2. 将整个 `AudioForgeRuntime` 文件夹复制到 Unity 项目的 `Assets` 目录里。
 3. 回到 Unity，等待脚本自动刷新和编译。
 4. 编译完成后，Project 面板里应能看到：
 	`Assets/AudioForgeRuntime/Scripts/...`
+5. 如果你想按仓库示例骨架搭建，也可以参考 `unity_validation/Assets/AudioForgeValidationSample`、`unity_validation/Assets/Scenes` 和 `unity_validation/Assets/StreamingAssets/AudioForge` 的说明文件。
+6. `AudioForgeBootstrap` 和 `AudioForgeEventPlayer` 的 Inspector 里现在会多一个 `关联搜索` 区，可按关键字搜索并应用 `Event Id`。
+7. 菜单 `AudioForge/Tools/Refresh AudioEventID From StreamingAssets` 可直接从当前导入的 `AudioData.json` 刷新 `AudioEventID.cs`。
 
 ## 第三步：放入导出数据和音频
 
@@ -112,11 +139,12 @@ Assets/
 2. 把它命名为 `AudioForgeBootstrap`。
 3. 给这个物体挂上 `AudioForgeBootstrap` 组件。
 4. 如果你想直接观察运行时状态，再额外挂上 `AudioForgeRuntimeDebugPanel` 组件。
-4. 在 Inspector 中设置：
+5. 如果你要接 Unity AudioMixer，可在 `AudioForgeRuntime` 组件 Inspector 中开启 `Integrate With Unity Audio Mixer`，并配置默认 `AudioMixerGroup`、主音量和各总线音量。
+6. 在 Inspector 中设置：
 	`Event Id = sfx_level_check_02`
 	`Auto Play On Start = true`
 	`Trigger Key = Space`
-5. 保存当前场景，例如保存为 `Assets/Scenes/Validation.unity`。
+7. 保存当前场景，例如保存为 `Assets/Scenes/Validation.unity`。
 
 ## 第五步：运行首次验证
 
@@ -203,7 +231,7 @@ Assets/
 2. 复制时没有连同 `.meta` 文件一起带过去。
 3. 场景里原本挂着旧版本的 `AudioForgeBootstrap`、`AudioForgeRuntime` 或其他测试组件。
 
-现在仓库里的 `AudioForgeRuntime` 已经带上稳定 `.meta` 文件，并且额外提供了一个编辑器清理工具：
+现在仓库里的 `AudioForgeRuntime` 已经带上稳定 `.meta` 文件，并且以 `unity_package` 为唯一维护真源；`unity_validation` 中的同名目录仅作为验证镜像存在。额外提供的编辑器清理工具如下：
 
 1. `AudioForge/Cleanup/Remove Missing Scripts In Selection`
 2. `AudioForge/Cleanup/Remove Missing Scripts In Active Scene`
@@ -211,7 +239,7 @@ Assets/
 
 推荐处理步骤：
 
-1. 先把整个 `unity_validation/Assets/AudioForgeRuntime` 连同 `.meta` 文件重新复制到 Unity 项目中。
+1. 先把整个 `unity_package/Assets/AudioForgeRuntime` 连同 `.meta` 文件重新复制到 Unity 项目中。
 2. 等 Unity 编译完成，确认 Console 没有红色 C# 编译错误。
 3. 如果只是个别对象坏了：选中这些对象，执行 `AudioForge > Cleanup > Remove Missing Scripts In Selection`。
 4. 如果整个测试场景都受影响：直接执行 `AudioForge > Cleanup > Remove Missing Scripts In Active Scene`。
