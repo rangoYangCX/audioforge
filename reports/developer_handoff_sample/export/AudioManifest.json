@@ -1,0 +1,468 @@
+{
+  "Assets": [
+    {
+      "AssetKey": "bgm/proxy/menu/01_uimvmt_whoosh_positive_flipster_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS.wav",
+      "ExportPath": "bgm/proxy/menu/01_uimvmt_whoosh_positive_flipster_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 20,
+      "LoopEndMs": 60,
+      "FileSize": 5846026,
+      "Hash": "4b93a7f697d8e5245603bc675cedfa3ff4fd8461120b0dacc51210a230bfdfc4",
+      "ReferencedByEvents": [
+        "BGM_Menu_ProxyLoop"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/random/01_magpoof_poof_bubble_stumble_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/random/01_magpoof_poof_bubble_stumble_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 6597680,
+      "Hash": "93b88edfc88361c8124248a48c73f47d87abbb16c20042270da170884c8e4154",
+      "ReferencedByEvents": [
+        "SFX_Poof_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/random/02_magpoof_poof_charm_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/random/02_magpoof_poof_charm_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 9988610,
+      "Hash": "3e7a4908f1dbe83adfc4fd4f56cd8b9c4a82b3dbfc4585c0bf8ba9523a535454",
+      "ReferencedByEvents": [
+        "SFX_Poof_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/random/03_magpoof_poof_chaser_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/random/03_magpoof_poof_chaser_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7417514,
+      "Hash": "5fdf6bb17f149e6f26d7d9356124f3e9a88a2f0c751dee723afd64dac20e812c",
+      "ReferencedByEvents": [
+        "SFX_Poof_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/random/04_magpoof_poof_fizzflip_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/random/04_magpoof_poof_fizzflip_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7655780,
+      "Hash": "aa929ac0fb8a2900c2148b788fe355d1b6e154445706a377a8a6528ca4445e08",
+      "ReferencedByEvents": [
+        "SFX_Poof_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/random/05_magpoof_poof_fizzleburst_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/random/05_magpoof_poof_fizzleburst_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 8729516,
+      "Hash": "8ce58168294dc045074d4f5211ddbe7a1a05448b3bf9ab9a4104bce5b70a779f",
+      "ReferencedByEvents": [
+        "SFX_Poof_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/sequence/01_magpoof_poof_mystery_box_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/sequence/01_magpoof_poof_mystery_box_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 12872808,
+      "Hash": "0c59b3e11aba157d244593dd8e0fb6dd1dc797827180a2704f0cd517a3a304f3",
+      "ReferencedByEvents": [
+        "SFX_Poof_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/sequence/02_magpoof_poof_nerfed_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/sequence/02_magpoof_poof_nerfed_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7159718,
+      "Hash": "a65eb11762598c760964d66670c5b7561432cfc430ad9de1d1523a081dbf273a",
+      "ReferencedByEvents": [
+        "SFX_Poof_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "sfx/poof/sequence/03_magpoof_poof_neutral_zap_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav",
+      "ExportPath": "sfx/poof/sequence/03_magpoof_poof_neutral_zap_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 9726040,
+      "Hash": "dea662b5f34b664537eb8a10314b00ccb849df566d6737e196c35b011880dcf9",
+      "ReferencedByEvents": [
+        "SFX_Poof_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "ui/click/random/01_uiclick_click_chunky_monkey_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Chunky Monkey_B00M_CUDS.wav",
+      "ExportPath": "ui/click/random/01_uiclick_click_chunky_monkey_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3508016,
+      "Hash": "661cf1d5dd29fb01903cb68c6f93030bb31162b7dd1f8f4f2373bd4b13459cbc",
+      "ReferencedByEvents": [
+        "UI_Click_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "ui/click/random/02_uiclick_click_classic_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Classic_B00M_CUDS.wav",
+      "ExportPath": "ui/click/random/02_uiclick_click_classic_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3225188,
+      "Hash": "629335b128acf03ec06d6e57e8c6c79b29eb27faa9f609a6f3c81077dd824ded",
+      "ReferencedByEvents": [
+        "UI_Click_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "ui/click/random/03_uiclick_click_drip_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Drip_B00M_CUDS.wav",
+      "ExportPath": "ui/click/random/03_uiclick_click_drip_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3599494,
+      "Hash": "0a793d537db436c17872ad6a92d4679a513be5dab50fbfd17b17c60e6488678e",
+      "ReferencedByEvents": [
+        "UI_Click_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "ui/click/random/04_uiclick_click_peep_show_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Peep Show_B00M_CUDS.wav",
+      "ExportPath": "ui/click/random/04_uiclick_click_peep_show_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3098356,
+      "Hash": "d527cca2eb9daa833199ee562e231b6f563422115f305c0b3b407861fa21b99a",
+      "ReferencedByEvents": [
+        "UI_Click_RandomWeighted"
+      ]
+    },
+    {
+      "AssetKey": "ui/confirm/sequence/01_uiclick_confirm_affirmative_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Affirmative_B00M_CUDS.wav",
+      "ExportPath": "ui/confirm/sequence/01_uiclick_confirm_affirmative_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 4866076,
+      "Hash": "612917109d4dce466d093070bc278b8215da24a50fadaeab630eb6e2105f219b",
+      "ReferencedByEvents": [
+        "UI_Confirm_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "ui/confirm/sequence/02_uiclick_confirm_bubble_shot_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Bubble Shot_B00M_CUDS.wav",
+      "ExportPath": "ui/confirm/sequence/02_uiclick_confirm_bubble_shot_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 4355254,
+      "Hash": "41e877d6816d15a68f8416255c0e66df7d45434762b373ee7280f6630e36ede9",
+      "ReferencedByEvents": [
+        "UI_Confirm_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "ui/confirm/sequence/03_uiclick_confirm_check_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Check_B00M_CUDS.wav",
+      "ExportPath": "ui/confirm/sequence/03_uiclick_confirm_check_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 6421742,
+      "Hash": "196caa76abb10f0bfe8a0edccd8a7e66fc6ea3424e5eaa1b5fc47ebf3a255206",
+      "ReferencedByEvents": [
+        "UI_Confirm_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "ui/confirm/sequence/04_uiclick_confirm_cheers_my_dears_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Cheers My Dears_B00M_CUDS.wav",
+      "ExportPath": "ui/confirm/sequence/04_uiclick_confirm_cheers_my_dears_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 8089620,
+      "Hash": "0e50bacaa5583aed49ea98a987e2d34a6c6ff44a7204725bf6131b52a551b653",
+      "ReferencedByEvents": [
+        "UI_Confirm_Sequence"
+      ]
+    },
+    {
+      "AssetKey": "ui/deny/cooldown/01_uimisc_deny_give_way_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_DENY-Give Way_B00M_CUDS.wav",
+      "ExportPath": "ui/deny/cooldown/01_uimisc_deny_give_way_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 4231332,
+      "Hash": "269f9c6042b54d3ee4853a341c441c00911ccbe93102f9ecde62fd856dbda40c",
+      "ReferencedByEvents": [
+        "UI_Deny_Cooldown"
+      ]
+    },
+    {
+      "AssetKey": "ui/deny/cooldown/02_uimisc_deny_gloopy_glue_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_DENY-Gloopy Glue_B00M_CUDS.wav",
+      "ExportPath": "ui/deny/cooldown/02_uimisc_deny_gloopy_glue_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 5225146,
+      "Hash": "35d5f43ef66d2d5976af4e4087534fead4c4cfe0ef2b4677ec725050faa439cc",
+      "ReferencedByEvents": [
+        "UI_Deny_Cooldown"
+      ]
+    },
+    {
+      "AssetKey": "ui/match/pitch_random/01_uimisc_match_align_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_MATCH-Align_B00M_CUDS.wav",
+      "ExportPath": "ui/match/pitch_random/01_uimisc_match_align_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3839302,
+      "Hash": "fb4b5e08d5f41da2cfe3e1726afcdbbe896b0c55ac07bb3ccab654384c71ba6d",
+      "ReferencedByEvents": [
+        "UI_Match_PitchRandom"
+      ]
+    },
+    {
+      "AssetKey": "ui/match/pitch_random/02_uimisc_match_black_custard_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_MATCH-Black Custard_B00M_CUDS.wav",
+      "ExportPath": "ui/match/pitch_random/02_uimisc_match_black_custard_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 4439186,
+      "Hash": "2f9450cd003f04713eeb98c29e35c77b3b65b8896dcd9966b32bc11dab0d910c",
+      "ReferencedByEvents": [
+        "UI_Match_PitchRandom"
+      ]
+    },
+    {
+      "AssetKey": "ui/match/pitch_random/03_uimisc_match_bubble_blop_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_MATCH-Bubble Blop_B00M_CUDS.wav",
+      "ExportPath": "ui/match/pitch_random/03_uimisc_match_bubble_blop_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3196996,
+      "Hash": "91d8e97ffcf5d2a48861b72ca1236228e4d2b4cf2690b1bc516b5446a58c410e",
+      "ReferencedByEvents": [
+        "UI_Match_PitchRandom"
+      ]
+    },
+    {
+      "AssetKey": "ui/popup/trim_loop/01_uimvmt_pop_up_classic_call_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_POP UP-Classic Call_B00M_CUDS.wav",
+      "ExportPath": "ui/popup/trim_loop/01_uimvmt_pop_up_classic_call_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 5,
+      "TrimEndMs": 10,
+      "LoopStartMs": 15,
+      "LoopEndMs": 40,
+      "FileSize": 3788670,
+      "Hash": "b5a7091f7a50201cf73b44345f8781393eda851a481933c0330fe40f8eaf6ba5",
+      "ReferencedByEvents": [
+        "UI_Popup_TrimLoop_Metadata"
+      ]
+    },
+    {
+      "AssetKey": "ui/popup/trim_loop/02_uimvmt_pop_up_short_appearance_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_POP UP-Short Appearance_B00M_CUDS.wav",
+      "ExportPath": "ui/popup/trim_loop/02_uimvmt_pop_up_short_appearance_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 3355184,
+      "Hash": "1bd4a473b6e751d6c56a9bd73c06cbd70ea27cecdfd1f2825636688fe0150ee0",
+      "ReferencedByEvents": [
+        "UI_Popup_TrimLoop_Metadata"
+      ]
+    },
+    {
+      "AssetKey": "ui/whoosh/reject_new/01_uimvmt_whoosh_neutral_player_swap_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_WHOOSH NEUTRAL -Player Swap_B00M_CUDS.wav",
+      "ExportPath": "ui/whoosh/reject_new/01_uimvmt_whoosh_neutral_player_swap_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 9520106,
+      "Hash": "921d13f629fb9ceffd7d7900f3c42d7bc03f62cfe95efbcd1f12892eaeef85fb",
+      "ReferencedByEvents": [
+        "UI_Whoosh_RejectNew"
+      ]
+    },
+    {
+      "AssetKey": "ui/whoosh/stop_oldest/01_uimvmt_whoosh_positive_breeze_burst_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_WHOOSH POSITIVE-Breeze Burst_B00M_CUDS.wav",
+      "ExportPath": "ui/whoosh/stop_oldest/01_uimvmt_whoosh_positive_breeze_burst_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7474782,
+      "Hash": "5d0a7af3324808abb9b893f5b7035a82d47f42b42db48450fbfb16439e83c6e3",
+      "ReferencedByEvents": [
+        "UI_Whoosh_StopOldest"
+      ]
+    },
+    {
+      "AssetKey": "ui/zap/combo/01_uimisc_zap_fast_flip_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_ZAP-Fast Flip_B00M_CUDS.wav",
+      "ExportPath": "ui/zap/combo/01_uimisc_zap_fast_flip_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7465058,
+      "Hash": "7e2775c39ce932617ea93017848436097d6d9d81fbfbad0043323b52c2f2618e",
+      "ReferencedByEvents": [
+        "UI_Zap_Combo"
+      ]
+    },
+    {
+      "AssetKey": "ui/zap/combo/02_uimisc_zap_kickflip_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_ZAP-Kickflip_B00M_CUDS.wav",
+      "ExportPath": "ui/zap/combo/02_uimisc_zap_kickflip_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 6363982,
+      "Hash": "28eee33ef31c1d801e5c63b852a1f6f1d9138d6d383165e51dcd4ea5e790822b",
+      "ReferencedByEvents": [
+        "UI_Zap_Combo"
+      ]
+    },
+    {
+      "AssetKey": "ui/zap/combo/03_uimisc_zap_pixel_poke_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_ZAP-Pixel Poke_B00M_CUDS.wav",
+      "ExportPath": "ui/zap/combo/03_uimisc_zap_pixel_poke_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 5006958,
+      "Hash": "c6768fc13c5427cd49a6a08d0884a37d52285f514e20903f7e2ffeadd173cebe",
+      "ReferencedByEvents": [
+        "UI_Zap_Combo"
+      ]
+    }
+  ]
+}

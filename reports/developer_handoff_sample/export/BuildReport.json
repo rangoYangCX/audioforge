@@ -1,0 +1,29 @@
+{
+  "ProjectVersion": 1,
+  "SchemaVersion": 1,
+  "EventCount": 11,
+  "ClipCount": 29,
+  "ErrorCount": 0,
+  "WarningCount": 2,
+  "ExportedFiles": [
+    "AudioData.json",
+    "AudioEventID.cs",
+    "AudioManifest.json",
+    "BuildReport.json"
+  ],
+  "AssetsDirectory": "Assets",
+  "Issues": [
+    {
+      "severity": "Warning",
+      "code": "CLIP_LOOP_NOT_IMPLEMENTED",
+      "message": "Clip 'UIMvmt_POP UP-Classic Call_B00M_CUDS' loop settings are reserved but not implemented in the current preview/runtime pipeline.",
+      "target": "UI_Popup_TrimLoop_Metadata"
+    },
+    {
+      "severity": "Warning",
+      "code": "CLIP_LOOP_NOT_IMPLEMENTED",
+      "message": "Clip 'UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS' loop settings are reserved but not implemented in the current preview/runtime pipeline.",
+      "target": "BGM_Menu_ProxyLoop"
+    }
+  ]
+}

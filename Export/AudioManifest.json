@@ -1,0 +1,84 @@
+{
+  "Assets": [
+    {
+      "AssetKey": "sfx_level_check_02",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_level_check_02.ogg",
+      "ExportPath": "sfx_level_check_02.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 14653,
+      "Hash": "434ac02e62393ab7507dc30e2213d54e1300c2cf3e284ac3c6d1daaa6ee86772",
+      "ReferencedByEvents": [
+        "sfx_level_check_02"
+      ]
+    },
+    {
+      "AssetKey": "sfx_level_check_03",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_level_check_03.ogg",
+      "ExportPath": "sfx_level_check_03.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7066,
+      "Hash": "811422a62c1081cd79dfaae452ba66a2c31672c49d7c863570cea7b1176aa0c5",
+      "ReferencedByEvents": [
+        "sfx_level_check_03"
+      ]
+    },
+    {
+      "AssetKey": "sfx_tile_hint_02",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_tile_hint_02.ogg",
+      "ExportPath": "sfx_tile_hint_02.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 34422,
+      "Hash": "2eb608480f7628ac24e1c19f92bf1b064a81c5cfeae0343e2bbd52202f6294df",
+      "ReferencedByEvents": [
+        "sfx_tile_hint_02"
+      ]
+    },
+    {
+      "AssetKey": "sfx_tile_undo_02",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_tile_undo_02.ogg",
+      "ExportPath": "sfx_tile_undo_02.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 29978,
+      "Hash": "8bf6655e5477aceb4840b059498ac65de61da746888c0d6c2582c060806ec3fb",
+      "ReferencedByEvents": [
+        "sfx_tile_undo_02"
+      ]
+    },
+    {
+      "AssetKey": "sfx_tile_undo_03",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_tile_undo_03.ogg",
+      "ExportPath": "sfx_tile_undo_03.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 24733,
+      "Hash": "2ec1ee2c4252d8702f61ca4ae96f0c0e6598795034a2f2ff48cc511ba0d5ae27",
+      "ReferencedByEvents": [
+        "sfx_tile_undo_03"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "overall": "PASS",
+  "project_path": "C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\internal_release_smoke.afproj",
+  "export_root": "C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\export",
+  "checks_root": "C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\checks",
+  "selected_wav_files": [
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Pop Rocket_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Power Puff_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Puffwhirl_B00M_CUDS.wav",
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Smoke Stack_B00M_CUDS.wav"
+  ],
+  "warning_count": 0,
+  "full_chain_report": {
+    "generated_at": "2026-04-27T09:03:59Z",
+    "workspace": "C:\\Users\\EDY\\wwise",
+    "export_dir": "C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\export",
+    "unity_validation_dir": "C:\\Users\\EDY\\wwise\\unity_validation",
+    "passed": true,
+    "summary": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0
+    },
+    "checks": [
+      {
+        "name": "pytest",
+        "passed": true,
+        "details": [
+          "exit_code=0",
+          "stdout_tail:",
+          "============================= test session starts =============================",
+          "platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0",
+          "rootdir: C:\\Users\\EDY\\wwise",
+          "configfile: pyproject.toml",
+          "collected 59 items",
+          "tests\\unit\\test_developer_handoff_sample.py .                            [  1%]",
+          "tests\\unit\\test_exporter.py ....                                         [  8%]",
+          "tests\\unit\\test_full_chain_check.py ..                                   [ 11%]",
+          "tests\\unit\\test_main_controller_full_flow.py ......                      [ 22%]",
+          "tests\\unit\\test_main_controller_layout.py .............................. [ 72%]",
+          "..                                                                       [ 76%]",
+          "tests\\unit\\test_preview_bus_mixer.py ..                                  [ 79%]",
+          "tests\\unit\\test_project_serializer.py .                                  [ 81%]",
+          "tests\\unit\\test_recovery_service.py .                                    [ 83%]",
+          "tests\\unit\\test_validator.py ..........                                  [100%]",
+          "============================= 59 passed in 7.28s =============================="
+        ]
+      },
+      {
+        "name": "export_bundle",
+        "passed": true,
+        "details": [
+          "export_dir=C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\export",
+          "all_required_export_files_present",
+          "asset_entries=12"
+        ]
+      },
+      {
+        "name": "runtime_contract",
+        "passed": true,
+        "details": [
+          "schema_version=1",
+          "runtime_audio_format=wav",
+          "events=12",
+          "clips=12",
+          "buses=3",
+          "manifest_assets=12"
+        ]
+      },
+      {
+        "name": "unity_validation_package",
+        "passed": true,
+        "details": [
+          "unity_validation_dir=C:\\Users\\EDY\\wwise\\unity_validation",
+          "runtime_files_checked=8"
+        ]
+      }
+    ]
+  },
+  "residual_risks": [
+    "Unity 侧仍是参考运行时，生产项目接入前仍需做一次目标工程联调。",
+    "自动恢复当前覆盖单份最近快照，适合内部上线前保护，不等于完整版本化备份。",
+    "本轮真实素材验证使用 12 个样本做烟雾覆盖，不代表已穷尽全部素材边界。"
+  ]
+}

@@ -1,0 +1,699 @@
+{
+  "ProjectVersion": 1,
+  "ProjectName": "DeveloperHandoffSample",
+  "CreatedAt": "2026-04-23T09:05:24Z",
+  "UpdatedAt": "2026-04-23T09:05:24Z",
+  "Settings": {
+    "DefaultBus": "UI",
+    "SupportedFormats": [
+      "wav",
+      "ogg"
+    ],
+    "ExportRoot": "C:\\Users\\EDY\\wwise\\reports\\developer_handoff_sample\\export",
+    "Buses": [
+      "BGM",
+      "SFX",
+      "UI"
+    ],
+    "BusConfigs": [
+      {
+        "Name": "Master",
+        "ParentBus": "Master",
+        "VolumeDb": 0.0,
+        "IsMuted": false
+      },
+      {
+        "Name": "BGM",
+        "ParentBus": "Master",
+        "VolumeDb": -3.0,
+        "IsMuted": false
+      },
+      {
+        "Name": "SFX",
+        "ParentBus": "Master",
+        "VolumeDb": -1.5,
+        "IsMuted": false
+      },
+      {
+        "Name": "UI",
+        "ParentBus": "SFX",
+        "VolumeDb": -1.0,
+        "IsMuted": false
+      }
+    ],
+    "SourceAudioFormat": "wav",
+    "RuntimeAudioFormat": "wav"
+  },
+  "Tree": {
+    "RootFolderIds": [
+      "folder_c1a6ce15"
+    ],
+    "Folders": {
+      "folder_c1a6ce15": {
+        "id": "folder_c1a6ce15",
+        "name": "Developer Handoff",
+        "child_folder_ids": [
+          "folder_910f9cdb",
+          "folder_e552296c",
+          "folder_0cc72e9b"
+        ],
+        "child_event_ids": []
+      },
+      "folder_910f9cdb": {
+        "id": "folder_910f9cdb",
+        "name": "UI",
+        "child_folder_ids": [],
+        "child_event_ids": [
+          "UI_Click_RandomWeighted",
+          "UI_Confirm_Sequence",
+          "UI_Zap_Combo",
+          "UI_Deny_Cooldown",
+          "UI_Whoosh_RejectNew",
+          "UI_Whoosh_StopOldest",
+          "UI_Popup_TrimLoop_Metadata",
+          "UI_Match_PitchRandom"
+        ]
+      },
+      "folder_e552296c": {
+        "id": "folder_e552296c",
+        "name": "SFX",
+        "child_folder_ids": [],
+        "child_event_ids": [
+          "SFX_Poof_RandomWeighted",
+          "SFX_Poof_Sequence"
+        ]
+      },
+      "folder_0cc72e9b": {
+        "id": "folder_0cc72e9b",
+        "name": "BGM Proxy",
+        "child_folder_ids": [],
+        "child_event_ids": [
+          "BGM_Menu_ProxyLoop"
+        ]
+      }
+    }
+  },
+  "Events": {
+    "UI_Click_RandomWeighted": {
+      "id": "UI_Click_RandomWeighted",
+      "display_name": "UI Click Random Weighted",
+      "bus": "UI",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": true,
+      "volume_db": -2.0,
+      "volume_rand_min_db": -1.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIClick_CLICK-Chunky Monkey_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Chunky Monkey_B00M_CUDS.wav",
+          "export_path": "ui/click/random/01_uiclick_click_chunky_monkey_b00m_cuds",
+          "asset_key": "ui/click/random/01_uiclick_click_chunky_monkey_b00m_cuds",
+          "weight": 5,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIClick_CLICK-Classic_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Classic_B00M_CUDS.wav",
+          "export_path": "ui/click/random/02_uiclick_click_classic_b00m_cuds",
+          "asset_key": "ui/click/random/02_uiclick_click_classic_b00m_cuds",
+          "weight": 3,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIClick_CLICK-Drip_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Drip_B00M_CUDS.wav",
+          "export_path": "ui/click/random/03_uiclick_click_drip_b00m_cuds",
+          "asset_key": "ui/click/random/03_uiclick_click_drip_b00m_cuds",
+          "weight": 2,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIClick_CLICK-Peep Show_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CLICK-Peep Show_B00M_CUDS.wav",
+          "export_path": "ui/click/random/04_uiclick_click_peep_show_b00m_cuds",
+          "asset_key": "ui/click/random/04_uiclick_click_peep_show_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 Random、AvoidImmediateRepeat、Weight、VolumeRandDb。"
+    },
+    "UI_Confirm_Sequence": {
+      "id": "UI_Confirm_Sequence",
+      "display_name": "UI Confirm Sequence",
+      "bus": "UI",
+      "play_mode": "Sequence",
+      "avoid_immediate_repeat": false,
+      "volume_db": -1.5,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIClick_CONFIRM-Affirmative_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Affirmative_B00M_CUDS.wav",
+          "export_path": "ui/confirm/sequence/01_uiclick_confirm_affirmative_b00m_cuds",
+          "asset_key": "ui/confirm/sequence/01_uiclick_confirm_affirmative_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIClick_CONFIRM-Bubble Shot_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Bubble Shot_B00M_CUDS.wav",
+          "export_path": "ui/confirm/sequence/02_uiclick_confirm_bubble_shot_b00m_cuds",
+          "asset_key": "ui/confirm/sequence/02_uiclick_confirm_bubble_shot_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIClick_CONFIRM-Check_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Check_B00M_CUDS.wav",
+          "export_path": "ui/confirm/sequence/03_uiclick_confirm_check_b00m_cuds",
+          "asset_key": "ui/confirm/sequence/03_uiclick_confirm_check_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIClick_CONFIRM-Cheers My Dears_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIClick_CONFIRM-Cheers My Dears_B00M_CUDS.wav",
+          "export_path": "ui/confirm/sequence/04_uiclick_confirm_cheers_my_dears_b00m_cuds",
+          "asset_key": "ui/confirm/sequence/04_uiclick_confirm_cheers_my_dears_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 Sequence 顺序轮转。"
+    },
+    "UI_Zap_Combo": {
+      "id": "UI_Zap_Combo",
+      "display_name": "UI Zap Combo",
+      "bus": "UI",
+      "play_mode": "Combo",
+      "avoid_immediate_repeat": false,
+      "volume_db": -2.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": -50,
+      "pitch_rand_max_cents": 50,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 200,
+      "combo_reset_seconds": 1.2,
+      "combo_max_step": 4,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMisc_ZAP-Fast Flip_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_ZAP-Fast Flip_B00M_CUDS.wav",
+          "export_path": "ui/zap/combo/01_uimisc_zap_fast_flip_b00m_cuds",
+          "asset_key": "ui/zap/combo/01_uimisc_zap_fast_flip_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIMisc_ZAP-Kickflip_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_ZAP-Kickflip_B00M_CUDS.wav",
+          "export_path": "ui/zap/combo/02_uimisc_zap_kickflip_b00m_cuds",
+          "asset_key": "ui/zap/combo/02_uimisc_zap_kickflip_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIMisc_ZAP-Pixel Poke_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_ZAP-Pixel Poke_B00M_CUDS.wav",
+          "export_path": "ui/zap/combo/03_uimisc_zap_pixel_poke_b00m_cuds",
+          "asset_key": "ui/zap/combo/03_uimisc_zap_pixel_poke_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 ComboPitchStepCents、ComboResetSeconds、ComboMaxStep、PitchRandCents。"
+    },
+    "UI_Deny_Cooldown": {
+      "id": "UI_Deny_Cooldown",
+      "display_name": "UI Deny Cooldown",
+      "bus": "UI",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -2.5,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.35,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMisc_DENY-Give Way_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_DENY-Give Way_B00M_CUDS.wav",
+          "export_path": "ui/deny/cooldown/01_uimisc_deny_give_way_b00m_cuds",
+          "asset_key": "ui/deny/cooldown/01_uimisc_deny_give_way_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIMisc_DENY-Gloopy Glue_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_DENY-Gloopy Glue_B00M_CUDS.wav",
+          "export_path": "ui/deny/cooldown/02_uimisc_deny_gloopy_glue_b00m_cuds",
+          "asset_key": "ui/deny/cooldown/02_uimisc_deny_gloopy_glue_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 CooldownSeconds。"
+    },
+    "UI_Whoosh_RejectNew": {
+      "id": "UI_Whoosh_RejectNew",
+      "display_name": "UI Whoosh Reject New",
+      "bus": "UI",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": 0.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 1,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMvmt_WHOOSH NEUTRAL -Player Swap_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_WHOOSH NEUTRAL -Player Swap_B00M_CUDS.wav",
+          "export_path": "ui/whoosh/reject_new/01_uimvmt_whoosh_neutral_player_swap_b00m_cuds",
+          "asset_key": "ui/whoosh/reject_new/01_uimvmt_whoosh_neutral_player_swap_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 MaxInstances=1 与 StealPolicy=RejectNew。"
+    },
+    "UI_Whoosh_StopOldest": {
+      "id": "UI_Whoosh_StopOldest",
+      "display_name": "UI Whoosh Stop Oldest",
+      "bus": "UI",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": 0.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 1,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "StopOldest",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMvmt_WHOOSH POSITIVE-Breeze Burst_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_WHOOSH POSITIVE-Breeze Burst_B00M_CUDS.wav",
+          "export_path": "ui/whoosh/stop_oldest/01_uimvmt_whoosh_positive_breeze_burst_b00m_cuds",
+          "asset_key": "ui/whoosh/stop_oldest/01_uimvmt_whoosh_positive_breeze_burst_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 MaxInstances=1 与 StealPolicy=StopOldest。"
+    },
+    "UI_Popup_TrimLoop_Metadata": {
+      "id": "UI_Popup_TrimLoop_Metadata",
+      "display_name": "UI Popup Trim Loop Metadata",
+      "bus": "UI",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": 0.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMvmt_POP UP-Classic Call_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_POP UP-Classic Call_B00M_CUDS.wav",
+          "export_path": "ui/popup/trim_loop/01_uimvmt_pop_up_classic_call_b00m_cuds",
+          "asset_key": "ui/popup/trim_loop/01_uimvmt_pop_up_classic_call_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 5,
+          "trim_end_ms": 10,
+          "loop_start_ms": 15,
+          "loop_end_ms": 40,
+          "tags": []
+        },
+        {
+          "id": "UIMvmt_POP UP-Short Appearance_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_POP UP-Short Appearance_B00M_CUDS.wav",
+          "export_path": "ui/popup/trim_loop/02_uimvmt_pop_up_short_appearance_b00m_cuds",
+          "asset_key": "ui/popup/trim_loop/02_uimvmt_pop_up_short_appearance_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 TrimStartMs、TrimEndMs、LoopStartMs、LoopEndMs 元数据。"
+    },
+    "UI_Match_PitchRandom": {
+      "id": "UI_Match_PitchRandom",
+      "display_name": "UI Match Pitch Random",
+      "bus": "UI",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": 0.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 100,
+      "pitch_rand_min_cents": -100,
+      "pitch_rand_max_cents": 150,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMisc_MATCH-Align_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_MATCH-Align_B00M_CUDS.wav",
+          "export_path": "ui/match/pitch_random/01_uimisc_match_align_b00m_cuds",
+          "asset_key": "ui/match/pitch_random/01_uimisc_match_align_b00m_cuds",
+          "weight": 4,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIMisc_MATCH-Black Custard_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_MATCH-Black Custard_B00M_CUDS.wav",
+          "export_path": "ui/match/pitch_random/02_uimisc_match_black_custard_b00m_cuds",
+          "asset_key": "ui/match/pitch_random/02_uimisc_match_black_custard_b00m_cuds",
+          "weight": 3,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "UIMisc_MATCH-Bubble Blop_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMisc_MATCH-Bubble Blop_B00M_CUDS.wav",
+          "export_path": "ui/match/pitch_random/03_uimisc_match_bubble_blop_b00m_cuds",
+          "asset_key": "ui/match/pitch_random/03_uimisc_match_bubble_blop_b00m_cuds",
+          "weight": 2,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 PitchCents、PitchRandCents。"
+    },
+    "SFX_Poof_RandomWeighted": {
+      "id": "SFX_Poof_RandomWeighted",
+      "display_name": "SFX Poof Random Weighted",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": true,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Bubble Stumble_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+          "export_path": "sfx/poof/random/01_magpoof_poof_bubble_stumble_b00m_cuds",
+          "asset_key": "sfx/poof/random/01_magpoof_poof_bubble_stumble_b00m_cuds",
+          "weight": 5,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "MAGPoof_POOF-Charm_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav",
+          "export_path": "sfx/poof/random/02_magpoof_poof_charm_b00m_cuds",
+          "asset_key": "sfx/poof/random/02_magpoof_poof_charm_b00m_cuds",
+          "weight": 4,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "MAGPoof_POOF-Chaser_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+          "export_path": "sfx/poof/random/03_magpoof_poof_chaser_b00m_cuds",
+          "asset_key": "sfx/poof/random/03_magpoof_poof_chaser_b00m_cuds",
+          "weight": 3,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "MAGPoof_POOF-Fizzflip_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+          "export_path": "sfx/poof/random/04_magpoof_poof_fizzflip_b00m_cuds",
+          "asset_key": "sfx/poof/random/04_magpoof_poof_fizzflip_b00m_cuds",
+          "weight": 2,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "MAGPoof_POOF-Fizzleburst_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav",
+          "export_path": "sfx/poof/random/05_magpoof_poof_fizzleburst_b00m_cuds",
+          "asset_key": "sfx/poof/random/05_magpoof_poof_fizzleburst_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 SFX 总线、Random、AvoidImmediateRepeat、Weight。"
+    },
+    "SFX_Poof_Sequence": {
+      "id": "SFX_Poof_Sequence",
+      "display_name": "SFX Poof Sequence",
+      "bus": "SFX",
+      "play_mode": "Sequence",
+      "avoid_immediate_repeat": false,
+      "volume_db": 0.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Mystery Box_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+          "export_path": "sfx/poof/sequence/01_magpoof_poof_mystery_box_b00m_cuds",
+          "asset_key": "sfx/poof/sequence/01_magpoof_poof_mystery_box_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "MAGPoof_POOF-Nerfed_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+          "export_path": "sfx/poof/sequence/02_magpoof_poof_nerfed_b00m_cuds",
+          "asset_key": "sfx/poof/sequence/02_magpoof_poof_nerfed_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        },
+        {
+          "id": "MAGPoof_POOF-Neutral Zap_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav",
+          "export_path": "sfx/poof/sequence/03_magpoof_poof_neutral_zap_b00m_cuds",
+          "asset_key": "sfx/poof/sequence/03_magpoof_poof_neutral_zap_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": "覆盖 SFX 总线下的 Sequence。"
+    },
+    "BGM_Menu_ProxyLoop": {
+      "id": "BGM_Menu_ProxyLoop",
+      "display_name": "BGM Menu Proxy Loop",
+      "bus": "BGM",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -4.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 1,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS.wav",
+          "export_path": "bgm/proxy/menu/01_uimvmt_whoosh_positive_flipster_b00m_cuds",
+          "asset_key": "bgm/proxy/menu/01_uimvmt_whoosh_positive_flipster_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 20,
+          "loop_end_ms": 60,
+          "tags": []
+        }
+      ],
+      "notes": "测试 WAV 包不含真实音乐素材，此事件使用 whoosh 代理素材，仅用于 BGM 总线、Loop 元数据和资源路径契约验证。"
+    }
+  }
+}

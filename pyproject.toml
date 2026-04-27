@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audioforge"
+version = "0.1.0"
+description = "Data-driven audio middleware authoring tool for Unity integration"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.7",
+    "pygame-ce>=2.5",
+    "pyloudnorm>=0.1.1",
+    "scipy>=1.15",
+    "soundfile>=0.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["audioforge*"]

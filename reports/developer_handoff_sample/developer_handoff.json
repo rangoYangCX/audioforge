@@ -1,0 +1,301 @@
+{
+  "result": "PASS",
+  "source_dir": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS",
+  "project_path": "C:\\Users\\EDY\\wwise\\reports\\developer_handoff_sample\\developer_handoff_sample.afproj",
+  "export_root": "C:\\Users\\EDY\\wwise\\reports\\developer_handoff_sample\\export",
+  "checks_root": "C:\\Users\\EDY\\wwise\\reports\\developer_handoff_sample\\checks",
+  "event_count": 11,
+  "clip_count": 29,
+  "warning_count": 2,
+  "bus_configs": [
+    {
+      "Name": "Master",
+      "ParentBus": "Master",
+      "VolumeDb": 0.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "BGM",
+      "ParentBus": "Master",
+      "VolumeDb": -3.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "SFX",
+      "ParentBus": "Master",
+      "VolumeDb": -1.5,
+      "IsMuted": false
+    },
+    {
+      "Name": "UI",
+      "ParentBus": "SFX",
+      "VolumeDb": -1.0,
+      "IsMuted": false
+    }
+  ],
+  "coverage_entries": [
+    {
+      "event_id": "UI_Click_RandomWeighted",
+      "bus": "UI",
+      "play_mode": "Random",
+      "clip_count": 4,
+      "covered_points": [
+        "Random",
+        "AvoidImmediateRepeat",
+        "Weight",
+        "VolumeRandDb"
+      ],
+      "source_files": [
+        "UIClick_CLICK-Chunky Monkey_B00M_CUDS.wav",
+        "UIClick_CLICK-Classic_B00M_CUDS.wav",
+        "UIClick_CLICK-Drip_B00M_CUDS.wav",
+        "UIClick_CLICK-Peep Show_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 Random、AvoidImmediateRepeat、Weight、VolumeRandDb。"
+    },
+    {
+      "event_id": "UI_Confirm_Sequence",
+      "bus": "UI",
+      "play_mode": "Sequence",
+      "clip_count": 4,
+      "covered_points": [
+        "Sequence"
+      ],
+      "source_files": [
+        "UIClick_CONFIRM-Affirmative_B00M_CUDS.wav",
+        "UIClick_CONFIRM-Bubble Shot_B00M_CUDS.wav",
+        "UIClick_CONFIRM-Check_B00M_CUDS.wav",
+        "UIClick_CONFIRM-Cheers My Dears_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 Sequence 顺序轮转。"
+    },
+    {
+      "event_id": "UI_Zap_Combo",
+      "bus": "UI",
+      "play_mode": "Combo",
+      "clip_count": 3,
+      "covered_points": [
+        "Combo",
+        "ComboPitchStepCents",
+        "ComboResetSeconds",
+        "ComboMaxStep",
+        "PitchRandCents"
+      ],
+      "source_files": [
+        "UIMisc_ZAP-Fast Flip_B00M_CUDS.wav",
+        "UIMisc_ZAP-Kickflip_B00M_CUDS.wav",
+        "UIMisc_ZAP-Pixel Poke_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 ComboPitchStepCents、ComboResetSeconds、ComboMaxStep、PitchRandCents。"
+    },
+    {
+      "event_id": "UI_Deny_Cooldown",
+      "bus": "UI",
+      "play_mode": "Random",
+      "clip_count": 2,
+      "covered_points": [
+        "CooldownSeconds"
+      ],
+      "source_files": [
+        "UIMisc_DENY-Give Way_B00M_CUDS.wav",
+        "UIMisc_DENY-Gloopy Glue_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 CooldownSeconds。"
+    },
+    {
+      "event_id": "UI_Whoosh_RejectNew",
+      "bus": "UI",
+      "play_mode": "Random",
+      "clip_count": 1,
+      "covered_points": [
+        "MaxInstances",
+        "StealPolicy=RejectNew"
+      ],
+      "source_files": [
+        "UIMvmt_WHOOSH NEUTRAL -Player Swap_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 MaxInstances=1 与 StealPolicy=RejectNew。"
+    },
+    {
+      "event_id": "UI_Whoosh_StopOldest",
+      "bus": "UI",
+      "play_mode": "Random",
+      "clip_count": 1,
+      "covered_points": [
+        "MaxInstances",
+        "StealPolicy=StopOldest"
+      ],
+      "source_files": [
+        "UIMvmt_WHOOSH POSITIVE-Breeze Burst_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 MaxInstances=1 与 StealPolicy=StopOldest。"
+    },
+    {
+      "event_id": "UI_Popup_TrimLoop_Metadata",
+      "bus": "UI",
+      "play_mode": "Random",
+      "clip_count": 2,
+      "covered_points": [
+        "TrimStartMs",
+        "TrimEndMs",
+        "LoopStartMs",
+        "LoopEndMs"
+      ],
+      "source_files": [
+        "UIMvmt_POP UP-Classic Call_B00M_CUDS.wav",
+        "UIMvmt_POP UP-Short Appearance_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 TrimStartMs、TrimEndMs、LoopStartMs、LoopEndMs 元数据。"
+    },
+    {
+      "event_id": "UI_Match_PitchRandom",
+      "bus": "UI",
+      "play_mode": "Random",
+      "clip_count": 3,
+      "covered_points": [
+        "PitchCents",
+        "PitchRandCents"
+      ],
+      "source_files": [
+        "UIMisc_MATCH-Align_B00M_CUDS.wav",
+        "UIMisc_MATCH-Black Custard_B00M_CUDS.wav",
+        "UIMisc_MATCH-Bubble Blop_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 PitchCents、PitchRandCents。"
+    },
+    {
+      "event_id": "SFX_Poof_RandomWeighted",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "clip_count": 5,
+      "covered_points": [
+        "SFX Bus",
+        "Random",
+        "AvoidImmediateRepeat",
+        "Weight"
+      ],
+      "source_files": [
+        "MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+        "MAGPoof_POOF-Charm_B00M_CUDS.wav",
+        "MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+        "MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+        "MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 SFX 总线、Random、AvoidImmediateRepeat、Weight。"
+    },
+    {
+      "event_id": "SFX_Poof_Sequence",
+      "bus": "SFX",
+      "play_mode": "Sequence",
+      "clip_count": 3,
+      "covered_points": [
+        "SFX Bus",
+        "Sequence"
+      ],
+      "source_files": [
+        "MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+        "MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+        "MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav"
+      ],
+      "notes": "覆盖 SFX 总线下的 Sequence。"
+    },
+    {
+      "event_id": "BGM_Menu_ProxyLoop",
+      "bus": "BGM",
+      "play_mode": "Random",
+      "clip_count": 1,
+      "covered_points": [
+        "BGM Bus",
+        "Loop Metadata",
+        "Proxy Asset"
+      ],
+      "source_files": [
+        "UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS.wav"
+      ],
+      "notes": "测试 WAV 包不含真实音乐素材，此事件使用 whoosh 代理素材，仅用于 BGM 总线、Loop 元数据和资源路径契约验证。"
+    }
+  ],
+  "export_issues": [
+    {
+      "severity": "Warning",
+      "code": "CLIP_LOOP_NOT_IMPLEMENTED",
+      "message": "Clip 'UIMvmt_POP UP-Classic Call_B00M_CUDS' loop settings are reserved but not implemented in the current preview/runtime pipeline.",
+      "target": "UI_Popup_TrimLoop_Metadata"
+    },
+    {
+      "severity": "Warning",
+      "code": "CLIP_LOOP_NOT_IMPLEMENTED",
+      "message": "Clip 'UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS' loop settings are reserved but not implemented in the current preview/runtime pipeline.",
+      "target": "BGM_Menu_ProxyLoop"
+    }
+  ],
+  "full_chain_report": {
+    "generated_at": "2026-04-23T09:05:26Z",
+    "workspace": "C:\\Users\\EDY\\wwise",
+    "export_dir": "C:\\Users\\EDY\\wwise\\reports\\developer_handoff_sample\\export",
+    "unity_validation_dir": "C:\\Users\\EDY\\wwise\\unity_validation",
+    "passed": true,
+    "summary": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0
+    },
+    "checks": [
+      {
+        "name": "pytest",
+        "passed": true,
+        "details": [
+          "exit_code=0",
+          "stdout_tail:",
+          "============================= test session starts =============================",
+          "platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0",
+          "rootdir: C:\\Users\\EDY\\wwise",
+          "configfile: pyproject.toml",
+          "collected 12 items",
+          "tests\\unit\\test_developer_handoff_sample.py .                            [  8%]",
+          "tests\\unit\\test_exporter.py ..                                           [ 25%]",
+          "tests\\unit\\test_full_chain_check.py ..                                   [ 41%]",
+          "tests\\unit\\test_preview_bus_mixer.py ..                                  [ 58%]",
+          "tests\\unit\\test_project_serializer.py .                                  [ 66%]",
+          "tests\\unit\\test_recovery_service.py .                                    [ 75%]",
+          "tests\\unit\\test_validator.py ...                                         [100%]",
+          "============================= 12 passed in 1.21s =============================="
+        ]
+      },
+      {
+        "name": "export_bundle",
+        "passed": true,
+        "details": [
+          "export_dir=C:\\Users\\EDY\\wwise\\reports\\developer_handoff_sample\\export",
+          "all_required_export_files_present",
+          "asset_entries=29"
+        ]
+      },
+      {
+        "name": "runtime_contract",
+        "passed": true,
+        "details": [
+          "schema_version=1",
+          "runtime_audio_format=wav",
+          "events=11",
+          "clips=29",
+          "buses=3",
+          "manifest_assets=29"
+        ]
+      },
+      {
+        "name": "unity_validation_package",
+        "passed": true,
+        "details": [
+          "unity_validation_dir=C:\\Users\\EDY\\wwise\\unity_validation",
+          "runtime_files_checked=8"
+        ]
+      }
+    ]
+  },
+  "residual_risks": [
+    "BGM 事件使用代理素材，仅用于数据契约验证，不代表最终音乐听感。",
+    "Trim 与 Loop 字段当前主要作为元数据导出，运行时是否实现样本级处理由接入方决定。",
+    "本次文档只覆盖运行时消费契约，不包含 Unity 场景搭建或联调步骤。"
+  ]
+}

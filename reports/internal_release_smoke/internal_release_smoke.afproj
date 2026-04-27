@@ -1,0 +1,545 @@
+{
+  "ProjectVersion": 1,
+  "ProjectName": "InternalReleaseSmoke",
+  "CreatedAt": "2026-04-27T09:03:50Z",
+  "UpdatedAt": "2026-04-27T09:03:50Z",
+  "Settings": {
+    "DefaultBus": "SFX",
+    "SupportedFormats": [
+      "wav",
+      "ogg"
+    ],
+    "ExportRoot": "C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\export",
+    "Buses": [
+      "BGM",
+      "SFX",
+      "UI"
+    ],
+    "BusConfigs": [
+      {
+        "Name": "Master",
+        "ParentBus": "Master",
+        "VolumeDb": 0.0,
+        "IsMuted": false
+      },
+      {
+        "Name": "BGM",
+        "ParentBus": "Master",
+        "VolumeDb": -2.0,
+        "IsMuted": false
+      },
+      {
+        "Name": "SFX",
+        "ParentBus": "Master",
+        "VolumeDb": -1.0,
+        "IsMuted": false
+      },
+      {
+        "Name": "UI",
+        "ParentBus": "SFX",
+        "VolumeDb": -1.5,
+        "IsMuted": false
+      }
+    ],
+    "SourceAudioFormat": "wav",
+    "RuntimeAudioFormat": "wav"
+  },
+  "Tree": {
+    "RootFolderIds": [
+      "folder_fa3147d7"
+    ],
+    "Folders": {
+      "folder_fa3147d7": {
+        "id": "folder_fa3147d7",
+        "name": "Default Work Unit",
+        "child_folder_ids": [],
+        "child_event_ids": [
+          "MAGPoof_POOF_Bubble_Stumble_B00M_CUDS",
+          "MAGPoof_POOF_Charm_B00M_CUDS",
+          "MAGPoof_POOF_Chaser_B00M_CUDS",
+          "MAGPoof_POOF_Fizzflip_B00M_CUDS",
+          "MAGPoof_POOF_Fizzleburst_B00M_CUDS",
+          "MAGPoof_POOF_Mystery_Box_B00M_CUDS",
+          "MAGPoof_POOF_Nerfed_B00M_CUDS",
+          "MAGPoof_POOF_Neutral_Zap_B00M_CUDS",
+          "MAGPoof_POOF_Pop_Rocket_B00M_CUDS",
+          "MAGPoof_POOF_Power_Puff_B00M_CUDS",
+          "MAGPoof_POOF_Puffwhirl_B00M_CUDS",
+          "MAGPoof_POOF_Smoke_Stack_B00M_CUDS"
+        ]
+      }
+    }
+  },
+  "Events": {
+    "MAGPoof_POOF_Bubble_Stumble_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Bubble_Stumble_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Bubble Stumble_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Bubble Stumble_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+          "export_path": "sfx/01_magpoof_poof_bubble_stumble_b00m_cuds",
+          "asset_key": "sfx/01_magpoof_poof_bubble_stumble_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Charm_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Charm_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Charm_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Charm_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav",
+          "export_path": "sfx/02_magpoof_poof_charm_b00m_cuds",
+          "asset_key": "sfx/02_magpoof_poof_charm_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Chaser_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Chaser_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Chaser_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Chaser_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+          "export_path": "sfx/03_magpoof_poof_chaser_b00m_cuds",
+          "asset_key": "sfx/03_magpoof_poof_chaser_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Fizzflip_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Fizzflip_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Fizzflip_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Fizzflip_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+          "export_path": "sfx/04_magpoof_poof_fizzflip_b00m_cuds",
+          "asset_key": "sfx/04_magpoof_poof_fizzflip_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Fizzleburst_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Fizzleburst_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Fizzleburst_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Fizzleburst_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav",
+          "export_path": "sfx/05_magpoof_poof_fizzleburst_b00m_cuds",
+          "asset_key": "sfx/05_magpoof_poof_fizzleburst_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Mystery_Box_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Mystery_Box_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Mystery Box_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Mystery Box_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+          "export_path": "sfx/06_magpoof_poof_mystery_box_b00m_cuds",
+          "asset_key": "sfx/06_magpoof_poof_mystery_box_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Nerfed_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Nerfed_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Nerfed_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Nerfed_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+          "export_path": "sfx/07_magpoof_poof_nerfed_b00m_cuds",
+          "asset_key": "sfx/07_magpoof_poof_nerfed_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Neutral_Zap_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Neutral_Zap_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Neutral Zap_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Neutral Zap_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav",
+          "export_path": "sfx/08_magpoof_poof_neutral_zap_b00m_cuds",
+          "asset_key": "sfx/08_magpoof_poof_neutral_zap_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Pop_Rocket_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Pop_Rocket_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Pop Rocket_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Pop Rocket_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Pop Rocket_B00M_CUDS.wav",
+          "export_path": "sfx/09_magpoof_poof_pop_rocket_b00m_cuds",
+          "asset_key": "sfx/09_magpoof_poof_pop_rocket_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Power_Puff_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Power_Puff_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Power Puff_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Power Puff_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Power Puff_B00M_CUDS.wav",
+          "export_path": "sfx/10_magpoof_poof_power_puff_b00m_cuds",
+          "asset_key": "sfx/10_magpoof_poof_power_puff_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Puffwhirl_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Puffwhirl_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Puffwhirl_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Puffwhirl_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Puffwhirl_B00M_CUDS.wav",
+          "export_path": "sfx/11_magpoof_poof_puffwhirl_b00m_cuds",
+          "asset_key": "sfx/11_magpoof_poof_puffwhirl_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    },
+    "MAGPoof_POOF_Smoke_Stack_B00M_CUDS": {
+      "id": "MAGPoof_POOF_Smoke_Stack_B00M_CUDS",
+      "display_name": "MAGPoof_POOF-Smoke Stack_B00M_CUDS",
+      "bus": "SFX",
+      "play_mode": "Random",
+      "avoid_immediate_repeat": false,
+      "volume_db": -3.0,
+      "volume_rand_min_db": 0.0,
+      "volume_rand_max_db": 0.0,
+      "pitch_cents": 0,
+      "pitch_rand_min_cents": 0,
+      "pitch_rand_max_cents": 0,
+      "max_instances": 0,
+      "cooldown_seconds": 0.0,
+      "steal_policy": "RejectNew",
+      "combo_pitch_step_cents": 100,
+      "combo_reset_seconds": 1.5,
+      "combo_max_step": 0,
+      "load_policy": "OnDemand",
+      "clips": [
+        {
+          "id": "MAGPoof_POOF-Smoke Stack_B00M_CUDS",
+          "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Smoke Stack_B00M_CUDS.wav",
+          "export_path": "sfx/12_magpoof_poof_smoke_stack_b00m_cuds",
+          "asset_key": "sfx/12_magpoof_poof_smoke_stack_b00m_cuds",
+          "weight": 1,
+          "trim_start_ms": 0,
+          "trim_end_ms": 0,
+          "loop_start_ms": 0,
+          "loop_end_ms": 0,
+          "tags": []
+        }
+      ],
+      "notes": ""
+    }
+  },
+  "Assets": {
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Pop Rocket_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Pop Rocket_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Power Puff_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Power Puff_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Puffwhirl_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Puffwhirl_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    },
+    "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Smoke Stack_B00M_CUDS.wav": {
+      "source_path": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Smoke Stack_B00M_CUDS.wav",
+      "discovered_at": "2026-04-27T09:03:50Z"
+    }
+  }
+}

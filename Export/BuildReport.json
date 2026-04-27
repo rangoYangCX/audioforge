@@ -1,0 +1,16 @@
+{
+  "ProjectVersion": 1,
+  "SchemaVersion": 1,
+  "EventCount": 5,
+  "ClipCount": 5,
+  "ErrorCount": 0,
+  "WarningCount": 0,
+  "ExportedFiles": [
+    "AudioData.json",
+    "AudioEventID.cs",
+    "AudioManifest.json",
+    "BuildReport.json"
+  ],
+  "AssetsDirectory": "Assets",
+  "Issues": []
+}

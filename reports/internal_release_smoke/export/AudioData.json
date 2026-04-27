@@ -1,0 +1,399 @@
+{
+  "SchemaVersion": 1,
+  "GeneratedAt": "2026-04-27T09:03:50Z",
+  "ProjectName": "InternalReleaseSmoke",
+  "RuntimeAudioFormat": "wav",
+  "Buses": [
+    "BGM",
+    "SFX",
+    "UI"
+  ],
+  "BusConfigs": [
+    {
+      "Name": "Master",
+      "ParentBus": "Master",
+      "VolumeDb": 0.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "BGM",
+      "ParentBus": "Master",
+      "VolumeDb": -2.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "SFX",
+      "ParentBus": "Master",
+      "VolumeDb": -1.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "UI",
+      "ParentBus": "SFX",
+      "VolumeDb": -1.5,
+      "IsMuted": false
+    }
+  ],
+  "Events": {
+    "MAGPoof_POOF_Bubble_Stumble_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Bubble Stumble_B00M_CUDS",
+          "AssetKey": "sfx/01_magpoof_poof_bubble_stumble_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Charm_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Charm_B00M_CUDS",
+          "AssetKey": "sfx/02_magpoof_poof_charm_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Chaser_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Chaser_B00M_CUDS",
+          "AssetKey": "sfx/03_magpoof_poof_chaser_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Fizzflip_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Fizzflip_B00M_CUDS",
+          "AssetKey": "sfx/04_magpoof_poof_fizzflip_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Fizzleburst_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Fizzleburst_B00M_CUDS",
+          "AssetKey": "sfx/05_magpoof_poof_fizzleburst_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Mystery_Box_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Mystery Box_B00M_CUDS",
+          "AssetKey": "sfx/06_magpoof_poof_mystery_box_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Nerfed_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Nerfed_B00M_CUDS",
+          "AssetKey": "sfx/07_magpoof_poof_nerfed_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Neutral_Zap_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Neutral Zap_B00M_CUDS",
+          "AssetKey": "sfx/08_magpoof_poof_neutral_zap_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Pop_Rocket_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Pop Rocket_B00M_CUDS",
+          "AssetKey": "sfx/09_magpoof_poof_pop_rocket_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Power_Puff_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Power Puff_B00M_CUDS",
+          "AssetKey": "sfx/10_magpoof_poof_power_puff_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Puffwhirl_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Puffwhirl_B00M_CUDS",
+          "AssetKey": "sfx/11_magpoof_poof_puffwhirl_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "MAGPoof_POOF_Smoke_Stack_B00M_CUDS": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Smoke Stack_B00M_CUDS",
+          "AssetKey": "sfx/12_magpoof_poof_smoke_stack_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    }
+  }
+}

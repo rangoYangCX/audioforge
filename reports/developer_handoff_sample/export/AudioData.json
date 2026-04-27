@@ -1,0 +1,534 @@
+{
+  "SchemaVersion": 1,
+  "GeneratedAt": "2026-04-23T09:05:25Z",
+  "ProjectName": "DeveloperHandoffSample",
+  "RuntimeAudioFormat": "wav",
+  "Buses": [
+    "BGM",
+    "SFX",
+    "UI"
+  ],
+  "BusConfigs": [
+    {
+      "Name": "Master",
+      "ParentBus": "Master",
+      "VolumeDb": 0.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "BGM",
+      "ParentBus": "Master",
+      "VolumeDb": -3.0,
+      "IsMuted": false
+    },
+    {
+      "Name": "SFX",
+      "ParentBus": "Master",
+      "VolumeDb": -1.5,
+      "IsMuted": false
+    },
+    {
+      "Name": "UI",
+      "ParentBus": "SFX",
+      "VolumeDb": -1.0,
+      "IsMuted": false
+    }
+  ],
+  "Events": {
+    "BGM_Menu_ProxyLoop": {
+      "Bus": "BGM",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -4.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 1,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMvmt_WHOOSH POSITIVE-Flipster_B00M_CUDS",
+          "AssetKey": "bgm/proxy/menu/01_uimvmt_whoosh_positive_flipster_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 20,
+          "LoopEndMs": 60
+        }
+      ]
+    },
+    "SFX_Poof_RandomWeighted": {
+      "Bus": "SFX",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": true,
+      "VolumeDb": -3.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Bubble Stumble_B00M_CUDS",
+          "AssetKey": "sfx/poof/random/01_magpoof_poof_bubble_stumble_b00m_cuds",
+          "Weight": 5,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "MAGPoof_POOF-Charm_B00M_CUDS",
+          "AssetKey": "sfx/poof/random/02_magpoof_poof_charm_b00m_cuds",
+          "Weight": 4,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "MAGPoof_POOF-Chaser_B00M_CUDS",
+          "AssetKey": "sfx/poof/random/03_magpoof_poof_chaser_b00m_cuds",
+          "Weight": 3,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "MAGPoof_POOF-Fizzflip_B00M_CUDS",
+          "AssetKey": "sfx/poof/random/04_magpoof_poof_fizzflip_b00m_cuds",
+          "Weight": 2,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "MAGPoof_POOF-Fizzleburst_B00M_CUDS",
+          "AssetKey": "sfx/poof/random/05_magpoof_poof_fizzleburst_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "SFX_Poof_Sequence": {
+      "Bus": "SFX",
+      "PlayMode": "Sequence",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": 0.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "MAGPoof_POOF-Mystery Box_B00M_CUDS",
+          "AssetKey": "sfx/poof/sequence/01_magpoof_poof_mystery_box_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "MAGPoof_POOF-Nerfed_B00M_CUDS",
+          "AssetKey": "sfx/poof/sequence/02_magpoof_poof_nerfed_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "MAGPoof_POOF-Neutral Zap_B00M_CUDS",
+          "AssetKey": "sfx/poof/sequence/03_magpoof_poof_neutral_zap_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Click_RandomWeighted": {
+      "Bus": "UI",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": true,
+      "VolumeDb": -2.0,
+      "VolumeRandDb": [
+        -1.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIClick_CLICK-Chunky Monkey_B00M_CUDS",
+          "AssetKey": "ui/click/random/01_uiclick_click_chunky_monkey_b00m_cuds",
+          "Weight": 5,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIClick_CLICK-Classic_B00M_CUDS",
+          "AssetKey": "ui/click/random/02_uiclick_click_classic_b00m_cuds",
+          "Weight": 3,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIClick_CLICK-Drip_B00M_CUDS",
+          "AssetKey": "ui/click/random/03_uiclick_click_drip_b00m_cuds",
+          "Weight": 2,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIClick_CLICK-Peep Show_B00M_CUDS",
+          "AssetKey": "ui/click/random/04_uiclick_click_peep_show_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Confirm_Sequence": {
+      "Bus": "UI",
+      "PlayMode": "Sequence",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -1.5,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIClick_CONFIRM-Affirmative_B00M_CUDS",
+          "AssetKey": "ui/confirm/sequence/01_uiclick_confirm_affirmative_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIClick_CONFIRM-Bubble Shot_B00M_CUDS",
+          "AssetKey": "ui/confirm/sequence/02_uiclick_confirm_bubble_shot_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIClick_CONFIRM-Check_B00M_CUDS",
+          "AssetKey": "ui/confirm/sequence/03_uiclick_confirm_check_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIClick_CONFIRM-Cheers My Dears_B00M_CUDS",
+          "AssetKey": "ui/confirm/sequence/04_uiclick_confirm_cheers_my_dears_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Deny_Cooldown": {
+      "Bus": "UI",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -2.5,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.35,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMisc_DENY-Give Way_B00M_CUDS",
+          "AssetKey": "ui/deny/cooldown/01_uimisc_deny_give_way_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIMisc_DENY-Gloopy Glue_B00M_CUDS",
+          "AssetKey": "ui/deny/cooldown/02_uimisc_deny_gloopy_glue_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Match_PitchRandom": {
+      "Bus": "UI",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": 0.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 100,
+      "PitchRandCents": [
+        -100,
+        150
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMisc_MATCH-Align_B00M_CUDS",
+          "AssetKey": "ui/match/pitch_random/01_uimisc_match_align_b00m_cuds",
+          "Weight": 4,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIMisc_MATCH-Black Custard_B00M_CUDS",
+          "AssetKey": "ui/match/pitch_random/02_uimisc_match_black_custard_b00m_cuds",
+          "Weight": 3,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIMisc_MATCH-Bubble Blop_B00M_CUDS",
+          "AssetKey": "ui/match/pitch_random/03_uimisc_match_bubble_blop_b00m_cuds",
+          "Weight": 2,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Popup_TrimLoop_Metadata": {
+      "Bus": "UI",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": 0.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMvmt_POP UP-Classic Call_B00M_CUDS",
+          "AssetKey": "ui/popup/trim_loop/01_uimvmt_pop_up_classic_call_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 5,
+          "TrimEndMs": 10,
+          "LoopStartMs": 15,
+          "LoopEndMs": 40
+        },
+        {
+          "ClipId": "UIMvmt_POP UP-Short Appearance_B00M_CUDS",
+          "AssetKey": "ui/popup/trim_loop/02_uimvmt_pop_up_short_appearance_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Whoosh_RejectNew": {
+      "Bus": "UI",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": 0.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 1,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMvmt_WHOOSH NEUTRAL -Player Swap_B00M_CUDS",
+          "AssetKey": "ui/whoosh/reject_new/01_uimvmt_whoosh_neutral_player_swap_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Whoosh_StopOldest": {
+      "Bus": "UI",
+      "PlayMode": "Random",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": 0.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        0,
+        0
+      ],
+      "MaxInstances": 1,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "StopOldest",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMvmt_WHOOSH POSITIVE-Breeze Burst_B00M_CUDS",
+          "AssetKey": "ui/whoosh/stop_oldest/01_uimvmt_whoosh_positive_breeze_burst_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ]
+    },
+    "UI_Zap_Combo": {
+      "Bus": "UI",
+      "PlayMode": "Combo",
+      "AvoidImmediateRepeat": false,
+      "VolumeDb": -2.0,
+      "VolumeRandDb": [
+        0.0,
+        0.0
+      ],
+      "PitchCents": 0,
+      "PitchRandCents": [
+        -50,
+        50
+      ],
+      "MaxInstances": 0,
+      "CooldownSeconds": 0.0,
+      "StealPolicy": "RejectNew",
+      "LoadPolicy": "OnDemand",
+      "Clips": [
+        {
+          "ClipId": "UIMisc_ZAP-Fast Flip_B00M_CUDS",
+          "AssetKey": "ui/zap/combo/01_uimisc_zap_fast_flip_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIMisc_ZAP-Kickflip_B00M_CUDS",
+          "AssetKey": "ui/zap/combo/02_uimisc_zap_kickflip_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        },
+        {
+          "ClipId": "UIMisc_ZAP-Pixel Poke_B00M_CUDS",
+          "AssetKey": "ui/zap/combo/03_uimisc_zap_pixel_poke_b00m_cuds",
+          "Weight": 1,
+          "TrimStartMs": 0,
+          "TrimEndMs": 0,
+          "LoopStartMs": 0,
+          "LoopEndMs": 0
+        }
+      ],
+      "ComboPitchStepCents": 200,
+      "ComboResetSeconds": 1.2,
+      "ComboMaxStep": 4
+    }
+  }
+}

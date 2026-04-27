@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-04-27T09:09:19Z",
+  "workspace": "C:\\Users\\EDY\\wwise",
+  "export_dir": "C:\\Users\\EDY\\wwise\\Export",
+  "unity_validation_dir": "C:\\Users\\EDY\\wwise\\unity_validation",
+  "passed": true,
+  "summary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0
+  },
+  "checks": [
+    {
+      "name": "pytest",
+      "passed": true,
+      "details": [
+        "exit_code=0",
+        "stdout_tail:",
+        "============================= test session starts =============================",
+        "platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0",
+        "rootdir: C:\\Users\\EDY\\wwise",
+        "configfile: pyproject.toml",
+        "collected 59 items",
+        "tests\\unit\\test_developer_handoff_sample.py .                            [  1%]",
+        "tests\\unit\\test_exporter.py ....                                         [  8%]",
+        "tests\\unit\\test_full_chain_check.py ..                                   [ 11%]",
+        "tests\\unit\\test_main_controller_full_flow.py ......                      [ 22%]",
+        "tests\\unit\\test_main_controller_layout.py .............................. [ 72%]",
+        "..                                                                       [ 76%]",
+        "tests\\unit\\test_preview_bus_mixer.py ..                                  [ 79%]",
+        "tests\\unit\\test_project_serializer.py .                                  [ 81%]",
+        "tests\\unit\\test_recovery_service.py .                                    [ 83%]",
+        "tests\\unit\\test_validator.py ..........                                  [100%]",
+        "============================= 59 passed in 7.25s =============================="
+      ]
+    },
+    {
+      "name": "export_bundle",
+      "passed": true,
+      "details": [
+        "export_dir=C:\\Users\\EDY\\wwise\\Export",
+        "all_required_export_files_present",
+        "asset_entries=5"
+      ]
+    },
+    {
+      "name": "runtime_contract",
+      "passed": true,
+      "details": [
+        "schema_version=1",
+        "runtime_audio_format=ogg",
+        "events=5",
+        "clips=5",
+        "buses=3",
+        "manifest_assets=5"
+      ]
+    },
+    {
+      "name": "unity_validation_package",
+      "passed": true,
+      "details": [
+        "unity_validation_dir=C:\\Users\\EDY\\wwise\\unity_validation",
+        "runtime_files_checked=8"
+      ]
+    }
+  ]
+}

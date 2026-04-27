@@ -1,0 +1,196 @@
+{
+  "Assets": [
+    {
+      "AssetKey": "sfx/01_magpoof_poof_bubble_stumble_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Bubble Stumble_B00M_CUDS.wav",
+      "ExportPath": "sfx/01_magpoof_poof_bubble_stumble_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 6597680,
+      "Hash": "93b88edfc88361c8124248a48c73f47d87abbb16c20042270da170884c8e4154",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Bubble_Stumble_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/02_magpoof_poof_charm_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Charm_B00M_CUDS.wav",
+      "ExportPath": "sfx/02_magpoof_poof_charm_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 9988610,
+      "Hash": "3e7a4908f1dbe83adfc4fd4f56cd8b9c4a82b3dbfc4585c0bf8ba9523a535454",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Charm_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/03_magpoof_poof_chaser_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Chaser_B00M_CUDS.wav",
+      "ExportPath": "sfx/03_magpoof_poof_chaser_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7417514,
+      "Hash": "5fdf6bb17f149e6f26d7d9356124f3e9a88a2f0c751dee723afd64dac20e812c",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Chaser_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/04_magpoof_poof_fizzflip_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzflip_B00M_CUDS.wav",
+      "ExportPath": "sfx/04_magpoof_poof_fizzflip_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7655780,
+      "Hash": "aa929ac0fb8a2900c2148b788fe355d1b6e154445706a377a8a6528ca4445e08",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Fizzflip_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/05_magpoof_poof_fizzleburst_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Fizzleburst_B00M_CUDS.wav",
+      "ExportPath": "sfx/05_magpoof_poof_fizzleburst_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 8729516,
+      "Hash": "8ce58168294dc045074d4f5211ddbe7a1a05448b3bf9ab9a4104bce5b70a779f",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Fizzleburst_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/06_magpoof_poof_mystery_box_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Mystery Box_B00M_CUDS.wav",
+      "ExportPath": "sfx/06_magpoof_poof_mystery_box_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 12872808,
+      "Hash": "0c59b3e11aba157d244593dd8e0fb6dd1dc797827180a2704f0cd517a3a304f3",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Mystery_Box_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/07_magpoof_poof_nerfed_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Nerfed_B00M_CUDS.wav",
+      "ExportPath": "sfx/07_magpoof_poof_nerfed_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7159718,
+      "Hash": "a65eb11762598c760964d66670c5b7561432cfc430ad9de1d1523a081dbf273a",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Nerfed_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/08_magpoof_poof_neutral_zap_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Neutral Zap_B00M_CUDS.wav",
+      "ExportPath": "sfx/08_magpoof_poof_neutral_zap_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 9726040,
+      "Hash": "dea662b5f34b664537eb8a10314b00ccb849df566d6737e196c35b011880dcf9",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Neutral_Zap_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/09_magpoof_poof_pop_rocket_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Pop Rocket_B00M_CUDS.wav",
+      "ExportPath": "sfx/09_magpoof_poof_pop_rocket_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 8335262,
+      "Hash": "61aca4ed9ab4f35891256d90f15f1ca4be1adcd4ab49142ac84399fb2c6bb8c2",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Pop_Rocket_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/10_magpoof_poof_power_puff_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Power Puff_B00M_CUDS.wav",
+      "ExportPath": "sfx/10_magpoof_poof_power_puff_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 10439042,
+      "Hash": "c94145b2d1c1dc80fc207889fd732694238476fd1399037fe7bb7051ebe61041",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Power_Puff_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/11_magpoof_poof_puffwhirl_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Puffwhirl_B00M_CUDS.wav",
+      "ExportPath": "sfx/11_magpoof_poof_puffwhirl_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7485638,
+      "Hash": "c12cdad74134c0b7d5b96002b33c85a43b3f987cfc9ff0bf564dffc5f9a34343",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Puffwhirl_B00M_CUDS"
+      ]
+    },
+    {
+      "AssetKey": "sfx/12_magpoof_poof_smoke_stack_b00m_cuds",
+      "SourcePath": "E:\\sfx\\116 Casual UI\\Casual UI\\Casual UI DS\\MAGPoof_POOF-Smoke Stack_B00M_CUDS.wav",
+      "ExportPath": "sfx/12_magpoof_poof_smoke_stack_b00m_cuds.wav",
+      "SourceFormat": "wav",
+      "RuntimeFormat": "wav",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 7573716,
+      "Hash": "50fb196ee861893c7172dfd20714f8ac1e7cc5982aa4c92402ba052d06731a04",
+      "ReferencedByEvents": [
+        "MAGPoof_POOF_Smoke_Stack_B00M_CUDS"
+      ]
+    }
+  ]
+}
