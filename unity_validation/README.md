@@ -37,7 +37,7 @@
 7. `AudioForgeRuntimeDebugPanel.cs`：轻量调试面板，方便直接观察事件、总线和活动声部状态。
 8. `Editor/AudioForgeValidationRunner.cs`：一键跑当前场景验证并输出报告。
 9. `Editor/AudioForgeMissingScriptCleaner.cs`：清理场景里残留的 Missing Script。
-10. `Editor` 下还包含事件 ID 搜索/刷新和 Runtime 自定义 Inspector，用于更快配置事件和 Unity AudioMixer。
+10. `Editor` 下还包含事件 ID 搜索/刷新、Runtime 自定义 Inspector，以及事件级 dB 微调入口，用于更快配置事件和 Unity AudioMixer。
 
 ## 当前示例工程骨架
 
@@ -139,12 +139,14 @@ Assets/
 2. 把它命名为 `AudioForgeBootstrap`。
 3. 给这个物体挂上 `AudioForgeBootstrap` 组件。
 4. 如果你想直接观察运行时状态，再额外挂上 `AudioForgeRuntimeDebugPanel` 组件。
-5. 如果你要接 Unity AudioMixer，可在 `AudioForgeRuntime` 组件 Inspector 中开启 `Integrate With Unity Audio Mixer`，并配置默认 `AudioMixerGroup`、主音量和各总线音量。
-6. 在 Inspector 中设置：
+5. 如果你要接 Unity AudioMixer，可在 `AudioForgeRuntime` 组件 Inspector 中开启 `启用 Unity AudioMixer 集成`，并在 `常用总线信息与微调` 区直接查看 AudioForge 导出总线、映射状态、默认输出组和各总线的 `附加倍率`。
+6. 这里的 `附加倍率` 不是覆盖 AudioForge 导出值，而是在导出基线之上做 Unity 侧微调；`1` 表示该总线未被 Unity 工程额外改动。
+7. 如果你想只改当前验证物体上的某个事件音量，可直接调整 `当前组件偏移`；如果想让整个项目里这个事件统一变化，请在 `AudioForgeRuntime` 的 `事件微调` 区做项目级偏移。
+8. 在 Inspector 中设置：
 	`Event Id = sfx_level_check_02`
 	`Auto Play On Start = true`
 	`Trigger Key = Space`
-7. 保存当前场景，例如保存为 `Assets/Scenes/Validation.unity`。
+9. 保存当前场景，例如保存为 `Assets/Scenes/Validation.unity`。
 
 ## 第五步：运行首次验证
 

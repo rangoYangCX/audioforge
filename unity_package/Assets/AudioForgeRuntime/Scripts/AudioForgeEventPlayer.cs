@@ -18,6 +18,7 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
     public bool TriggerOnEnable;
     public bool UseAttachedAudioSource;
     public KeyCode TriggerKey = KeyCode.None;
+    public float LocalEventVolumeDbOffset;
 
     [HideInInspector] public AudioSource OverrideAudioSource;
 
@@ -70,7 +71,7 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
             source = OverrideAudioSource != null ? OverrideAudioSource : GetComponent<AudioSource>();
         }
 
-        yield return runtime.PlayEvent(EventId, source);
+        yield return runtime.PlayEvent(EventId, source, LocalEventVolumeDbOffset);
     }
 
     private AudioForgeRuntime ResolveRuntime()

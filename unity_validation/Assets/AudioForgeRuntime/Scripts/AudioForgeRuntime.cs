@@ -26,6 +26,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     [SerializeField] private AudioMixerGroup defaultOutputMixerGroup;
     [SerializeField] [Range(0f, 1f)] private float unityMasterVolume = 1f;
     [SerializeField] private List<AudioForgeUnityBusMixerBinding> unityBusMixerBindings = new List<AudioForgeUnityBusMixerBinding>();
+    [SerializeField] private List<AudioForgeUnityEventVolumeBinding> unityEventVolumeBindings = new List<AudioForgeUnityEventVolumeBinding>();
 
     private readonly Dictionary<string, AudioForgeEventConfig> _events = new Dictionary<string, AudioForgeEventConfig>();
     private readonly Dictionary<string, AudioClip> _clips = new Dictionary<string, AudioClip>();
@@ -113,6 +114,17 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         return unityMasterVolume;
     }
 
+    public float GetUnityEventVolumeOffsetDb(string eventId)
+    {
+        AudioForgeUnityEventVolumeBinding binding = FindUnityEventVolumeBinding(eventId);
+        return binding != null ? binding.VolumeDbOffset : 0f;
+    }
+
+    public string GetMasterBusName()
+    {
+        return masterBusName;
+    }
+
     public float GetBusVolume(string busName)
     {
         AudioForgeBusState busState;
@@ -147,6 +159,38 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         return false;
     }
 
+    public string GetBusParentName(string busName)
+    {
+        AudioForgeBusState busState;
+        if (_buses.TryGetValue(NormalizeBusName(busName), out busState))
+        {
+            return string.IsNullOrWhiteSpace(busState.ParentBusName) ? masterBusName : busState.ParentBusName;
+        }
+
+        return masterBusName;
+    }
+
+    public AudioMixerGroup GetBusOutputMixerGroup(string busName)
+    {
+        AudioForgeBusState busState;
+        if (_buses.TryGetValue(NormalizeBusName(busName), out busState))
+        {
+            return busState.OutputMixerGroup;
+        }
+
+        return null;
+    }
+
+    public float GetEffectiveBusVolume(string busName)
+    {
+        return ComputeEffectiveVolume(1f, busName);
+    }
+
+    public bool HasCustomBusMixerBinding(string busName)
+    {
+        return FindUnityBusMixerBinding(busName) != null;
+    }
+
     public int GetActiveVoiceCount(string eventId)
     {
         AudioForgeRuntimeState state;
@@ -156,6 +200,28 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         return 0;
+    }
+
+    public float GetEventBaseVolumeDb(string eventId)
+    {
+        AudioForgeEventConfig eventConfig;
+        if (_events.TryGetValue(eventId, out eventConfig))
+        {
+            return eventConfig.VolumeDb;
+        }
+
+        return 0f;
+    }
+
+    public string GetEventBusName(string eventId)
+    {
+        AudioForgeEventConfig eventConfig;
+        if (_events.TryGetValue(eventId, out eventConfig))
+        {
+            return NormalizeBusName(eventConfig.Bus);
+        }
+
+        return NormalizeBusName(null);
     }
 
     public int GetProcessedClipCacheCount()
@@ -175,12 +241,17 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
     public Coroutine Play(string eventId)
     {
-        return StartCoroutine(PlayEvent(eventId, null));
+        return StartCoroutine(PlayEvent(eventId, null, 0f));
     }
 
     public Coroutine Play(string eventId, AudioSource overrideSource)
     {
-        return StartCoroutine(PlayEvent(eventId, overrideSource));
+        return StartCoroutine(PlayEvent(eventId, overrideSource, 0f));
+    }
+
+    public Coroutine Play(string eventId, AudioSource overrideSource, float localEventVolumeDbOffset)
+    {
+        return StartCoroutine(PlayEvent(eventId, overrideSource, localEventVolumeDbOffset));
     }
 
     public IEnumerator Initialize()
@@ -246,6 +317,11 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
     public IEnumerator PlayEvent(string eventId, AudioSource audioSource)
     {
+        return PlayEvent(eventId, audioSource, 0f);
+    }
+
+    public IEnumerator PlayEvent(string eventId, AudioSource audioSource, float localEventVolumeDbOffset)
+    {
         AudioForgeEventConfig eventConfig;
         if (!IsReady || !_events.TryGetValue(eventId, out eventConfig))
         {
@@ -302,7 +378,8 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         int comboStep = ResolveComboStep(eventConfig, state, now);
-        float volumeDb = eventConfig.VolumeDb + RandomRange(eventConfig.VolumeRandMinDb, eventConfig.VolumeRandMaxDb);
+        float eventVolumeDbOffset = GetUnityEventVolumeOffsetDb(eventId) + localEventVolumeDbOffset;
+        float volumeDb = eventConfig.VolumeDb + eventVolumeDbOffset + RandomRange(eventConfig.VolumeRandMinDb, eventConfig.VolumeRandMaxDb);
         int pitchCents = eventConfig.PitchCents + RandomRangeInt(eventConfig.PitchRandMinCents, eventConfig.PitchRandMaxCents);
         if (eventConfig.PlayMode == "Combo")
         {
@@ -372,6 +449,24 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         binding.Volume = busState.UnityVolume;
         RefreshBusVolumes(busState.Name);
         AppendDebugBusRecord(busState.Name, "set_unity_bus_volume", busState.UnityVolume, busState.IsMuted);
+    }
+
+    public void SetUnityEventVolumeOffsetDb(string eventId, float volumeDbOffset)
+    {
+        if (string.IsNullOrWhiteSpace(eventId))
+        {
+            return;
+        }
+
+        AudioForgeUnityEventVolumeBinding binding = FindUnityEventVolumeBinding(eventId);
+        if (binding == null)
+        {
+            binding = new AudioForgeUnityEventVolumeBinding();
+            binding.EventId = eventId.Trim();
+            unityEventVolumeBindings.Add(binding);
+        }
+
+        binding.VolumeDbOffset = volumeDbOffset;
     }
 
     public void StopBus(string busName)
@@ -515,6 +610,26 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         {
             AudioForgeUnityBusMixerBinding binding = unityBusMixerBindings[index];
             if (binding != null && NormalizeBusName(binding.BusName) == normalizedBusName)
+            {
+                return binding;
+            }
+        }
+
+        return null;
+    }
+
+    private AudioForgeUnityEventVolumeBinding FindUnityEventVolumeBinding(string eventId)
+    {
+        if (string.IsNullOrWhiteSpace(eventId))
+        {
+            return null;
+        }
+
+        string normalizedEventId = eventId.Trim();
+        for (int index = 0; index < unityEventVolumeBindings.Count; index += 1)
+        {
+            AudioForgeUnityEventVolumeBinding binding = unityEventVolumeBindings[index];
+            if (binding != null && string.Equals(binding.EventId, normalizedEventId, StringComparison.Ordinal))
             {
                 return binding;
             }

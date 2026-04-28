@@ -49,8 +49,28 @@
 
 `AudioForgeRuntime` 现在已经支持 Unity AudioMixer 接入：
 
-1. 可在组件 Inspector 中开启 `Integrate With Unity Audio Mixer`。
-2. 可配置默认输出 `AudioMixerGroup`。
-3. 可配置 `Unity Master Volume` 和每个总线的附加音量倍率。
-4. 可为指定总线绑定独立的 `AudioMixerGroup`。
-5. 进入 Play 模式后，`AudioForgeRuntime` 的 Inspector 配置栏会出现实时音量滑杆，可直接调主音量和各总线音量。
+1. 可在组件 Inspector 中开启 `启用 Unity AudioMixer 集成`。
+2. Inspector 顶部会优先显示导出项目、运行时格式、事件数、总线数和运行时状态等常用信息。
+3. `常用总线信息与微调` 区会直接列出从 `AudioData.json` 识别出的 AudioForge 总线，显示父总线、导出基线、当前映射状态和附加倍率。
+4. Unity 侧的 `主总线附加倍率` 与各总线 `附加倍率` 都表示在 AudioForge 导出结果之上的额外微调；`1` 表示未改动，不会覆盖导出基线。
+5. 可为指定总线绑定独立的 `AudioMixerGroup`；未单独绑定时会回退到默认输出组。
+6. 进入 Play 模式后，`运行中快速微调` 区会显示实时滑杆，便于联调时快速试听。
+7. `跨场景常驻`、预热声源数、最大声源数、主总线名称和保时长变调开关等低频配置，已收纳到折叠区，避免干扰常用操作。
+
+## 事件音量微调
+
+现在 Unity 侧已经补充两层事件音量微调能力：
+
+1. `AudioForgeRuntime` Inspector 中的 `事件微调`：项目级偏移，按 `EventId` 对整个工程生效。
+2. `AudioForgeEventPlayer` 和 `AudioForgeBootstrap` Inspector 中的 `当前组件偏移`：只影响当前组件触发的该事件。
+
+这两层都以 dB 表达：
+
+- `0 dB` 表示不改动 AudioForge 导出事件基线。
+- 负值表示压低当前事件。
+- 正值表示单独抬高当前事件。
+
+推荐用法：
+
+1. 项目里全局都要改的事件，放到 `AudioForgeRuntime` 的项目级偏移里。
+2. 只在某个场景物体上想单独修一下的事件，放到 `AudioForgeEventPlayer` 或 `AudioForgeBootstrap` 的组件级偏移里。

@@ -15,6 +15,7 @@ public sealed class AudioForgeBootstrap : MonoBehaviour
     public string EventId = DefaultValidationEventId;
     public bool AutoPlayOnStart = true;
     public KeyCode TriggerKey = KeyCode.Space;
+    public float LocalEventVolumeDbOffset;
 
     private AudioForgeRuntime _runtime;
     private AudioForgeEventPlayer _eventPlayer;
@@ -45,6 +46,7 @@ public sealed class AudioForgeBootstrap : MonoBehaviour
         _eventPlayer.OverrideAudioSource = GetComponent<AudioSource>();
         _eventPlayer.UseAttachedAudioSource = _eventPlayer.OverrideAudioSource != null;
         _eventPlayer.TriggerKey = KeyCode.None;
+        _eventPlayer.LocalEventVolumeDbOffset = LocalEventVolumeDbOffset;
 
         yield return _runtime.Initialize();
         if (AutoPlayOnStart)
@@ -63,6 +65,7 @@ public sealed class AudioForgeBootstrap : MonoBehaviour
         if (_eventPlayer != null)
         {
             _eventPlayer.EventId = EventId;
+            _eventPlayer.LocalEventVolumeDbOffset = LocalEventVolumeDbOffset;
         }
 
         if (Input.GetKeyDown(TriggerKey))

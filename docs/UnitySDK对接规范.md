@@ -110,10 +110,12 @@ Assets/
 - `bool HasEvent(string eventId)`
 - `void PlayEvent(string eventId)`
 - `void PlayEvent(string eventId, AudioSource overrideSource)`
+- `void PlayEvent(string eventId, AudioSource overrideSource, float localEventVolumeDbOffset)`
 - `void StopEvent(string eventId)`
 - `void StopBus(string busName)`
 - `void SetBusVolume(string busName, float linearVolume)`
 - `void SetBusMuted(string busName, bool isMuted)`
+- `void SetUnityEventVolumeOffsetDb(string eventId, float volumeDbOffset)`
 
 如果项目需要更完整接入，建议再预留：
 
@@ -247,6 +249,37 @@ Assets/
 9.3 总线
 
 总线控制应乘到事件最终音量上，而不是回写事件导出数据。运行时建议将总线状态保存在独立表中，但初始化时应先消费 `AudioData.json` 中的 `BusConfigs`，把工具端配置的初始音量、静音和父子路由关系还原到运行时总线表，并沿 `ParentBus -> Master` 链累乘总线增益。
+
+当前参考实现额外区分了两层 Unity 侧微调：
+
+- 总线级微调：以线性倍率表达，叠乘在 AudioForge 导出总线基线之上。
+- 事件级微调：以 dB 偏移表达，叠加在 AudioForge 导出事件基线之上。
+
+这样可以在 Inspector 中明确区分“工具导出的原始配置”和“Unity 工程内额外做过的调整”。
+
+9.4 事件级微调
+
+当前参考实现已经补充两层事件级微调：
+
+- 项目级事件偏移：由 `AudioForgeRuntime` 维护，按 `EventId` 存储，适合全局修正某个事件。
+- 组件级事件偏移：由 `AudioForgeEventPlayer` 和 `AudioForgeBootstrap` 持有，适合只影响当前场景物体。
+
+建议最终事件音量计算顺序为：
+
+1. AudioForge 事件基线
+2. Unity 项目级事件偏移
+3. Unity 组件级事件偏移
+4. 随机音量偏移
+5. AudioForge 总线基线与 Unity 总线微调
+
+其中两层事件偏移都采用 dB 表达，默认 `0 dB` 表示不改动导出事件基线。
+
+当前参考 Inspector 的语义已经固定为两层：
+
+- `导出基线`：来自 AudioForge 导出的总线音量、静音状态和父子关系，只读展示。
+- `Unity 附加倍率`：Unity 工程侧的额外微调，默认值为 `1`，表示未改动导出基线。
+
+这意味着 Unity 程序可以一眼区分“工具导出的原始配置”和“项目内额外做过的混音微调”，同时避免把 Unity 侧微调误解为 AudioForge 原始总线值。
 
 10. 资源加载要求
 

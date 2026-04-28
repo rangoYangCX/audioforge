@@ -122,6 +122,13 @@ public sealed class AudioForgeUnityBusMixerBinding
     [Range(0f, 1f)] public float Volume = 1f;
 }
 
+[Serializable]
+public sealed class AudioForgeUnityEventVolumeBinding
+{
+    public string EventId;
+    public float VolumeDbOffset;
+}
+
 /// <summary>
 /// 最近一次事件触发的调试记录。
 /// 用于在参考调试面板中直观看到：命中片段、总音高、是否走保时长、缓存是否命中、触发是否被拒绝。
