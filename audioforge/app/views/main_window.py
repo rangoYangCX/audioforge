@@ -12,6 +12,7 @@ from PySide6.QtGui import QCloseEvent, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QStyle,
     QTabWidget,
     QSplitter,
@@ -110,6 +112,104 @@ class DetachedToolWindow(QWidget):
         event.ignore()
 
 
+class TaskSidebar(QFrame):
+    modeRequested = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("TaskSidebar")
+        self._buttons: dict[str, QPushButton] = {}
+        self._button_group = QButtonGroup(self)
+        self._button_group.setExclusive(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        title = QLabel("工作模式")
+        title.setProperty("role", "sidebarTitle")
+        layout.addWidget(title)
+
+        utility_specs = [
+            ("home", "欢迎页"),
+        ]
+        for mode, label in utility_specs:
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty("role", "taskNavButton")
+            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
+            self._button_group.addButton(button)
+            self._buttons[mode] = button
+            layout.addWidget(button)
+
+        workflow_title = QLabel("制作流程")
+        workflow_title.setProperty("role", "sidebarTitle")
+        layout.addWidget(workflow_title)
+
+        button_specs = [
+            ("resources", "资源整理"),
+            ("events", "事件设计"),
+            ("buses", "总线与混音"),
+            ("validation", "校验修复"),
+            ("build", "构建交付"),
+        ]
+        for mode, label in button_specs:
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty("role", "taskNavButton")
+            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
+            self._button_group.addButton(button)
+            self._buttons[mode] = button
+            layout.addWidget(button)
+
+        results_title = QLabel("结果与收尾")
+        results_title.setProperty("role", "sidebarTitle")
+        layout.addWidget(results_title)
+
+        result_specs = [
+            ("results", "结果中心"),
+            ("validation-results", "校验结果"),
+            ("build-results", "构建结果"),
+            ("loudness-results", "响度结果"),
+        ]
+        for mode, label in result_specs:
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty("role", "taskNavButton")
+            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
+            self._button_group.addButton(button)
+            self._buttons[mode] = button
+            layout.addWidget(button)
+
+        layout.addStretch(1)
+
+    def set_active_mode(self, mode: str) -> None:
+        for current_mode, button in self._buttons.items():
+            button.blockSignals(True)
+            button.setChecked(current_mode == mode)
+            button.blockSignals(False)
+
+    def button(self, mode: str) -> QPushButton | None:
+        return self._buttons.get(mode)
+
+
+class AppShell(QFrame):
+    def __init__(self, top_bar: QWidget, sidebar: QWidget, content: QWidget) -> None:
+        super().__init__()
+        self.setObjectName("AppShell")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+        layout.addWidget(top_bar)
+
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(10)
+        body_layout.addWidget(sidebar)
+        body_layout.addWidget(content, 1)
+        layout.addWidget(body, 1)
+
+
 class MainWindow(QMainWindow):
     eventPropertiesChanged = Signal()
     projectSettingsChanged = Signal()
@@ -171,6 +271,7 @@ class MainWindow(QMainWindow):
         self._project_bus_selection_overridden = False
         self._syncing_project_bus_selection = False
         self._explorer_detached = False
+        self._active_workspace_mode = "home"
         self._event_import_template_defaults = {
             "bus_name": "",
             "asset_prefix": "",
@@ -355,6 +456,9 @@ class MainWindow(QMainWindow):
         self.clip_locate_source_button = QPushButton("定位源文件")
         self.build_preview_output = QPlainTextEdit()
         self.build_preview_output.setReadOnly(True)
+        self.resources_preview_output = QPlainTextEdit()
+        self.resources_preview_output.setReadOnly(True)
+        self.resources_preview_output.setDocument(self.build_preview_output.document())
         self.audio_meter_context_label = QLabel("未执行试听")
         self.audio_meter_short_term_value = QLabel("-Inf")
         self.audio_meter_short_term_max_value = QLabel("-Inf")
@@ -387,6 +491,14 @@ class MainWindow(QMainWindow):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.validation_summary_label = QLabel("等待校验。")
+        self.validation_filter_status_label = QLabel("显示全部校验问题。")
+        self.validation_filter_severity_combo = QComboBox()
+        self.validation_filter_severity_combo.addItems(["全部级别", "错误", "警告", "信息"])
+        self.validation_filter_keyword_edit = QLineEdit()
+        self.validation_filter_keyword_edit.setPlaceholderText("按代码、目标或消息过滤")
+        self.validation_filter_reset_button = QPushButton("清空筛选")
+        self.validation_revalidate_button = QPushButton("重新校验")
+        self.validation_locate_button = QPushButton("定位当前问题")
         self.validation_issue_list = QListWidget()
         self.validation_report_output = QPlainTextEdit()
         self.validation_report_output.setReadOnly(True)
@@ -434,11 +546,20 @@ class MainWindow(QMainWindow):
         self.project_badge = QLabel("AudioForge 工程台")
         self.project_title_label = QLabel("未命名工程")
         self.project_path_label = QLabel("尚未保存")
+        self.welcome_project_title_label = QLabel("未命名工程")
+        self.welcome_project_path_label = QLabel("尚未保存")
+        self.welcome_dirty_label = QLabel("已保存")
+        self.shell_product_label = QLabel(APP_NAME)
+        self.shell_project_title_label = QLabel("未命名工程")
+        self.shell_project_path_label = QLabel("尚未保存")
+        self.shell_mode_title_label = QLabel("欢迎页")
         self.status_label = QLabel("未选择事件")
         self.dirty_status_label = QLabel("已保存")
         self.toolbar_dirty_label = QLabel("已保存")
         self.workspace_dirty_label = QLabel("已保存")
         self.workspace_report_focus_label = QLabel("当前：日志")
+        self.activity_report_focus_label = QLabel("当前：日志")
+        self.activity_dirty_label = QLabel("已保存")
         self.report_focus_label = QLabel("当前：日志")
         self.report_detail_label = QLabel("等待校验、构建或响度扫描结果")
         self.inspector_caption = QLabel("检查器")
@@ -455,6 +576,7 @@ class MainWindow(QMainWindow):
         self.zoom_in_button = QToolButton()
         self.reset_layout_button = QToolButton()
         self.settings_button = QPushButton("设置")
+        self.command_button = QPushButton("命令")
         self.scale_status_label = QLabel("100%")
         self.new_folder_button = QPushButton("新建文件夹")
         self.new_event_button = QPushButton("新建事件")
@@ -474,6 +596,24 @@ class MainWindow(QMainWindow):
         self.batch_rename_button = QPushButton("批量重命名")
         self.apply_default_bus_button = QPushButton("默认总线应用到全部事件")
         self.tree_search_button = QToolButton()
+        self.global_search_edit = QLineEdit()
+        self.global_search_edit.setPlaceholderText("搜索事件并定位")
+        self.global_search_button = QToolButton()
+        self.task_sidebar = TaskSidebar()
+        self.workspace_mode_stack = QStackedWidget()
+        self.activity_summary_label = QLabel("欢迎使用新的 AppShell。先从欢迎页进入具体工作模式。")
+        self.activity_hint_label = QLabel("这里会持续显示最近的结果入口与当前工作状态。")
+        self.events_workspace_status_label = QLabel("等待选择事件。")
+        self.event_overview_hint_label = QLabel("从左侧概览快速切到参数、资源或结果页。")
+        self.resources_workspace_status_label = QLabel("等待导入或选择片段。")
+        self.resources_overview_hint_label = QLabel("先完成片段编排，再进入批处理或生成预览。")
+        self.buses_workspace_status_label = QLabel("等待选择事件总线。")
+        self.buses_overview_hint_label = QLabel("从左侧概览选择当前要处理的总线工作流。")
+        self.build_workspace_status_label = QLabel("等待准备导出配置。")
+        self.build_overview_hint_label = QLabel("先确认导出设置，再查看差异和构建结果。")
+        self.validation_overview_hint_label = QLabel("按级别与关键字聚焦问题，再回到对象或资源页修复。")
+        self.results_overview_hint_label = QLabel("从结果导航进入日志、校验、构建或响度结果。")
+        self._validation_issue_items: list[dict[str, object]] = []
 
         self._build_ui()
         self._bind_internal_signals()
@@ -481,53 +621,11 @@ class MainWindow(QMainWindow):
         self._apply_wwise_style()
 
     def _build_ui(self) -> None:
-        self.main_toolbar = QToolBar("主工具栏")
-        self.main_toolbar.setIconSize(QSize(18, 18))
-        self.main_toolbar.addWidget(self._build_toolbar_section_label("工程"))
-        self.main_toolbar.addWidget(self.new_project_button)
-        self.main_toolbar.addWidget(self.open_project_button)
-        self.main_toolbar.addWidget(self.save_project_button)
-        self.main_toolbar.addWidget(self.save_as_project_button)
-        self.main_toolbar.addSeparator()
-        self.main_toolbar.addWidget(self._build_toolbar_section_label("对象"))
-        self.main_toolbar.addWidget(self.new_folder_button)
-        self.main_toolbar.addWidget(self.new_event_button)
-        self.main_toolbar.addWidget(self.rename_button)
-        self.main_toolbar.addWidget(self.delete_button)
-        self.main_toolbar.addWidget(self.bulk_event_bus_button)
-        self.main_toolbar.addSeparator()
-        self.main_toolbar.addWidget(self._build_toolbar_section_label("修订"))
-        self.main_toolbar.addWidget(self.undo_button)
-        self.main_toolbar.addWidget(self.redo_button)
-        self.main_toolbar.addSeparator()
-        self.main_toolbar.addWidget(self._build_toolbar_section_label("试听与交付"))
-        self.main_toolbar.addWidget(self.preview_button)
-        self.main_toolbar.addWidget(self.stop_preview_event_button)
-        self.main_toolbar.addWidget(self.stop_preview_bus_button)
-        self.main_toolbar.addWidget(self.validate_button)
-        self.main_toolbar.addWidget(self.loudness_scan_button)
-        self.main_toolbar.addWidget(self.build_button)
-        self.main_toolbar.addSeparator()
-        self.main_toolbar.addWidget(self._build_toolbar_section_label("视图"))
-        self.main_toolbar.addWidget(self.zoom_out_button)
-        self.main_toolbar.addWidget(self.zoom_reset_button)
-        self.main_toolbar.addWidget(self.zoom_in_button)
-        self.main_toolbar.addWidget(self.scale_status_label)
-        self.main_toolbar.addWidget(self.reset_layout_button)
-        self.main_toolbar.addSeparator()
-        self.main_toolbar.addWidget(self._build_toolbar_section_label("设置"))
-        self.main_toolbar.addWidget(self.settings_button)
-        toolbar_spacer = QWidget()
-        toolbar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.main_toolbar.addWidget(toolbar_spacer)
-        self.toolbar_dirty_label = QLabel(self.toolbar_dirty_label.text(), self.main_toolbar)
-        self.main_toolbar.addWidget(self.toolbar_dirty_label)
-        self.addToolBar(self.main_toolbar)
-        self.main_toolbar.setMovable(False)
+        self.top_app_bar = self._build_top_app_bar()
 
-        hero_panel = QFrame()
-        hero_panel.setObjectName("HeroPanel")
-        hero_layout = QVBoxLayout(hero_panel)
+        self.hero_panel = QFrame()
+        self.hero_panel.setObjectName("HeroPanel")
+        hero_layout = QVBoxLayout(self.hero_panel)
         hero_layout.setContentsMargins(16, 14, 16, 14)
         hero_layout.setSpacing(2)
         hero_layout.addWidget(self.project_badge)
@@ -535,9 +633,9 @@ class MainWindow(QMainWindow):
         hero_layout.addWidget(self.project_path_label)
         hero_layout.addWidget(self.dirty_status_label)
 
-        object_header = QFrame()
-        object_header.setObjectName("ObjectHeader")
-        object_header_layout = QVBoxLayout(object_header)
+        self.object_header_frame = QFrame()
+        self.object_header_frame.setObjectName("ObjectHeader")
+        object_header_layout = QVBoxLayout(self.object_header_frame)
         object_header_layout.setContentsMargins(12, 10, 12, 10)
         object_header_layout.setSpacing(4)
         object_top_row = QHBoxLayout()
@@ -572,8 +670,8 @@ class MainWindow(QMainWindow):
         object_action_row.addStretch(1)
         object_header_layout.addLayout(object_action_row)
 
-        reference_group = QGroupBox("对象引用")
-        reference_layout = QGridLayout(reference_group)
+        self.reference_group = QGroupBox("对象引用")
+        reference_layout = QGridLayout(self.reference_group)
         reference_layout.setContentsMargins(10, 8, 10, 8)
         reference_layout.setHorizontalSpacing(10)
         reference_layout.setVerticalSpacing(6)
@@ -588,8 +686,8 @@ class MainWindow(QMainWindow):
         reference_layout.addWidget(self.reference_work_unit_label, 2, 0, 1, 2)
         reference_layout.addWidget(self.reference_output_label, 2, 2, 1, 2)
 
-        general_group = QGroupBox("对象设置")
-        general_layout = QFormLayout(general_group)
+        self.event_general_group = QGroupBox("对象设置")
+        general_layout = QFormLayout(self.event_general_group)
         general_layout.addRow("名称", self.display_name_edit)
         general_layout.addRow("对象 ID", self.event_id_edit)
         general_layout.addRow("输出总线", self.bus_combo)
@@ -604,8 +702,8 @@ class MainWindow(QMainWindow):
         voice_layout.addRow("冷却时间（秒）", self.cooldown_spin)
         voice_layout.addRow("避免紧邻重复", self.avoid_repeat_check)
 
-        modulation_group = QGroupBox("音调与音量")
-        modulation_layout = QFormLayout(modulation_group)
+        self.modulation_group = QGroupBox("音调与音量")
+        modulation_layout = QFormLayout(self.modulation_group)
         modulation_layout.addRow("基础音量（dB）", self.volume_spin)
         modulation_layout.addRow("音量随机最小（dB）", self.volume_rand_min_spin)
         modulation_layout.addRow("音量随机最大（dB）", self.volume_rand_max_spin)
@@ -619,8 +717,8 @@ class MainWindow(QMainWindow):
         combo_layout.addRow("重置时间（秒）", self.combo_reset_spin)
         combo_layout.addRow("最大步数", self.combo_max_step_spin)
 
-        loudness_group = QGroupBox("最近试听")
-        loudness_layout = QFormLayout(loudness_group)
+        self.loudness_group = QGroupBox("最近试听")
+        loudness_layout = QFormLayout(self.loudness_group)
         loudness_layout.addRow("监视器", self.open_loudness_view_button)
         loudness_layout.addRow("源文件", self.audio_meter_summary_source_context_label)
         loudness_layout.addRow("源 Integrated", self.audio_meter_summary_source_integrated_value)
@@ -629,11 +727,9 @@ class MainWindow(QMainWindow):
         loudness_layout.addRow("后 Integrated", self.audio_meter_summary_integrated_value)
         loudness_layout.addRow("后 True Peak", self.audio_meter_summary_true_peak_value)
 
-        notes_group = QGroupBox("备注")
-        notes_layout = QVBoxLayout(notes_group)
+        self.notes_group = QGroupBox("备注")
+        notes_layout = QVBoxLayout(self.notes_group)
         notes_layout.addWidget(self.notes_edit)
-
-        event_page = self._build_two_column_page([general_group, self.event_behavior_group], [notes_group])
 
         self.inline_bus_group = QGroupBox("当前输出总线")
         inline_bus_layout = QVBoxLayout(self.inline_bus_group)
@@ -657,8 +753,8 @@ class MainWindow(QMainWindow):
         route_bar_layout = QHBoxLayout(self.project_bus_route_bar)
         route_bar_layout.setContentsMargins(0, 0, 0, 0)
         route_bar_layout.setSpacing(6)
-        bus_routing_group = QGroupBox("Routing")
-        bus_routing_layout = QVBoxLayout(bus_routing_group)
+        self.bus_routing_group = QGroupBox("Routing")
+        bus_routing_layout = QVBoxLayout(self.bus_routing_group)
         bus_identity_form = QFormLayout()
         bus_identity_form.addRow("总线名称", self.project_bus_name_edit)
         bus_identity_form.addRow("父总线", self.project_bus_parent_combo)
@@ -671,49 +767,41 @@ class MainWindow(QMainWindow):
         child_caption.setProperty("role", "meterTitle")
         bus_routing_layout.addWidget(child_caption)
         bus_routing_layout.addWidget(self.project_bus_children_label)
-        bus_level_group = QGroupBox("Bus Volume")
-        bus_level_layout = QFormLayout(bus_level_group)
+        self.bus_level_group = QGroupBox("Bus Volume")
+        bus_level_layout = QFormLayout(self.bus_level_group)
         bus_level_layout.addRow("基础音量（dB）", self.project_bus_volume_spin)
         bus_level_layout.addRow("静音", self.project_bus_mute_check)
         bus_level_layout.addRow("作者态输出", self.project_bus_effective_value)
         bus_level_layout.addRow("输出表", self.project_bus_effective_bar)
-        bus_validation_group = QGroupBox("导出结果")
-        bus_validation_layout = QVBoxLayout(bus_validation_group)
+        self.bus_validation_group = QGroupBox("导出结果")
+        bus_validation_layout = QVBoxLayout(self.bus_validation_group)
         bus_validation_layout.setContentsMargins(12, 10, 12, 10)
         bus_validation_layout.addWidget(self.project_bus_export_label)
-        inline_bus_content = QSplitter()
-        inline_bus_content.setOrientation(Qt.Orientation.Horizontal)
-        inline_bus_content.setChildrenCollapsible(False)
-        inline_bus_content.addWidget(bus_routing_group)
+        self.inline_bus_content = QSplitter()
+        self.inline_bus_content.setOrientation(Qt.Orientation.Horizontal)
+        self.inline_bus_content.setChildrenCollapsible(False)
+        self.inline_bus_content.addWidget(self.bus_routing_group)
         bus_status_panel = QWidget()
         bus_status_layout = QVBoxLayout(bus_status_panel)
         bus_status_layout.setContentsMargins(0, 0, 0, 0)
-        bus_status_layout.addWidget(bus_level_group)
-        bus_status_layout.addWidget(bus_validation_group)
+        bus_status_layout.addWidget(self.bus_level_group)
+        bus_status_layout.addWidget(self.bus_validation_group)
         bus_status_layout.addStretch(1)
-        inline_bus_content.addWidget(bus_status_panel)
-        inline_bus_content.setStretchFactor(0, 3)
-        inline_bus_content.setStretchFactor(1, 2)
-        inline_bus_layout.addWidget(inline_bus_content)
+        self.inline_bus_content.addWidget(bus_status_panel)
+        self.inline_bus_content.setStretchFactor(0, 3)
+        self.inline_bus_content.setStretchFactor(1, 2)
+        inline_bus_layout.addWidget(self.inline_bus_content)
 
-        audio_page = QWidget()
-        audio_page_layout = QVBoxLayout(audio_page)
-        audio_page_layout.setContentsMargins(0, 0, 0, 0)
-        audio_page_layout.setSpacing(12)
-        audio_top_splitter = QSplitter()
-        audio_top_splitter.setOrientation(Qt.Orientation.Horizontal)
-        audio_top_splitter.setChildrenCollapsible(False)
-        audio_top_splitter.addWidget(modulation_group)
-        audio_top_splitter.addWidget(loudness_group)
-        audio_top_splitter.setStretchFactor(0, 3)
-        audio_top_splitter.setStretchFactor(1, 2)
-        audio_page_layout.addWidget(audio_top_splitter)
-        audio_page_layout.addWidget(self.inline_bus_group)
-        audio_page_layout.addWidget(self.combo_group)
-        audio_page_layout.addStretch(1)
+        self.audio_top_splitter = QSplitter()
+        self.audio_top_splitter.setOrientation(Qt.Orientation.Horizontal)
+        self.audio_top_splitter.setChildrenCollapsible(False)
+        self.audio_top_splitter.addWidget(self.modulation_group)
+        self.audio_top_splitter.addWidget(self.loudness_group)
+        self.audio_top_splitter.setStretchFactor(0, 3)
+        self.audio_top_splitter.setStretchFactor(1, 2)
 
-        generation_settings_group = QGroupBox("生成设置")
-        generation_settings_layout = QFormLayout(generation_settings_group)
+        self.generation_settings_group = QGroupBox("生成设置")
+        generation_settings_layout = QFormLayout(self.generation_settings_group)
         export_root_row = QHBoxLayout()
         export_root_row.setContentsMargins(0, 0, 0, 0)
         export_root_row.setSpacing(8)
@@ -723,23 +811,21 @@ class MainWindow(QMainWindow):
         generation_settings_layout.addRow("源格式", self.source_audio_format_combo)
         generation_settings_layout.addRow("运行时格式", self.runtime_audio_format_combo)
 
-        build_group = QGroupBox("生成概览")
-        build_layout = QVBoxLayout(build_group)
+        self.build_overview_group = QGroupBox("生成概览")
+        build_layout = QVBoxLayout(self.build_overview_group)
         build_layout.addWidget(QLabel("休闲游戏推荐流程：WAV 源资源 -> OGG 运行时导出"))
         build_layout.addWidget(QLabel("建议交付：AudioData.json、AudioManifest.json、AudioEventID.cs 与轻量音频资源目录"))
         build_layout.addWidget(self.preview_export_diff_button)
         build_layout.addStretch(1)
 
-        generation_page = self._build_two_column_page([generation_settings_group], [build_group])
-
-        project_settings_group = QGroupBox("工程总览")
-        project_settings_layout = QFormLayout(project_settings_group)
+        self.project_settings_group = QGroupBox("工程总览")
+        project_settings_layout = QFormLayout(self.project_settings_group)
         project_settings_layout.addRow("默认总线", self.default_bus_combo)
         project_settings_layout.addRow("总线概况", self.project_bus_count_label)
         project_settings_layout.addRow("批量操作", self.apply_default_bus_button)
 
-        bus_browser_group = QGroupBox("总线浏览器")
-        bus_browser_layout = QVBoxLayout(bus_browser_group)
+        self.bus_browser_group = QGroupBox("总线浏览器")
+        bus_browser_layout = QVBoxLayout(self.bus_browser_group)
         bus_browser_actions = QHBoxLayout()
         bus_browser_actions.addWidget(self.project_bus_add_button)
         bus_browser_actions.addWidget(self.project_bus_remove_button)
@@ -747,8 +833,8 @@ class MainWindow(QMainWindow):
         bus_browser_layout.addWidget(self.project_bus_list)
         bus_browser_layout.addWidget(self.project_bus_default_label)
 
-        master_bus_group = QGroupBox("Master 总线")
-        master_bus_layout = QFormLayout(master_bus_group)
+        self.master_bus_group = QGroupBox("Master 总线")
+        master_bus_layout = QFormLayout(self.master_bus_group)
         master_bus_layout.addRow("总线名称", self.project_master_summary_label)
         master_bus_layout.addRow("基础音量（dB）", self.project_master_volume_spin)
         master_bus_layout.addRow("静音", self.project_master_mute_check)
@@ -756,46 +842,25 @@ class MainWindow(QMainWindow):
         master_bus_layout.addRow("输出表", self.project_master_effective_bar)
         master_bus_layout.addRow("说明", self.project_master_hint_label)
 
-        project_bus_overview_group = QGroupBox("总线工作区")
-        project_bus_overview_layout = QVBoxLayout(project_bus_overview_group)
+        self.project_bus_overview_group = QGroupBox("总线工作区")
+        project_bus_overview_layout = QVBoxLayout(self.project_bus_overview_group)
         project_bus_overview_layout.addWidget(self.project_bus_summary_label)
         project_bus_overview_layout.addWidget(self.project_bus_focus_audio_button)
 
         project_right_panel = QWidget()
         project_right_layout = QVBoxLayout(project_right_panel)
         project_right_layout.setContentsMargins(0, 0, 0, 0)
-        project_right_layout.addWidget(master_bus_group)
-        project_right_layout.addWidget(project_settings_group)
-        project_right_layout.addWidget(project_bus_overview_group)
+        project_right_layout.addWidget(self.master_bus_group)
+        project_right_layout.addWidget(self.project_settings_group)
+        project_right_layout.addWidget(self.project_bus_overview_group)
         project_right_layout.addStretch(1)
 
-        project_splitter = QSplitter()
-        project_splitter.setOrientation(Qt.Orientation.Horizontal)
-        project_splitter.setChildrenCollapsible(False)
-        project_splitter.addWidget(bus_browser_group)
-        project_splitter.addWidget(project_right_panel)
-        project_splitter.setStretchFactor(1, 1)
-
-        project_page = QWidget()
-        project_page_layout = QVBoxLayout(project_page)
-        project_page_layout.setContentsMargins(0, 0, 0, 0)
-        project_page_layout.setSpacing(12)
-        project_page_layout.addWidget(hero_panel)
-        project_page_layout.addWidget(project_splitter)
-
-        self.property_tabs = QTabWidget()
-        self.property_tabs.addTab(self._wrap_scrollable_page(event_page), "事件")
-        self.property_tabs.addTab(self._wrap_scrollable_page(audio_page), "音频属性")
-        self.property_tabs.addTab(self._wrap_scrollable_page(generation_page), "生成")
-        self.property_tabs.addTab(self._wrap_scrollable_page(project_page), "工程")
-
-        self.property_group = QWidget()
-        property_layout = QVBoxLayout(self.property_group)
-        property_layout.setContentsMargins(0, 0, 0, 0)
-        property_layout.setSpacing(8)
-        property_layout.addWidget(object_header)
-        property_layout.addWidget(reference_group)
-        property_layout.addWidget(self.property_tabs)
+        self.project_splitter = QSplitter()
+        self.project_splitter.setOrientation(Qt.Orientation.Horizontal)
+        self.project_splitter.setChildrenCollapsible(False)
+        self.project_splitter.addWidget(self.bus_browser_group)
+        self.project_splitter.addWidget(project_right_panel)
+        self.project_splitter.setStretchFactor(1, 1)
 
         clip_list_group = QGroupBox("片段列表")
         clip_list_layout = QVBoxLayout(clip_list_group)
@@ -852,8 +917,8 @@ class MainWindow(QMainWindow):
         batch_guide_layout.addWidget(QLabel("如果只是想确认导出差异，请切到“生成预览”，避免在批处理页塞入过多只读信息。"))
         batch_guide_layout.addStretch(1)
 
-        build_preview_group = QGroupBox("生成预览")
-        build_preview_layout = QVBoxLayout(build_preview_group)
+        self.build_preview_group = QGroupBox("生成预览")
+        build_preview_layout = QVBoxLayout(self.build_preview_group)
         build_preview_layout.addWidget(self.build_preview_output)
 
         self.content_top_splitter = QSplitter()
@@ -868,38 +933,64 @@ class MainWindow(QMainWindow):
         preview_page = QWidget()
         preview_layout = QVBoxLayout(preview_page)
         preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.addWidget(build_preview_group)
+        preview_layout.setSpacing(10)
+        preview_layout.addWidget(self._build_mode_surface_card("生成预览入口", "这里显示当前导出差异与构建预览的镜像视图；正式交付仍在构建交付工作区完成。"))
+        preview_shortcut_button = QPushButton("进入构建交付")
+        preview_shortcut_button.clicked.connect(lambda: self._activate_workspace_mode("build"))
+        preview_layout.addWidget(preview_shortcut_button)
+        preview_mirror_group = QGroupBox("当前导出预览")
+        preview_mirror_layout = QVBoxLayout(preview_mirror_group)
+        preview_mirror_layout.addWidget(self.resources_preview_output)
+        preview_layout.addWidget(preview_mirror_group, 1)
 
         self.contents_tabs = QTabWidget()
         self.contents_tabs.addTab(self.content_top_splitter, load_app_icon("content"), "片段编排")
         self.contents_tabs.addTab(self._wrap_scrollable_page(batch_page), load_app_icon("audio"), "批处理")
         self.contents_tabs.addTab(self._wrap_scrollable_page(preview_page), load_app_icon("generate"), "生成预览")
 
-        inspector_panel = QWidget()
-        inspector_panel_layout = QVBoxLayout(inspector_panel)
-        inspector_panel_layout.addWidget(self._build_panel_header("属性编辑器", "property"))
-        inspector_panel_layout.addWidget(self.property_group)
-
-        contents_panel = QWidget()
-        contents_panel_layout = QVBoxLayout(contents_panel)
-        contents_panel_layout.addWidget(self._build_panel_header("内容编辑器", "contents"))
-        contents_panel_layout.addWidget(self.contents_tabs)
-
-        loudness_view = QWidget()
-        loudness_view_layout = QVBoxLayout(loudness_view)
+        self.loudness_view = QWidget()
+        loudness_view_layout = QVBoxLayout(self.loudness_view)
         loudness_view_layout.addWidget(self._build_panel_header("响度监视器", "meter"))
         loudness_view_layout.addWidget(self._build_loudness_monitor_view())
 
+        self.property_tabs = QTabWidget()
+        self.property_tabs.addTab(QWidget(), "事件")
+        self.property_tabs.addTab(QWidget(), "音频属性")
+        self.property_tabs.addTab(QWidget(), "生成")
+        self.property_tabs.addTab(QWidget(), "工程")
+        self.property_tabs.hide()
+
         self.editor_tabs = QTabWidget()
-        self.editor_tabs.addTab(inspector_panel, load_app_icon("event"), "属性编辑器")
-        self.editor_tabs.addTab(contents_panel, load_app_icon("content"), "内容编辑器")
-        self.editor_tabs.addTab(loudness_view, load_app_icon("audio"), "响度监视器")
+        self.editor_tabs.addTab(QWidget(), load_app_icon("event"), "属性编辑器")
+        self.editor_tabs.addTab(QWidget(), load_app_icon("content"), "内容编辑器")
+        self.editor_tabs.addTab(QWidget(), load_app_icon("audio"), "响度监视器")
+        self.editor_tabs.hide()
+
+        self.events_workspace = self._build_events_workspace()
+        self.resources_workspace = self._build_resources_workspace()
+        self.buses_workspace = self._build_buses_workspace()
+        self.build_workspace = self._build_build_workspace()
+        self.validation_workspace = self._build_validation_workspace()
+        self.property_group = self.events_workspace
+
+        self.report_pages = QStackedWidget()
+        self._report_page_titles = ["当前：日志", "当前：校验报告", "当前：构建报告", "当前：响度扫描"]
+        self._report_pages: dict[int, QWidget] = {
+            0: self._build_log_results_page(),
+            1: self._build_validation_results_page(),
+            2: self._build_build_results_page(),
+            3: self._build_loudness_results_page(),
+        }
+        for index in range(4):
+            self.report_pages.addWidget(self._report_pages[index])
+        self._active_report_index = 0
 
         self.report_tabs = QTabWidget()
-        self.report_tabs.addTab(self.log_output, "日志")
-        self.report_tabs.addTab(self._build_report_center_page(self.validation_summary_label, self.validation_issue_list, self.validation_report_output), "校验报告")
-        self.report_tabs.addTab(self._build_report_center_page(self.build_summary_label, self.build_issue_list, self.build_report_output), "构建报告")
-        self.report_tabs.addTab(self._build_report_center_page(self.loudness_summary_label, self.loudness_issue_list, self.loudness_report_output), "响度扫描")
+        self.report_tabs.addTab(QWidget(), "日志")
+        self.report_tabs.addTab(QWidget(), "校验报告")
+        self.report_tabs.addTab(QWidget(), "构建报告")
+        self.report_tabs.addTab(QWidget(), "响度扫描")
+        self.report_tabs.hide()
 
         self.report_header = QFrame()
         self.report_header.setObjectName("ReportHeader")
@@ -915,13 +1006,36 @@ class MainWindow(QMainWindow):
         report_header_layout.addWidget(self._build_report_jump_button("构建", 2))
         report_header_layout.addWidget(self._build_report_jump_button("扫描", 3))
 
-        log_panel = QWidget()
-        log_panel.setMinimumHeight(self._minimum_report_panel_height)
-        log_panel_layout = QVBoxLayout(log_panel)
-        log_panel_layout.addWidget(self._build_panel_header("捕获日志", "log"))
-        log_panel_layout.addWidget(self.report_header)
-        log_panel_layout.addWidget(self.report_tabs)
-        self.log_panel = log_panel
+        self.results_center_panel = self._build_results_center_panel()
+        self.activity_panel = self._build_activity_panel()
+
+        self._workspace_mode_pages: dict[str, QWidget] = {}
+        self._workspace_mode_hosts: dict[str, QVBoxLayout] = {}
+        self._workspace_shared_surfaces: dict[str, QWidget] = {
+            "results": self.results_center_panel,
+            "validation": self.validation_workspace,
+        }
+        self.workspace_mode_stack.addWidget(self._build_welcome_page())
+        self._workspace_mode_pages["home"] = self.workspace_mode_stack.widget(self.workspace_mode_stack.count() - 1)
+        for mode, title, description in [
+            ("events", "事件设计", "以事件参数、触发控制和响度监视作为专属工作区，不再依赖旧属性编辑器。"),
+            ("resources", "资源整理", "集中处理片段编排、批处理和生成预览，不再从属性页反复跳转。"),
+            ("buses", "总线与混音", "将当前事件总线、总线浏览器和 Master 输出整合为独立混音工作区。"),
+            ("validation", "校验修复", "直接进入问题中心，按校验结果修复对象与资源。"),
+            ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
+            ("results", "结果中心", "统一查看日志、校验报告、构建报告和响度扫描，作为收尾页使用。"),
+            ("validation-results", "校验结果", "直接进入校验专页，适合从左侧导航快速回看问题清单并继续修复。"),
+            ("build-results", "构建结果", "直接进入构建结果专页，集中查看构建摘要、问题定位和交付预览。"),
+            ("loudness-results", "响度结果", "直接进入响度专页，查看超标项、条目细节和完整扫描输出。"),
+        ]:
+            page, host_layout = self._build_workspace_mode_page(title, description)
+            self._workspace_mode_pages[mode] = page
+            self._workspace_mode_hosts[mode] = host_layout
+            self.workspace_mode_stack.addWidget(page)
+        self._workspace_mode_hosts["events"].addWidget(self.events_workspace)
+        self._workspace_mode_hosts["resources"].addWidget(self.resources_workspace)
+        self._workspace_mode_hosts["buses"].addWidget(self.buses_workspace)
+        self._workspace_mode_hosts["build"].addWidget(self.build_workspace)
 
         self.workspace_status_bar = QFrame()
         self.workspace_status_bar.setObjectName("WorkspaceStatusBar")
@@ -961,7 +1075,7 @@ class MainWindow(QMainWindow):
         self.explorer_window_layout = explorer_window_layout
         self.explorer_window.closeRequested.connect(self.attach_explorer_panel)
         self.main_splitter.addWidget(self.explorer_panel)
-        self.main_splitter.addWidget(self.editor_tabs)
+        self.main_splitter.addWidget(self.workspace_mode_stack)
         self.main_splitter.setStretchFactor(1, 1)
         self._set_main_splitter_sizes(self._default_main_splitter_sizes)
 
@@ -970,19 +1084,892 @@ class MainWindow(QMainWindow):
         self.workspace_splitter.setChildrenCollapsible(False)
         self.workspace_splitter.setHandleWidth(10)
         self.workspace_splitter.addWidget(self.main_splitter)
-        self.workspace_splitter.addWidget(log_panel)
+        self.workspace_splitter.addWidget(self.activity_panel)
         self.workspace_splitter.setStretchFactor(0, 8)
         self.workspace_splitter.setStretchFactor(1, 1)
         self._set_workspace_splitter_sizes(self._default_workspace_splitter_sizes)
 
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(8, 8, 8, 8)
-        container_layout.setSpacing(8)
-        container_layout.addWidget(self.workspace_status_bar)
-        container_layout.addWidget(self.workspace_splitter)
-        self.setCentralWidget(container)
+        workspace_container = QWidget()
+        workspace_container_layout = QVBoxLayout(workspace_container)
+        workspace_container_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_container_layout.setSpacing(8)
+        workspace_container_layout.addWidget(self.workspace_status_bar)
+        workspace_container_layout.addWidget(self.workspace_splitter)
+
+        shell = AppShell(self.top_app_bar, self.task_sidebar, workspace_container)
+        self.setCentralWidget(shell)
+        self._activate_workspace_mode(self._active_workspace_mode)
+        self.task_sidebar.set_active_mode(self._active_workspace_mode)
         self._build_settings_dialog()
+
+    def _build_top_app_bar(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("TopAppBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+
+        branding = QWidget()
+        branding_layout = QVBoxLayout(branding)
+        branding_layout.setContentsMargins(0, 0, 0, 0)
+        branding_layout.setSpacing(2)
+        self.shell_product_label.setProperty("role", "appTitle")
+        self.shell_project_title_label.setProperty("role", "appProjectTitle")
+        self.shell_project_path_label.setProperty("role", "appProjectPath")
+        branding_layout.addWidget(self.shell_product_label)
+        branding_layout.addWidget(self.shell_project_title_label)
+        branding_layout.addWidget(self.shell_project_path_label)
+
+        mode_summary = QWidget()
+        mode_summary_layout = QVBoxLayout(mode_summary)
+        mode_summary_layout.setContentsMargins(0, 0, 0, 0)
+        mode_summary_layout.setSpacing(2)
+        mode_title_caption = QLabel("当前工作模式")
+        mode_title_caption.setProperty("role", "appMetaCaption")
+        self.shell_mode_title_label.setProperty("role", "appModeTitle")
+        mode_summary_layout.addWidget(mode_title_caption)
+        mode_summary_layout.addWidget(self.shell_mode_title_label)
+
+        search_row = QWidget()
+        search_row_layout = QHBoxLayout(search_row)
+        search_row_layout.setContentsMargins(0, 0, 0, 0)
+        search_row_layout.setSpacing(6)
+        search_row_layout.addWidget(self.global_search_edit, 1)
+        search_row_layout.addWidget(self.global_search_button)
+
+        primary_actions = QWidget()
+        primary_actions_layout = QHBoxLayout(primary_actions)
+        primary_actions_layout.setContentsMargins(0, 0, 0, 0)
+        primary_actions_layout.setSpacing(8)
+        for button in [
+            self.new_project_button,
+            self.open_project_button,
+            self.save_project_button,
+            self.validate_button,
+            self.build_button,
+            self.command_button,
+            self.settings_button,
+        ]:
+            primary_actions_layout.addWidget(button)
+        self.toolbar_dirty_label.setProperty("role", "topStatusChip")
+        primary_actions_layout.addWidget(self.toolbar_dirty_label)
+
+        layout.addWidget(branding)
+        layout.addSpacing(8)
+        layout.addWidget(mode_summary)
+        layout.addSpacing(12)
+        layout.addWidget(search_row, 1)
+        layout.addWidget(primary_actions)
+        return bar
+
+    def _build_workspace_mode_page(self, title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        intro_card = QFrame()
+        intro_card.setObjectName("ModeIntroCard")
+        intro_layout = QVBoxLayout(intro_card)
+        intro_layout.setContentsMargins(16, 14, 16, 14)
+        intro_layout.setSpacing(4)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "modeCardTitle")
+        description_label = QLabel(description)
+        description_label.setWordWrap(True)
+        description_label.setProperty("role", "modeCardDescription")
+        intro_layout.addWidget(title_label)
+        intro_layout.addWidget(description_label)
+
+        host = QWidget()
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+
+        layout.addWidget(intro_card)
+        layout.addWidget(host, 1)
+        return page, host_layout
+
+    def _build_mode_surface_card(self, title: str, description: str, *, role: str = "modeCardDescription") -> QFrame:
+        card = QFrame()
+        card.setObjectName("ModeIntroCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(6)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "modeCardTitle")
+        description_label = QLabel(description)
+        description_label.setWordWrap(True)
+        description_label.setProperty("role", role)
+        layout.addWidget(title_label)
+        layout.addWidget(description_label)
+        return card
+
+    def _build_workspace_action_bar(
+        self,
+        title: str,
+        summary_label: QLabel,
+        actions: list[tuple[str, object, str]],
+    ) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("WorkspaceActionBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        text_column = QVBoxLayout()
+        text_column.setContentsMargins(0, 0, 0, 0)
+        text_column.setSpacing(2)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "workspaceSectionTitle")
+        summary_label.setProperty("role", "workspaceSectionSummary")
+        summary_label.setWordWrap(True)
+        text_column.addWidget(title_label)
+        text_column.addWidget(summary_label)
+        layout.addLayout(text_column, 1)
+
+        for label, handler, icon_name in actions:
+            button = QPushButton(label)
+            button.setProperty("role", "workspaceActionButton")
+            icon = load_app_icon(icon_name)
+            if not icon.isNull():
+                button.setIcon(icon)
+            button.clicked.connect(handler)
+            layout.addWidget(button)
+        return bar
+
+    def _build_workspace_shortcut_grid(self, shortcut_specs: list[tuple[str, object, str, int, int]]) -> QGridLayout:
+        shortcut_grid = QGridLayout()
+        shortcut_grid.setContentsMargins(0, 0, 0, 0)
+        shortcut_grid.setHorizontalSpacing(8)
+        shortcut_grid.setVerticalSpacing(8)
+        for label, handler, icon_name, row, column in shortcut_specs:
+            button = QPushButton(label)
+            button.setProperty("role", "workspaceShortcutButton")
+            icon = load_app_icon(icon_name)
+            if not icon.isNull():
+                button.setIcon(icon)
+            button.clicked.connect(handler)
+            shortcut_grid.addWidget(button, row, column)
+        return shortcut_grid
+
+    def _build_workspace_overview_card(
+        self,
+        title: str,
+        summary_label: QLabel,
+        shortcut_specs: list[tuple[str, object, str, int, int]] | None = None,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("WorkspaceOverviewCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "workspaceSectionTitle")
+        summary_label.setProperty("role", "workspaceSectionSummary")
+        summary_label.setWordWrap(True)
+        layout.addWidget(title_label)
+        layout.addWidget(summary_label)
+        if shortcut_specs:
+            layout.addLayout(self._build_workspace_shortcut_grid(shortcut_specs))
+        return card
+
+    def _build_workspace_note_card(self, title: str, lines: list[str]) -> QFrame:
+        card = QFrame()
+        card.setObjectName("WorkspaceOverviewCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "workspaceSectionTitle")
+        layout.addWidget(title_label)
+        for line in lines:
+            label = QLabel(line)
+            label.setWordWrap(True)
+            label.setProperty("role", "workspaceChecklistLine")
+            layout.addWidget(label)
+        return card
+
+    def _build_events_workspace(self) -> QWidget:
+        self.events_workspace_tabs = QTabWidget()
+        design_page = self._build_two_column_page(
+            [self.event_general_group, self.event_behavior_group, self.notes_group],
+            [self.modulation_group, self.combo_group, self.loudness_group],
+        )
+        self.event_design_scroll = self._wrap_scrollable_page(design_page)
+        self.events_workspace_tabs.addTab(self.event_design_scroll, load_app_icon("event"), "事件参数")
+        self.events_workspace_tabs.addTab(self.loudness_view, load_app_icon("audio"), "响度监视器")
+
+        overview_panel = self._build_event_overview_panel()
+        event_splitter = QSplitter()
+        event_splitter.setOrientation(Qt.Orientation.Horizontal)
+        event_splitter.setChildrenCollapsible(False)
+        event_splitter.addWidget(overview_panel)
+        event_splitter.addWidget(self.events_workspace_tabs)
+        event_splitter.setStretchFactor(0, 2)
+        event_splitter.setStretchFactor(1, 5)
+
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_action_bar(
+                "事件设计",
+                self.events_workspace_status_label,
+                [
+                    ("新建事件", self.createEventRequested.emit, "event"),
+                    ("试听对象", self.previewRequested.emit, "play"),
+                    ("资源整理", lambda: self._activate_workspace_mode("resources"), "content"),
+                    ("跟随总线", self._follow_current_event_bus, "bus"),
+                ],
+            )
+        )
+        layout.addWidget(event_splitter, 1)
+        return workspace
+
+    def _build_event_overview_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "事件概览",
+                self.event_overview_hint_label,
+                [
+                    ("参数画布", lambda: self.events_workspace_tabs.setCurrentIndex(0), "event", 0, 0),
+                    ("响度监视", self.show_loudness_view, "audio", 0, 1),
+                    ("资源片段", lambda: self.set_active_contents_category("片段"), "content", 1, 0),
+                    ("校验结果", lambda: self._activate_workspace_mode("validation-results"), "report", 1, 1),
+                ],
+            )
+        )
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "编辑节奏",
+                [
+                    "先确定对象命名、总线和播放机制，再处理随机范围与连击逻辑。",
+                    "响度监视器保持事件内联，便于边试听边校准。",
+                ],
+            )
+        )
+        layout.addWidget(self.object_header_frame)
+        layout.addWidget(self.reference_group)
+        layout.addStretch(1)
+        return panel
+
+    def _build_resources_overview_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "资源工作流",
+                self.resources_overview_hint_label,
+                [
+                    ("片段编排", lambda: self.set_active_contents_category("片段"), "content", 0, 0),
+                    ("批处理", lambda: self.set_active_contents_category("批处理"), "audio", 0, 1),
+                    ("生成预览", lambda: self.set_active_contents_category("生成"), "generate", 1, 0),
+                    ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 1, 1),
+                ],
+            )
+        )
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "整理建议",
+                [
+                    "片段编排负责单片段精修，批处理只做成组修改。",
+                    "生成预览显示当前导出差异镜像，正式交付在构建页完成。",
+                ],
+            )
+        )
+        layout.addStretch(1)
+        return panel
+
+    def _build_resources_workspace(self) -> QWidget:
+        overview_panel = self._build_resources_overview_panel()
+        workspace_splitter = QSplitter()
+        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
+        workspace_splitter.setChildrenCollapsible(False)
+        workspace_splitter.addWidget(overview_panel)
+        workspace_splitter.addWidget(self.contents_tabs)
+        workspace_splitter.setStretchFactor(0, 2)
+        workspace_splitter.setStretchFactor(1, 5)
+
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_action_bar(
+                "资源整理",
+                self.resources_workspace_status_label,
+                [
+                    ("导入音频", self._request_clip_import, "content"),
+                    ("批量权重", self._request_bulk_weight, "audio"),
+                    ("生成预览", lambda: self.set_active_contents_category("生成"), "generate"),
+                    ("导出差异", self.previewExportDiffRequested.emit, "report"),
+                ],
+            )
+        )
+        layout.addWidget(workspace_splitter, 1)
+        return workspace
+
+    def _build_buses_overview_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self.hero_panel)
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "混音导航",
+                self.buses_overview_hint_label,
+                [
+                    ("当前事件总线", self._follow_current_event_bus, "bus", 0, 0),
+                    ("新建总线", self._request_add_project_bus, "bus", 0, 1),
+                    ("设为默认", self._set_current_bus_as_default, "generate", 1, 0),
+                    ("回到事件", lambda: self._activate_workspace_mode("events"), "event", 1, 1),
+                ],
+            )
+        )
+        layout.addWidget(self.project_settings_group)
+        layout.addStretch(1)
+        return panel
+
+    def _build_buses_workspace(self) -> QWidget:
+        overview_panel = self._build_buses_overview_panel()
+        bus_surface = QSplitter()
+        bus_surface.setOrientation(Qt.Orientation.Vertical)
+        bus_surface.setChildrenCollapsible(False)
+        bus_surface.addWidget(self.inline_bus_group)
+        bus_surface.addWidget(self.project_splitter)
+        bus_surface.setStretchFactor(0, 2)
+        bus_surface.setStretchFactor(1, 3)
+
+        workspace_splitter = QSplitter()
+        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
+        workspace_splitter.setChildrenCollapsible(False)
+        workspace_splitter.addWidget(overview_panel)
+        workspace_splitter.addWidget(bus_surface)
+        workspace_splitter.setStretchFactor(0, 2)
+        workspace_splitter.setStretchFactor(1, 5)
+
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_action_bar(
+                "总线与混音",
+                self.buses_workspace_status_label,
+                [
+                    ("新建总线", self._request_add_project_bus, "bus"),
+                    ("设为默认", self._set_current_bus_as_default, "generate"),
+                    ("挂到 Master", self._route_current_bus_to_master, "route"),
+                    ("回到事件", lambda: self._activate_workspace_mode("events"), "event"),
+                ],
+            )
+        )
+        layout.addWidget(workspace_splitter, 1)
+        return workspace
+
+    def _build_build_overview_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "交付流程",
+                self.build_overview_hint_label,
+                [
+                    ("导出设置", lambda: self._activate_workspace_mode("build"), "generate", 0, 0),
+                    ("导出差异", self.previewExportDiffRequested.emit, "report", 0, 1),
+                    ("构建结果", lambda: self._activate_workspace_mode("build-results"), "report", 1, 0),
+                    ("校验修复", lambda: self._activate_workspace_mode("validation"), "validate", 1, 1),
+                ],
+            )
+        )
+        layout.addWidget(self.generation_settings_group)
+        layout.addWidget(self.build_overview_group)
+        layout.addStretch(1)
+        return panel
+
+    def _build_build_workspace(self) -> QWidget:
+        overview_panel = self._build_build_overview_panel()
+        delivery_followup = self._build_workspace_note_card(
+            "交付回看",
+            [
+                "生成预览显示完整导出文本，便于在构建前核对差异。",
+                "构建完成后直接切到构建结果页查看摘要与问题定位。",
+            ],
+        )
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+        right_layout.addWidget(self.build_preview_group, 1)
+        right_layout.addWidget(delivery_followup)
+
+        workspace_splitter = QSplitter()
+        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
+        workspace_splitter.setChildrenCollapsible(False)
+        workspace_splitter.addWidget(overview_panel)
+        workspace_splitter.addWidget(right_panel)
+        workspace_splitter.setStretchFactor(0, 2)
+        workspace_splitter.setStretchFactor(1, 5)
+
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_action_bar(
+                "构建交付",
+                self.build_workspace_status_label,
+                [
+                    ("校验", self.validate_button.click, "validate"),
+                    ("导出差异", self.previewExportDiffRequested.emit, "report"),
+                    ("构建导出", self.build_button.click, "generate"),
+                    ("查看结果", lambda: self._activate_workspace_mode("build-results"), "report"),
+                ],
+            )
+        )
+        layout.addWidget(workspace_splitter, 1)
+        return workspace
+
+    def _build_validation_overview_panel(self, filter_card: QWidget) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "校验工作流",
+                self.validation_overview_hint_label,
+                [
+                    ("重新校验", self.validate_button.click, "validate", 0, 0),
+                    ("定位问题", self._locate_selected_validation_issue, "report", 0, 1),
+                    ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 1, 0),
+                    ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 1, 1),
+                ],
+            )
+        )
+        layout.addWidget(filter_card)
+        layout.addWidget(self.validation_filter_status_label)
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "修复原则",
+                [
+                    "先处理错误，再看警告；信息级问题只在需要时回看。",
+                    "这里负责聚焦和跳转，不继续堆复杂修复逻辑。",
+                ],
+            )
+        )
+        layout.addStretch(1)
+        return panel
+
+    def _build_validation_workspace(self) -> QWidget:
+        filter_card = QFrame()
+        filter_card.setObjectName("ModeIntroCard")
+        filter_layout = QHBoxLayout(filter_card)
+        filter_layout.setContentsMargins(14, 12, 14, 12)
+        filter_layout.setSpacing(8)
+        filter_layout.addWidget(QLabel("问题级别"))
+        filter_layout.addWidget(self.validation_filter_severity_combo)
+        filter_layout.addWidget(QLabel("关键字"))
+        filter_layout.addWidget(self.validation_filter_keyword_edit, 1)
+        filter_layout.addWidget(self.validation_filter_reset_button)
+        filter_layout.addWidget(self.validation_revalidate_button)
+        filter_layout.addWidget(self.validation_locate_button)
+
+        workspace_splitter = QSplitter()
+        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
+        workspace_splitter.setChildrenCollapsible(False)
+        workspace_splitter.addWidget(self._build_validation_overview_panel(filter_card))
+        workspace_splitter.addWidget(self._build_report_center_page(self.validation_summary_label, self.validation_issue_list, self.validation_report_output))
+        workspace_splitter.setStretchFactor(0, 2)
+        workspace_splitter.setStretchFactor(1, 5)
+
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self._build_mode_surface_card("校验修复工作流", "把筛选、定位和结果细节拆分成左右双栏，减少来回切页。"))
+        layout.addWidget(workspace_splitter, 1)
+        return workspace
+
+    def _current_property_scroll_widget(self) -> QWidget | None:
+        index = self.property_tabs.currentIndex()
+        if index == 0:
+            return self.event_design_scroll
+        if index in {1, 3}:
+            return self.inline_bus_group
+        if index == 2:
+            return self.generation_settings_group
+        return None
+
+    def _build_welcome_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        hero = QFrame()
+        hero.setObjectName("WelcomeHero")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(22, 20, 22, 20)
+        hero_layout.setSpacing(8)
+        title = QLabel("欢迎进入新的 AudioForge AppShell")
+        title.setProperty("role", "welcomeTitle")
+        subtitle = QLabel("现在的首屏不再直接把所有工具堆在一起，而是把入口、流程和结果收口到清晰的页面层。")
+        subtitle.setWordWrap(True)
+        subtitle.setProperty("role", "welcomeDescription")
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 6, 0, 0)
+        action_row.setSpacing(8)
+        new_button = QPushButton("新建工程")
+        open_button = QPushButton("打开工程")
+        events_button = QPushButton("进入事件设计")
+        results_button = QPushButton("查看结果中心")
+        new_button.clicked.connect(self.new_project_button.click)
+        open_button.clicked.connect(self.open_project_button.click)
+        events_button.clicked.connect(lambda: self._activate_workspace_mode("events"))
+        results_button.clicked.connect(lambda: self._activate_workspace_mode("results"))
+        action_row.addWidget(new_button)
+        action_row.addWidget(open_button)
+        action_row.addWidget(events_button)
+        action_row.addWidget(results_button)
+        action_row.addStretch(1)
+        hero_layout.addWidget(title)
+        hero_layout.addWidget(subtitle)
+        hero_layout.addLayout(action_row)
+
+        project_snapshot = QFrame()
+        project_snapshot.setObjectName("ModeIntroCard")
+        project_snapshot_layout = QVBoxLayout(project_snapshot)
+        project_snapshot_layout.setContentsMargins(16, 14, 16, 14)
+        project_snapshot_layout.setSpacing(6)
+        snapshot_title = QLabel("当前工程")
+        snapshot_title.setProperty("role", "modeCardTitle")
+        project_snapshot_layout.addWidget(snapshot_title)
+        project_snapshot_layout.addWidget(self.welcome_project_title_label)
+        project_snapshot_layout.addWidget(self.welcome_project_path_label)
+        project_snapshot_layout.addWidget(self.welcome_dirty_label)
+
+        quick_start = self._build_workspace_note_card(
+            "快速进入",
+            [
+                "资源整理：先批量导入、清洗资源键，再切到事件设计。",
+                "总线与混音：集中看事件总线、父子路由和 Master 输出。",
+                "结果中心：所有日志、校验、构建和响度结果都统一收口到这里。",
+            ],
+        )
+        mode_map = self._build_workspace_note_card(
+            "工作区地图",
+            [
+                "事件设计负责对象参数与响度校准。",
+                "资源整理负责片段编排、批处理和预览镜像。",
+                "构建交付负责真实导出与交付回看。",
+            ],
+        )
+        welcome_splitter = QSplitter()
+        welcome_splitter.setOrientation(Qt.Orientation.Horizontal)
+        welcome_splitter.setChildrenCollapsible(False)
+        left_column = QWidget()
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+        left_layout.addWidget(project_snapshot)
+        left_layout.addWidget(mode_map)
+        left_layout.addStretch(1)
+        right_column = QWidget()
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+        right_layout.addWidget(quick_start)
+        right_layout.addWidget(
+            self._build_workspace_overview_card(
+                "首屏快捷跳转",
+                QLabel("直接进入核心工作区，避免从首页层层钻取。"),
+                [
+                    ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 0, 0),
+                    ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 0, 1),
+                    ("总线与混音", lambda: self._activate_workspace_mode("buses"), "bus", 1, 0),
+                    ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 1, 1),
+                ],
+            )
+        )
+        right_layout.addStretch(1)
+        welcome_splitter.addWidget(left_column)
+        welcome_splitter.addWidget(right_column)
+        welcome_splitter.setStretchFactor(0, 2)
+        welcome_splitter.setStretchFactor(1, 3)
+
+        layout.addWidget(hero)
+        layout.addWidget(welcome_splitter, 1)
+        layout.addStretch(1)
+        return self._wrap_scrollable_page(page)
+
+    def _build_log_results_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self._build_mode_surface_card("日志中心", "集中查看运行日志、导入反馈和交付链路输出；当没有问题时，这里主要承担追踪和回溯职责。"))
+        results_splitter = QSplitter()
+        results_splitter.setOrientation(Qt.Orientation.Horizontal)
+        results_splitter.setChildrenCollapsible(False)
+        results_splitter.addWidget(
+            self._build_workspace_note_card(
+                "日志用途",
+                [
+                    "导入反馈、构建输出和异常日志都统一在这里回看。",
+                    "如果日志已经定位到对象，可从左侧导航切回对应工作区继续修订。",
+                ],
+            )
+        )
+        log_group = QGroupBox("运行日志")
+        log_layout = QVBoxLayout(log_group)
+        log_layout.addWidget(self.log_output)
+        results_splitter.addWidget(log_group)
+        results_splitter.setStretchFactor(0, 2)
+        results_splitter.setStretchFactor(1, 5)
+        layout.addWidget(results_splitter, 1)
+        return page
+
+    def _build_validation_results_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self._build_mode_surface_card("校验结果入口", "校验问题已经收口到“校验修复”工作流页。你仍然可以从结果导航直接进入那里继续修复。"))
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "继续修复",
+                QLabel("结果专页只保留回看入口，真正的筛选与定位动作集中在校验修复页。"),
+                [
+                    ("进入校验修复", lambda: self._activate_workspace_mode("validation"), "validate", 0, 0),
+                    ("回到事件设计", lambda: self._activate_workspace_mode("events"), "event", 0, 1),
+                ],
+            )
+        )
+        layout.addStretch(1)
+        return page
+
+    def _build_build_results_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self._build_mode_surface_card("构建结果", "将构建摘要、问题定位和完整输出固定为交付专页，不再和其他结果共享同一组 tab。"))
+        top_splitter = QSplitter()
+        top_splitter.setOrientation(Qt.Orientation.Horizontal)
+        top_splitter.setChildrenCollapsible(False)
+        top_splitter.addWidget(self._build_report_center_page(self.build_summary_label, self.build_issue_list, self.build_report_output))
+        preview_group = QGroupBox("交付预览")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_layout.addWidget(self.build_preview_output)
+        top_splitter.addWidget(preview_group)
+        top_splitter.setStretchFactor(0, 3)
+        top_splitter.setStretchFactor(1, 2)
+        layout.addWidget(top_splitter, 1)
+        return page
+
+    def _build_loudness_results_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self._build_mode_surface_card("响度结果", "把超标项、条目细节和扫描输出固定成独立结果页，便于与事件修订来回切换。"))
+        loudness_splitter = QSplitter()
+        loudness_splitter.setOrientation(Qt.Orientation.Horizontal)
+        loudness_splitter.setChildrenCollapsible(False)
+        loudness_splitter.addWidget(
+            self._build_workspace_note_card(
+                "扫描回路",
+                [
+                    "先看超标项，再回到事件设计做音量或随机范围修订。",
+                    "响度专页负责结论回看，参数调整仍在事件工作区完成。",
+                ],
+            )
+        )
+        loudness_splitter.addWidget(self._build_report_center_page(self.loudness_summary_label, self.loudness_issue_list, self.loudness_report_output))
+        loudness_splitter.setStretchFactor(0, 2)
+        loudness_splitter.setStretchFactor(1, 5)
+        layout.addWidget(loudness_splitter, 1)
+        return page
+
+    def _build_results_overview_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "结果导航",
+                self.results_overview_hint_label,
+                [
+                    ("日志", lambda: self.show_report_tab(0), "report", 0, 0),
+                    ("校验", lambda: self.show_report_tab(1), "validate", 0, 1),
+                    ("构建", lambda: self.show_report_tab(2), "generate", 1, 0),
+                    ("响度", lambda: self.show_report_tab(3), "audio", 1, 1),
+                ],
+            )
+        )
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "收尾建议",
+                [
+                    "先看校验和构建，再确认响度结果，最后回日志追踪链路。",
+                    "结果页用于收尾与回看，不再承担编辑动作本身。",
+                ],
+            )
+        )
+        layout.addStretch(1)
+        return panel
+
+    def _build_results_center_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self._build_panel_header("结果中心", "log"))
+        workspace_splitter = QSplitter()
+        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
+        workspace_splitter.setChildrenCollapsible(False)
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        right_layout.addWidget(self.report_header)
+        right_layout.addWidget(self.report_pages, 1)
+        workspace_splitter.addWidget(self._build_results_overview_panel())
+        workspace_splitter.addWidget(right_panel)
+        workspace_splitter.setStretchFactor(0, 2)
+        workspace_splitter.setStretchFactor(1, 5)
+        layout.addWidget(workspace_splitter, 1)
+        return panel
+
+    def _build_activity_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setMinimumHeight(self._minimum_report_panel_height)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self._build_panel_header("活动与结果入口", "log"))
+
+        body = QFrame()
+        body.setObjectName("ActivityPanel")
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(12, 10, 12, 10)
+        body_layout.setSpacing(10)
+
+        text_column = QVBoxLayout()
+        text_column.setContentsMargins(0, 0, 0, 0)
+        text_column.setSpacing(4)
+        self.activity_summary_label.setProperty("role", "modeCardTitle")
+        self.activity_hint_label.setProperty("role", "modeCardDescription")
+        self.activity_hint_label.setWordWrap(True)
+        text_column.addWidget(self.activity_summary_label)
+        text_column.addWidget(self.activity_hint_label)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(8)
+        results_button = QPushButton("结果中心")
+        validate_button = QPushButton("校验结果")
+        build_button = QPushButton("构建结果")
+        loudness_button = QPushButton("响度结果")
+        results_button.clicked.connect(lambda: self._activate_workspace_mode("results"))
+        validate_button.clicked.connect(lambda: self.show_report_tab(1))
+        build_button.clicked.connect(lambda: self.show_report_tab(2))
+        loudness_button.clicked.connect(lambda: self.show_report_tab(3))
+        action_row.addWidget(results_button)
+        action_row.addWidget(validate_button)
+        action_row.addWidget(build_button)
+        action_row.addWidget(loudness_button)
+        action_row.addStretch(1)
+        text_column.addLayout(action_row)
+
+        body_layout.addLayout(text_column, 1)
+        body_layout.addWidget(self.activity_report_focus_label)
+        body_layout.addWidget(self.activity_dirty_label)
+        layout.addWidget(body)
+        self.log_panel = panel
+        return panel
+
+    def _mount_workspace_surface(self, mode: str) -> None:
+        surface_key = {
+            "validation": "validation",
+            "results": "results",
+            "validation-results": "validation",
+            "build-results": "results",
+            "loudness-results": "results",
+        }.get(mode)
+        if surface_key is None:
+            return
+        surface = self._workspace_shared_surfaces[surface_key]
+        host_layout = self._workspace_mode_hosts.get(mode)
+        if host_layout is None:
+            return
+        if host_layout.indexOf(surface) >= 0:
+            return
+        surface.setParent(None)
+        host_layout.addWidget(surface)
+
+    def _reset_validation_filters(self) -> None:
+        self.validation_filter_severity_combo.setCurrentIndex(0)
+        self.validation_filter_keyword_edit.clear()
+
+    def _sync_validation_issue_actions(self) -> None:
+        self.validation_locate_button.setEnabled(self.validation_issue_list.currentItem() is not None)
+
+    def _locate_selected_validation_issue(self) -> None:
+        self._activate_report_item(self.validation_issue_list)
+
+    def _apply_validation_filters(self) -> None:
+        severity_map = {
+            "错误": "Error",
+            "警告": "Warning",
+            "信息": "Info",
+        }
+        severity_text = self.validation_filter_severity_combo.currentText().strip()
+        keyword = self.validation_filter_keyword_edit.text().strip().casefold()
+        filtered_items: list[dict[str, object]] = []
+        for item in self._validation_issue_items:
+            severity_value = str(item.get("severity", "")).strip()
+            if severity_text != "全部级别" and severity_value != severity_map.get(severity_text, severity_value):
+                continue
+            haystack = " ".join(
+                [
+                    str(item.get("title", "")),
+                    str(item.get("detail", "")),
+                    str(item.get("target_id", "")),
+                    str(item.get("code", "")),
+                ]
+            ).casefold()
+            if keyword and keyword not in haystack:
+                continue
+            filtered_items.append(item)
+        self._set_report_items(self.validation_issue_list, filtered_items)
+        self.validation_filter_status_label.setText(
+            f"当前筛选后显示 {len(filtered_items)} / {len(self._validation_issue_items)} 个校验问题。"
+        )
+        if not filtered_items:
+            self.validation_report_output.setPlainText("当前筛选条件下没有匹配的问题。")
+        self._sync_validation_issue_actions()
+        self._update_workspace_summary_labels()
 
     def _build_settings_dialog(self) -> None:
         self.settings_dialog = QDialog(self)
@@ -1033,6 +2020,106 @@ class MainWindow(QMainWindow):
         self.settings_dialog.show()
         self.settings_dialog.raise_()
         self.settings_dialog.activateWindow()
+
+    def _show_command_quick_reference(self) -> None:
+        QMessageBox.information(
+            self,
+            f"{APP_NAME} 命令",
+            "当前入口已经收口到 AppShell。\n\n"
+            "推荐命令：\n"
+            "- 顶部搜索：定位事件\n"
+            "- 左侧任务导航：切换工作模式\n"
+            "- Delete：删除选中对象或片段\n"
+            "- F2：重命名\n"
+            "- Enter：打开当前编辑焦点\n"
+            "- Ctrl+C：复制对象标识或资源键",
+        )
+
+    def _set_workspace_mode(self, mode: str) -> None:
+        mode_titles = {
+            "home": "欢迎页",
+            "resources": "资源整理",
+            "events": "事件设计",
+            "buses": "总线与混音",
+            "validation": "校验修复",
+            "build": "构建交付",
+            "results": "结果中心",
+            "validation-results": "校验结果",
+            "build-results": "构建结果",
+            "loudness-results": "响度结果",
+        }
+        self._active_workspace_mode = mode
+        self.task_sidebar.set_active_mode(mode)
+        self.shell_mode_title_label.setText(mode_titles.get(mode, "欢迎页"))
+        self.activity_summary_label.setText(f"当前工作模式：{mode_titles.get(mode, '欢迎页')}")
+        self.activity_hint_label.setText(self._current_workspace_context_text())
+
+    def _activate_workspace_mode(self, mode: str) -> None:
+        if mode == "home":
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["home"])
+        elif mode == "resources":
+            self._mount_workspace_surface("resources")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["resources"])
+            self.editor_tabs.setCurrentIndex(1)
+            self.contents_tabs.setCurrentIndex(0)
+            self._set_content_top_splitter_sizes(self._default_focus_content_splitter_sizes)
+        elif mode == "events":
+            self._mount_workspace_surface("events")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["events"])
+            self.editor_tabs.setCurrentIndex(0)
+            self.property_tabs.setCurrentIndex(0)
+            self.events_workspace_tabs.setCurrentIndex(0)
+        elif mode == "buses":
+            self._mount_workspace_surface("buses")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["buses"])
+            self.editor_tabs.setCurrentIndex(0)
+            self.property_tabs.setCurrentIndex(1)
+            self._project_bus_selection_overridden = False
+            self._sync_current_event_bus_selection(force=True)
+        elif mode == "validation":
+            self._mount_workspace_surface("validation")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["validation"])
+            self._active_report_index = 1
+            self.report_pages.setCurrentIndex(1)
+            self.report_tabs.setCurrentIndex(1)
+            workspace_total = max(sum(self.workspace_splitter.sizes()), sum(self._default_workspace_splitter_sizes))
+            self._set_workspace_splitter_sizes([int(workspace_total * 0.68), int(workspace_total * 0.32)])
+        elif mode == "build":
+            self._mount_workspace_surface("build")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["build"])
+            self.editor_tabs.setCurrentIndex(0)
+            self.property_tabs.setCurrentIndex(2)
+        elif mode == "results":
+            self._mount_workspace_surface("results")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["results"])
+        elif mode == "validation-results":
+            self._mount_workspace_surface("validation-results")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["validation-results"])
+            self._active_report_index = 1
+            self.report_pages.setCurrentIndex(1)
+            self.report_tabs.setCurrentIndex(1)
+        elif mode == "build-results":
+            self._mount_workspace_surface("build-results")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["build-results"])
+            self._active_report_index = 2
+            self.report_pages.setCurrentIndex(2)
+            self.report_tabs.setCurrentIndex(2)
+        elif mode == "loudness-results":
+            self._mount_workspace_surface("loudness-results")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["loudness-results"])
+            self._active_report_index = 3
+            self.report_pages.setCurrentIndex(3)
+            self.report_tabs.setCurrentIndex(3)
+        self._set_workspace_mode(mode)
+        self._update_object_bus_status()
+
+    def _sync_global_search_fields(self, text: str) -> None:
+        self.tree_filter_edit.setText(text)
+
+    def _request_global_search(self) -> None:
+        query = self.global_search_edit.text().strip()
+        self.tree_filter_edit.setText(query)
+        self._search_next_tree_event()
 
     def current_event_import_template_defaults(self) -> dict[str, object]:
         selected_bus = self.import_template_bus_combo.currentData()
@@ -1418,20 +2505,33 @@ class MainWindow(QMainWindow):
         return self.tree.selected_event_ids()
 
     def _current_workspace_context_text(self) -> str:
+        mode_title = self.shell_mode_title_label.text()
         editor_index = self.editor_tabs.currentIndex()
-        if editor_index == 0:
+        if self._active_workspace_mode == "home":
+            editor_title = "欢迎页"
+        elif self._active_workspace_mode in {"validation", "results", "validation-results", "build-results", "loudness-results"}:
+            editor_title = f"结果/{self._report_page_titles[self._active_report_index].replace('当前：', '')}"
+        elif self._active_workspace_mode == "events":
+            editor_title = f"事件设计/{self.events_workspace_tabs.tabText(self.events_workspace_tabs.currentIndex())}"
+        elif self._active_workspace_mode == "buses":
+            editor_title = "总线与混音/混音台"
+        elif self._active_workspace_mode == "build":
+            editor_title = "构建交付/交付准备"
+        elif self._active_workspace_mode == "resources":
+            editor_title = f"资源整理/{self.contents_tabs.tabText(self.contents_tabs.currentIndex())}"
+        elif editor_index == 0:
             editor_title = f"属性/{self.property_tabs.tabText(self.property_tabs.currentIndex())}"
         elif editor_index == 1:
             editor_title = f"内容/{self.contents_tabs.tabText(self.contents_tabs.currentIndex())}"
         else:
             editor_title = "响度监视器"
-        report_title = self.report_tabs.tabText(self.report_tabs.currentIndex())
+        report_title = self._report_page_titles[self._active_report_index].replace("当前：", "")
         dirty_text = self.dirty_status_label.text()
         selected_event_count = len(self.selected_tree_event_ids())
         selected_clip_count = len(self.selected_clip_ids())
         event_text = f" | 已选事件 {selected_event_count}" if selected_event_count else ""
         clip_text = f" | 已选片段 {selected_clip_count}" if selected_clip_count else ""
-        return f"当前页：{editor_title} | 报告：{report_title} | 状态：{dirty_text}{event_text}{clip_text}"
+        return f"模式：{mode_title} | 当前页：{editor_title} | 报告：{report_title} | 状态：{dirty_text}{event_text}{clip_text}"
 
     def _scrollable_widget_state(self, widget: QWidget | None) -> dict[str, int]:
         if widget is None or not hasattr(widget, "verticalScrollBar") or not hasattr(widget, "horizontalScrollBar"):
@@ -1510,14 +2610,16 @@ class MainWindow(QMainWindow):
 
     def navigation_state(self) -> dict[str, object]:
         return {
+            "workspace_mode": self._active_workspace_mode,
             "editor_tab": self.editor_tabs.currentIndex(),
             "property_tab": self.property_tabs.currentIndex(),
+            "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
             "contents_tab": self.contents_tabs.currentIndex(),
-            "report_tab": self.report_tabs.currentIndex(),
+            "report_tab": self._active_report_index,
             "workspace_splitter_sizes": self.workspace_splitter.sizes(),
             "main_splitter_sizes": self._effective_main_splitter_sizes(),
             "content_top_splitter_sizes": self.content_top_splitter.sizes(),
-            "property_scroll": self._scrollable_widget_state(self.property_tabs.currentWidget()),
+            "property_scroll": self._scrollable_widget_state(self._current_property_scroll_widget()),
             "contents_scroll": self._scrollable_widget_state(self.contents_tabs.currentWidget()),
             "log_scroll": self._scrollable_widget_state(self.log_output),
             "validation_report_panel": self._capture_report_panel_state(self.validation_issue_list, self.validation_report_output),
@@ -1528,11 +2630,13 @@ class MainWindow(QMainWindow):
     def apply_navigation_state(self, state: dict[str, object] | None) -> None:
         if not state:
             return
+        workspace_mode = state.get("workspace_mode")
         workspace_sizes = state.get("workspace_splitter_sizes")
         main_sizes = state.get("main_splitter_sizes")
         content_sizes = state.get("content_top_splitter_sizes")
         editor_tab = state.get("editor_tab")
         property_tab = state.get("property_tab")
+        events_workspace_tab = state.get("events_workspace_tab")
         contents_tab = state.get("contents_tab")
         report_tab = state.get("report_tab")
         if isinstance(workspace_sizes, list) and len(workspace_sizes) == 2:
@@ -1545,11 +2649,17 @@ class MainWindow(QMainWindow):
             self.editor_tabs.setCurrentIndex(editor_tab)
         if isinstance(property_tab, int) and 0 <= property_tab < self.property_tabs.count():
             self.property_tabs.setCurrentIndex(property_tab)
+        if isinstance(events_workspace_tab, int) and 0 <= events_workspace_tab < self.events_workspace_tabs.count():
+            self.events_workspace_tabs.setCurrentIndex(events_workspace_tab)
         if isinstance(contents_tab, int) and 0 <= contents_tab < self.contents_tabs.count():
             self.contents_tabs.setCurrentIndex(contents_tab)
-        if isinstance(report_tab, int) and 0 <= report_tab < self.report_tabs.count():
+        if isinstance(report_tab, int) and 0 <= report_tab < len(self._report_page_titles):
+            self._active_report_index = report_tab
+            self.report_pages.setCurrentIndex(report_tab)
             self.report_tabs.setCurrentIndex(report_tab)
-        self._apply_scrollable_widget_state(self.property_tabs.currentWidget(), state.get("property_scroll"))
+        if isinstance(workspace_mode, str) and workspace_mode in self._workspace_mode_pages:
+            self._activate_workspace_mode(workspace_mode)
+        self._apply_scrollable_widget_state(self._current_property_scroll_widget(), state.get("property_scroll"))
         self._apply_scrollable_widget_state(self.contents_tabs.currentWidget(), state.get("contents_scroll"))
         self._apply_scrollable_widget_state(self.log_output, state.get("log_scroll"))
         self._restore_report_panel_state(self.validation_issue_list, self.validation_report_output, state.get("validation_report_panel"))
@@ -1567,6 +2677,49 @@ class MainWindow(QMainWindow):
             self.object_bus_browser_chip.setText(f"跟随事件 {current_project_bus}")
             bus_hint = f"当前总线浏览跟随事件 {current_project_bus}。"
         self.object_context_hint_label.setText(f"{self._current_workspace_context_text()} | {bus_hint}")
+        self._update_workspace_summary_labels()
+
+    def _update_workspace_summary_labels(self) -> None:
+        selected_event_count = len(self.selected_tree_event_ids())
+        selected_clip_count = len(self.selected_clip_ids())
+        current_event_bus = self._current_event_bus_name() or "-"
+        current_project_bus = self.current_project_bus_name() or "-"
+        export_root = self.export_root_edit.text().strip() or "未设置"
+        runtime_format = self.runtime_audio_format_combo.currentText() or "-"
+        current_results_title = self._report_page_titles[self._active_report_index].replace("当前：", "")
+        event_workspace_title = self.events_workspace_tabs.tabText(self.events_workspace_tabs.currentIndex())
+        resources_workspace_title = self.contents_tabs.tabText(self.contents_tabs.currentIndex())
+
+        self.events_workspace_status_label.setText(
+            f"已选事件 {selected_event_count} | 当前子页 {event_workspace_title} | 事件总线 {current_event_bus}。"
+        )
+        self.event_overview_hint_label.setText(
+            f"对象摘要已前置到左侧。当前浏览 {event_workspace_title}，可快速跳去资源片段或校验结果继续处理。"
+        )
+        self.resources_workspace_status_label.setText(
+            f"已选片段 {selected_clip_count} | 当前页 {resources_workspace_title} | 资源整理后可直接切到生成预览。"
+        )
+        self.resources_overview_hint_label.setText(
+            f"当前浏览 {resources_workspace_title}，已选片段 {selected_clip_count}。先做片段编排，再进批处理或预览镜像。"
+        )
+        self.buses_workspace_status_label.setText(
+            f"浏览总线 {current_project_bus} | 事件总线 {current_event_bus} | 默认总线 {self.default_bus_combo.currentText() or '-'}。"
+        )
+        self.buses_overview_hint_label.setText(
+            f"当前浏览总线 {current_project_bus}。可直接切默认总线、挂到 Master，或回到事件总线继续调整。"
+        )
+        self.build_workspace_status_label.setText(
+            f"导出目录 {export_root} | 运行时格式 {runtime_format} | 最近结果页 {current_results_title}。"
+        )
+        self.build_overview_hint_label.setText(
+            f"导出目录 {export_root}，运行时格式 {runtime_format}。构建后优先回看 {current_results_title}。"
+        )
+        self.validation_overview_hint_label.setText(
+            f"{self.validation_filter_status_label.text()} 当前结果页为 {current_results_title}。"
+        )
+        self.results_overview_hint_label.setText(
+            f"当前结果页 {current_results_title}。可在这里统一回看日志、校验、构建和响度输出。"
+        )
 
     def _build_report_center_page(self, summary_label: QLabel, issue_list: QListWidget, detail_output: QPlainTextEdit) -> QWidget:
         page = QWidget()
@@ -1619,15 +2772,29 @@ class MainWindow(QMainWindow):
         tab_map = {"事件": 0, "音频属性": 1, "生成": 2, "工程": 3}
         index = tab_map.get(category)
         if index is not None:
+            if category == "音频属性":
+                self._activate_workspace_mode("buses")
+            elif category == "生成":
+                self._activate_workspace_mode("build")
+            elif category == "工程":
+                self._activate_workspace_mode("buses")
+            else:
+                self._activate_workspace_mode("events")
             self.editor_tabs.setCurrentIndex(0)
             self.property_tabs.setCurrentIndex(index)
             self._update_object_bus_status()
 
     def show_loudness_view(self) -> None:
+        self._activate_workspace_mode("events")
         self.editor_tabs.setCurrentIndex(2)
+        self.events_workspace_tabs.setCurrentIndex(1)
         self._update_object_bus_status()
 
     def set_active_contents_category(self, category: str) -> None:
+        if category == "生成":
+            self._activate_workspace_mode("build")
+        else:
+            self._activate_workspace_mode("resources")
         self.editor_tabs.setCurrentIndex(1)
         if category == "片段":
             self.contents_tabs.setCurrentIndex(0)
@@ -1971,6 +3138,7 @@ class MainWindow(QMainWindow):
         self.log_output.appendPlainText(message)
         self.report_detail_label.setText(f"最近日志：{message[:80]}")
         self.report_detail_label.setToolTip(message)
+        self._update_workspace_summary_labels()
 
     def show_validation_summary(self, issues: list[ValidationIssue]) -> None:
         if not issues:
@@ -2006,7 +3174,12 @@ class MainWindow(QMainWindow):
         suffix = file_path if file_path else "未保存"
         self.project_title_label.setText(project_name)
         self.project_path_label.setText(suffix)
+        self.welcome_project_title_label.setText(project_name)
+        self.welcome_project_path_label.setText(suffix)
+        self.shell_project_title_label.setText(project_name)
+        self.shell_project_path_label.setText(suffix)
         self.setWindowTitle(f"{APP_NAME} - {project_name} [{suffix}]")
+        self._update_workspace_summary_labels()
 
     def ui_preferences(self) -> dict[str, object]:
         return {
@@ -2050,8 +3223,10 @@ class MainWindow(QMainWindow):
     def set_dirty_state(self, is_dirty: bool) -> None:
         text = "未保存更改" if is_dirty else "已保存"
         self.dirty_status_label.setText(text)
+        self.welcome_dirty_label.setText(text)
         self.toolbar_dirty_label.setText(text)
         self.workspace_dirty_label.setText(text)
+        self.activity_dirty_label.setText(text)
         self._update_object_bus_status()
 
     def set_recent_projects(self, project_paths: list[str]) -> None:
@@ -2796,6 +3971,8 @@ class MainWindow(QMainWindow):
                         "detail": f"目标：{issue.target}\n级别：{issue.severity}\n代码：{issue.code}\n\n{issue.message}",
                         "target_type": "auto",
                         "target_id": issue.target,
+                        "severity": issue.severity,
+                        "code": issue.code,
                     }
                 )
             self.validation_summary_label.setText(
@@ -2803,9 +3980,11 @@ class MainWindow(QMainWindow):
             )
         else:
             self.validation_summary_label.setText("校验通过，没有发现问题。")
-        self._set_report_items(self.validation_issue_list, issue_items)
+        self._validation_issue_items = issue_items
+        self._apply_validation_filters()
         self._restore_report_panel_state(self.validation_issue_list, self.validation_report_output, panel_state)
         self.report_detail_label.setText("校验报告已刷新，可在问题中心快速定位对象。")
+        self._update_workspace_summary_labels()
 
     def set_build_report(self, report_text: str, highlights: list[dict[str, object]] | None = None) -> None:
         panel_state = self._capture_report_panel_state(self.build_issue_list, self.build_report_output)
@@ -2819,6 +3998,7 @@ class MainWindow(QMainWindow):
         self._restore_report_panel_state(self.build_issue_list, self.build_report_output, panel_state)
         self.build_summary_label.setText("构建问题中心：优先看 Schema、BusConfigs、资源差异与导出数量。")
         self.report_detail_label.setText("构建报告已刷新，生成预览已同步。")
+        self._update_workspace_summary_labels()
 
     def set_loudness_report(self, report_text: str, rows: list[dict[str, object]] | None = None, summary_text: str | None = None) -> None:
         panel_state = self._capture_report_panel_state(self.loudness_issue_list, self.loudness_report_output)
@@ -2842,13 +4022,26 @@ class MainWindow(QMainWindow):
         self._restore_report_panel_state(self.loudness_issue_list, self.loudness_report_output, panel_state)
         self.loudness_summary_label.setText(summary_text or "响度扫描报告已刷新。双击条目可跳转到事件。")
         self.report_detail_label.setText("响度扫描报告已刷新。")
+        self._update_workspace_summary_labels()
 
     def show_report_tab(self, index: int) -> None:
+        if not 0 <= index < len(self._report_page_titles):
+            return
+        self._active_report_index = index
+        self.report_pages.setCurrentIndex(index)
         self.report_tabs.setCurrentIndex(index)
-        report_titles = ["当前：日志", "当前：校验报告", "当前：构建报告", "当前：响度扫描"]
-        if 0 <= index < len(report_titles):
-            self.report_focus_label.setText(report_titles[index])
-            self.workspace_report_focus_label.setText(report_titles[index])
+        report_title = self._report_page_titles[index]
+        self.report_focus_label.setText(report_title)
+        self.workspace_report_focus_label.setText(report_title)
+        self.activity_report_focus_label.setText(report_title)
+        if index == 1:
+            self._activate_workspace_mode("validation-results")
+        elif index == 2:
+            self._activate_workspace_mode("build-results")
+        elif index == 3:
+            self._activate_workspace_mode("loudness-results")
+        else:
+            self._activate_workspace_mode("results")
         self._update_object_bus_status()
 
     def ask_import_clip_paths(self) -> list[str]:
@@ -3015,8 +4208,11 @@ class MainWindow(QMainWindow):
         self.property_tabs.setCurrentIndex(0)
         self._set_content_top_splitter_sizes(self._default_content_top_splitter_sizes)
         self.contents_tabs.setCurrentIndex(0)
+        self._active_report_index = 0
+        self.report_pages.setCurrentIndex(0)
         self.report_tabs.setCurrentIndex(0)
         self.report_detail_label.setText("已恢复默认布局。")
+        self._activate_workspace_mode("events")
         self._update_object_bus_status()
 
     def focus_panel(self, panel_key: str) -> None:
@@ -3030,17 +4226,21 @@ class MainWindow(QMainWindow):
             self._set_main_splitter_sizes([int(main_total * 0.42), int(main_total * 0.58)])
             return
         if panel_key == "property":
+            self._activate_workspace_mode("events")
             self.editor_tabs.setCurrentIndex(0)
             self._set_main_splitter_sizes([int(main_total * 0.18), int(main_total * 0.82)])
         elif panel_key == "contents":
+            self._activate_workspace_mode("resources")
             self.editor_tabs.setCurrentIndex(1)
             self._set_main_splitter_sizes([int(main_total * 0.18), int(main_total * 0.82)])
             self.contents_tabs.setCurrentIndex(0)
             self._set_content_top_splitter_sizes(self._default_focus_content_splitter_sizes)
         elif panel_key == "meter":
+            self._activate_workspace_mode("events")
             self.editor_tabs.setCurrentIndex(2)
             self._set_main_splitter_sizes([int(main_total * 0.18), int(main_total * 0.82)])
         elif panel_key == "log":
+            self._activate_workspace_mode("results")
             self._set_workspace_splitter_sizes([int(workspace_total * 0.62), int(workspace_total * 0.38)])
         self._update_object_bus_status()
 
@@ -3225,21 +4425,33 @@ class MainWindow(QMainWindow):
             self._closing_main_window = False
 
     def _bind_internal_signals(self) -> None:
+        self.task_sidebar.modeRequested.connect(self._activate_workspace_mode)
         self.zoom_in_button.clicked.connect(self.increase_ui_scale)
         self.zoom_out_button.clicked.connect(self.decrease_ui_scale)
         self.zoom_reset_button.clicked.connect(self.reset_ui_scale)
         self.reset_layout_button.clicked.connect(self.restore_default_layout)
         self.settings_button.clicked.connect(self.open_settings_dialog)
+        self.command_button.clicked.connect(self._show_command_quick_reference)
+        self.global_search_edit.returnPressed.connect(self._request_global_search)
+        self.global_search_edit.textChanged.connect(self._sync_global_search_fields)
+        self.global_search_button.clicked.connect(self._request_global_search)
         self.object_parent_button.clicked.connect(self.navigateParentRequested.emit)
         self.reference_parent_value_button.clicked.connect(self.navigateParentRequested.emit)
         self.reference_bus_value_button.clicked.connect(lambda: self.set_active_property_category("事件"))
         self.reference_assets_value_button.clicked.connect(lambda: self.set_active_contents_category("片段"))
         self.reference_generation_value_button.clicked.connect(lambda: self.set_active_property_category("生成"))
         self.object_preview_button.clicked.connect(self.previewRequested.emit)
-        self.object_contents_button.clicked.connect(lambda: self.set_active_contents_category("片段"))
+        self.object_contents_button.clicked.connect(lambda: self._activate_workspace_mode("resources"))
         self.object_follow_bus_button.clicked.connect(self._follow_current_event_bus)
-        self.object_report_button.clicked.connect(lambda: self.show_report_tab(1))
+        self.object_report_button.clicked.connect(lambda: self._activate_workspace_mode("validation"))
+        self.validation_filter_severity_combo.currentIndexChanged.connect(self._apply_validation_filters)
+        self.validation_filter_keyword_edit.textChanged.connect(lambda _text: self._apply_validation_filters())
+        self.validation_filter_reset_button.clicked.connect(self._reset_validation_filters)
+        self.validation_revalidate_button.clicked.connect(self.validate_button.click)
+        self.validation_locate_button.clicked.connect(self._locate_selected_validation_issue)
         self.open_loudness_view_button.clicked.connect(self.show_loudness_view)
+        self.events_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
+        self.contents_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.clear_meter_button.clicked.connect(self.clear_peak_hold)
         self.loudness_scan_button.clicked.connect(self.loudnessScanRequested.emit)
         self.clip_preview_button.clicked.connect(self._request_selected_clip_preview)
@@ -3338,6 +4550,7 @@ class MainWindow(QMainWindow):
         self.tree.itemDoubleClicked.connect(lambda item, column: self._handle_open_shortcut())
         self.clip_table.itemDoubleClicked.connect(lambda item: self._handle_open_shortcut())
         self.validation_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.validation_issue_list, self.validation_report_output))
+        self.validation_issue_list.itemSelectionChanged.connect(self._sync_validation_issue_actions)
         self.build_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.build_issue_list, self.build_report_output))
         self.loudness_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.loudness_issue_list, self.loudness_report_output))
         self.validation_issue_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.validation_issue_list))
@@ -3416,6 +4629,7 @@ class MainWindow(QMainWindow):
         self._project_bus_selection_overridden = False
         self._sync_current_event_bus_selection(force=True)
         self.set_active_property_category("音频属性")
+        self._set_workspace_mode("buses")
         self._update_object_bus_status()
 
     def _show_tree_context_menu(self, position) -> None:
@@ -3670,12 +4884,15 @@ class MainWindow(QMainWindow):
             (self.inline_bus_to_master_button, load_app_icon("route")),
             (self.inline_bus_open_parent_button, load_app_icon("navigate_parent")),
             (self.project_bus_focus_audio_button, load_app_icon("audio")),
+            (self.command_button, load_app_icon("focus_panel")),
         ]
         for button, icon in icon_pairs:
             if not icon.isNull():
                 button.setIcon(icon)
         self.tree_search_button.setIcon(load_app_icon("open_project"))
         self.tree_search_button.setToolTip("定位下一个匹配的事件")
+        self.global_search_button.setIcon(load_app_icon("open_project"))
+        self.global_search_button.setToolTip("搜索并定位事件")
         self.object_parent_button.setIcon(load_app_icon("navigate_parent"))
         self.object_parent_button.setToolTip("跳转到父级")
         self.object_parent_button.setAutoRaise(True)
@@ -3703,6 +4920,22 @@ class MainWindow(QMainWindow):
         self.reset_layout_button.setText("布局")
         self.reset_layout_button.setIcon(load_app_icon("reset_layout"))
         self.reset_layout_button.setToolTip("恢复默认布局")
+        sidebar_icon_map = {
+            "home": load_app_icon("app"),
+            "resources": load_app_icon("content"),
+            "events": load_app_icon("event"),
+            "buses": load_app_icon("bus"),
+            "validation": load_app_icon("validate"),
+            "build": load_app_icon("generate"),
+            "results": load_app_icon("report"),
+            "validation-results": load_app_icon("validate"),
+            "build-results": load_app_icon("generate"),
+            "loudness-results": load_app_icon("audio"),
+        }
+        for mode, icon in sidebar_icon_map.items():
+            button = self.task_sidebar.button(mode)
+            if button is not None and not icon.isNull():
+                button.setIcon(icon)
 
     def _apply_clip_filter(self, text: str) -> None:
         normalized = text.strip().lower()
@@ -3777,6 +5010,48 @@ class MainWindow(QMainWindow):
                 border: 1px solid #3f4854;
                 border-radius: {group_radius}px;
             }}
+            #AppShell {{
+                background-color: #262a30;
+                border: none;
+            }}
+            #TopAppBar {{
+                background-color: #171a1f;
+                border: 1px solid #3f4854;
+                border-radius: {group_radius}px;
+            }}
+            #WelcomeHero {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #182129, stop:1 #283849);
+                border: 1px solid #4c6278;
+                border-radius: {hero_radius}px;
+            }}
+            #WorkspaceActionBar {{
+                background-color: #1b2026;
+                border: 1px solid #465563;
+                border-radius: {group_radius}px;
+            }}
+            #WorkspaceOverviewPanel {{
+                background: transparent;
+                border: none;
+                min-width: 318px;
+            }}
+            #WorkspaceOverviewCard {{
+                background-color: #1d232b;
+                border: 1px solid #445464;
+                border-radius: {group_radius}px;
+            }}
+            #ModeIntroCard, #ActivityPanel {{
+                background-color: #1b2026;
+                border: 1px solid #3f4854;
+                border-radius: {group_radius}px;
+            }}
+            #TaskSidebar {{
+                background-color: #1b2026;
+                border: 1px solid #3f4854;
+                border-radius: {group_radius}px;
+                min-width: 164px;
+                max-width: 196px;
+            }}
             #InlineBusHeader {{
                 background-color: #1d232b;
                 border: 1px solid #41505f;
@@ -3817,6 +5092,58 @@ class MainWindow(QMainWindow):
                 font-weight: 700;
                 padding: 0 4px;
             }}
+            QLabel[role="sidebarTitle"] {{
+                color: #8aa4bf;
+                font-size: {object_type_size}px;
+                font-weight: 700;
+                padding: 2px 4px 6px 4px;
+            }}
+            QLabel[role="appTitle"] {{
+                color: #9ec6f0;
+                font-size: {object_type_size + 1}px;
+                font-weight: 700;
+            }}
+            QLabel[role="appProjectTitle"] {{
+                color: #edf3f9;
+                font-size: {object_title_size}px;
+                font-weight: 700;
+            }}
+            QLabel[role="appProjectPath"] {{
+                color: #8f9ba9;
+            }}
+            QLabel[role="appMetaCaption"] {{
+                color: #7f8a97;
+                font-size: {object_type_size}px;
+            }}
+            QLabel[role="appModeTitle"] {{
+                color: #dce8f5;
+                font-size: {object_title_size - 1}px;
+                font-weight: 600;
+            }}
+            QLabel[role="welcomeTitle"] {{
+                color: #f2f7fb;
+                font-size: {object_title_size + 4}px;
+                font-weight: 700;
+            }}
+            QLabel[role="welcomeDescription"], QLabel[role="modeCardDescription"] {{
+                color: #b9c7d6;
+            }}
+            QLabel[role="modeCardTitle"] {{
+                color: #eef5fb;
+                font-size: {object_title_size - 1}px;
+                font-weight: 600;
+            }}
+            QLabel[role="workspaceSectionTitle"] {{
+                color: #f0f6fc;
+                font-size: {object_title_size}px;
+                font-weight: 700;
+            }}
+            QLabel[role="workspaceSectionSummary"] {{
+                color: #b9c7d6;
+            }}
+            QLabel[role="workspaceChecklistLine"] {{
+                color: #c2cfdb;
+            }}
             QLabel[role="meterTitle"] {{
                 color: #8e9aa8;
                 font-size: {object_type_size}px;
@@ -3844,6 +5171,51 @@ class MainWindow(QMainWindow):
                 color: #e4eef8;
                 padding: {button_padding_v}px {button_padding_h}px;
                 font-weight: 600;
+            }}
+            QLabel[role="topStatusChip"] {{
+                background-color: #24303b;
+                border: 1px solid #55677a;
+                border-radius: {radius}px;
+                color: #e4eef8;
+                padding: {button_padding_v}px {button_padding_h}px;
+                font-weight: 600;
+            }}
+            QPushButton[role="taskNavButton"] {{
+                text-align: left;
+                background-color: #20262d;
+                border: 1px solid #434f5c;
+                border-radius: {group_radius}px;
+                padding: {button_padding_v + 3}px {button_padding_h}px;
+                min-height: 32px;
+            }}
+            QPushButton[role="taskNavButton"]:hover {{
+                background-color: #2b3540;
+            }}
+            QPushButton[role="taskNavButton"]:checked {{
+                background-color: #32404f;
+                border-color: #7ca7d6;
+                color: #f3f8fd;
+            }}
+            QPushButton[role="workspaceActionButton"] {{
+                background-color: #24303b;
+                border: 1px solid #566a7c;
+                border-radius: {radius}px;
+                padding: {button_padding_v}px {button_padding_h}px;
+                min-height: 26px;
+            }}
+            QPushButton[role="workspaceActionButton"]:hover {{
+                background-color: #2e3d4b;
+            }}
+            QPushButton[role="workspaceShortcutButton"] {{
+                background-color: #24303b;
+                border: 1px solid #546677;
+                border-radius: {radius}px;
+                padding: {button_padding_v + 1}px {button_padding_h}px;
+                min-height: 30px;
+                text-align: left;
+            }}
+            QPushButton[role="workspaceShortcutButton"]:hover {{
+                background-color: #30414f;
             }}
             QToolButton[role="reportJump"] {{
                 background-color: transparent;
@@ -3944,5 +5316,9 @@ class MainWindow(QMainWindow):
         self.toolbar_dirty_label.setProperty("role", "busHeaderChip")
         self.workspace_dirty_label.setProperty("role", "busHeaderChip")
         self.workspace_report_focus_label.setProperty("role", "busHeaderChip")
+        self.activity_dirty_label.setProperty("role", "busHeaderChip")
+        self.activity_report_focus_label.setProperty("role", "busHeaderChip")
         self.report_focus_label.setProperty("role", "busHeaderChip")
         self.report_detail_label.setProperty("role", "meterContext")
+        self.activity_summary_label.setProperty("role", "modeCardTitle")
+        self.activity_hint_label.setProperty("role", "modeCardDescription")
