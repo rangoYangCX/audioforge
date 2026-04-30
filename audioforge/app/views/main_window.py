@@ -456,8 +456,10 @@ class MainWindow(QMainWindow):
         self.clip_locate_source_button = QPushButton("定位源文件")
         self.build_preview_output = QPlainTextEdit()
         self.build_preview_output.setReadOnly(True)
+        self.build_preview_output.setPlaceholderText("导出差异、构建摘要和交付文本会显示在这里。")
         self.resources_preview_output = QPlainTextEdit()
         self.resources_preview_output.setReadOnly(True)
+        self.resources_preview_output.setPlaceholderText("当前没有可回看的导出预览。先执行差异预览或构建，再回到这里查看镜像内容。")
         self.resources_preview_output.setDocument(self.build_preview_output.document())
         self.audio_meter_context_label = QLabel("未执行试听")
         self.audio_meter_short_term_value = QLabel("-Inf")
@@ -490,6 +492,7 @@ class MainWindow(QMainWindow):
 
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
+        self.log_output.setPlaceholderText("运行日志、导入反馈和交付链路输出会显示在这里。")
         self.validation_summary_label = QLabel("等待校验。")
         self.validation_filter_status_label = QLabel("显示全部校验问题。")
         self.validation_filter_severity_combo = QComboBox()
@@ -502,14 +505,17 @@ class MainWindow(QMainWindow):
         self.validation_issue_list = QListWidget()
         self.validation_report_output = QPlainTextEdit()
         self.validation_report_output.setReadOnly(True)
+        self.validation_report_output.setPlaceholderText("选择左侧问题条目后，这里会显示详细说明与定位上下文。")
         self.build_summary_label = QLabel("等待构建或差异预览。")
         self.build_issue_list = QListWidget()
         self.build_report_output = QPlainTextEdit()
         self.build_report_output.setReadOnly(True)
+        self.build_report_output.setPlaceholderText("构建摘要、产物说明和异常输出会显示在这里。")
         self.loudness_summary_label = QLabel("等待响度扫描。")
         self.loudness_issue_list = QListWidget()
         self.loudness_report_output = QPlainTextEdit()
         self.loudness_report_output.setReadOnly(True)
+        self.loudness_report_output.setPlaceholderText("响度扫描完成后，这里会显示条目细节、阈值与超标说明。")
         self.clip_filter_edit = QLineEdit()
         self.clip_filter_edit.setPlaceholderText("按片段 ID、源路径、资源键或标签过滤")
         self.bulk_clip_weight_spin = QSpinBox()
@@ -1134,6 +1140,8 @@ class MainWindow(QMainWindow):
         search_row_layout = QHBoxLayout(search_row)
         search_row_layout.setContentsMargins(0, 0, 0, 0)
         search_row_layout.setSpacing(6)
+        self.global_search_edit.setProperty("role", "topSearchField")
+        self.global_search_button.setProperty("role", "topSearchButton")
         search_row_layout.addWidget(self.global_search_edit, 1)
         search_row_layout.addWidget(self.global_search_button)
 
@@ -1141,6 +1149,13 @@ class MainWindow(QMainWindow):
         primary_actions_layout = QHBoxLayout(primary_actions)
         primary_actions_layout.setContentsMargins(0, 0, 0, 0)
         primary_actions_layout.setSpacing(8)
+        self.new_project_button.setProperty("role", "topSubtleButton")
+        self.open_project_button.setProperty("role", "topSubtleButton")
+        self.save_project_button.setProperty("role", "topSubtleButton")
+        self.validate_button.setProperty("role", "topAccentButton")
+        self.build_button.setProperty("role", "topPrimaryButton")
+        self.command_button.setProperty("role", "topSubtleButton")
+        self.settings_button.setProperty("role", "topSubtleButton")
         for button in [
             self.new_project_button,
             self.open_project_button,
@@ -5026,8 +5041,9 @@ class MainWindow(QMainWindow):
                 border-radius: {hero_radius}px;
             }}
             #WorkspaceActionBar {{
-                background-color: #1b2026;
-                border: 1px solid #465563;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #1c2229, stop:1 #222b34);
+                border: 1px solid #506172;
                 border-radius: {group_radius}px;
             }}
             #WorkspaceOverviewPanel {{
@@ -5036,8 +5052,9 @@ class MainWindow(QMainWindow):
                 min-width: 318px;
             }}
             #WorkspaceOverviewCard {{
-                background-color: #1d232b;
-                border: 1px solid #445464;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1c232a, stop:1 #222c35);
+                border: 1px solid #4d6070;
                 border-radius: {group_radius}px;
             }}
             #ModeIntroCard, #ActivityPanel {{
@@ -5206,6 +5223,30 @@ class MainWindow(QMainWindow):
             QPushButton[role="workspaceActionButton"]:hover {{
                 background-color: #2e3d4b;
             }}
+            QPushButton[role="topSubtleButton"] {{
+                background-color: #212830;
+                border-color: #4b5a69;
+            }}
+            QPushButton[role="topSubtleButton"]:hover {{
+                background-color: #2b3640;
+            }}
+            QPushButton[role="topAccentButton"] {{
+                background-color: #23364a;
+                border-color: #6f97c0;
+                color: #eef6fd;
+            }}
+            QPushButton[role="topAccentButton"]:hover {{
+                background-color: #2c4560;
+            }}
+            QPushButton[role="topPrimaryButton"] {{
+                background-color: #8d5a34;
+                border-color: #d29a64;
+                color: #fff7ef;
+                font-weight: 700;
+            }}
+            QPushButton[role="topPrimaryButton"]:hover {{
+                background-color: #a0663b;
+            }}
             QPushButton[role="workspaceShortcutButton"] {{
                 background-color: #24303b;
                 border: 1px solid #546677;
@@ -5247,6 +5288,19 @@ class MainWindow(QMainWindow):
                 background-color: #2b3947;
                 border-color: #79a8d8;
             }}
+            QLineEdit[role="topSearchField"] {{
+                background-color: #12171c;
+                border: 1px solid #5a7087;
+                border-radius: {group_radius}px;
+                padding: {field_padding + 2}px {button_padding_h}px;
+                min-height: 28px;
+            }}
+            QToolButton[role="topSearchButton"] {{
+                background-color: #253443;
+                border: 1px solid #617990;
+                border-radius: {group_radius}px;
+                padding: {button_padding_v}px {button_padding_h - 2}px;
+            }}
             QToolButton {{
                 text-align: left;
             }}
@@ -5256,38 +5310,117 @@ class MainWindow(QMainWindow):
             QGroupBox[title="当前输出总线"] QLabel {{
                 background: transparent;
             }}
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTreeWidget, QTableWidget {{
-                background-color: #171a1f;
-                border: 1px solid #45505c;
+            QLineEdit::placeholder, QPlainTextEdit::placeholder {{
+                color: #6f7d8a;
+            }}
+            QLineEdit, QComboBox, QAbstractSpinBox, QPlainTextEdit, QListWidget, QTreeWidget, QTableWidget {{
+                background-color: #14191f;
+                border: 1px solid #495867;
                 border-radius: {radius}px;
                 color: #dfe6ee;
-                selection-background-color: #5c7ea3;
+                selection-background-color: #5f83a9;
                 padding: {field_padding}px;
             }}
+            QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus, QPlainTextEdit:focus, QListWidget:focus, QTreeWidget:focus, QTableWidget:focus {{
+                border: 1px solid #7aa0c9;
+            }}
+            QTreeWidget[role="navigationTree"], QListWidget[role="resultList"] {{
+                background-color: #161b21;
+                border-color: #536679;
+            }}
+            QTableWidget[role="editorTable"] {{
+                background-color: #171d24;
+                border-color: #5a6f83;
+                gridline-color: #32404e;
+                alternate-background-color: #1c232b;
+            }}
+            QPlainTextEdit[role="resultSurface"] {{
+                background-color: #11161b;
+                border-color: #54697d;
+                selection-background-color: #476685;
+            }}
             QGroupBox {{
-                border: 1px solid #46515d;
+                border: 1px solid #4a5866;
                 border-radius: {group_radius}px;
                 margin-top: 12px;
                 font-weight: 600;
-                background-color: #2b3037;
+                background-color: #20262d;
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 12px;
                 padding: 0 6px;
+                color: #eef4fb;
             }}
             QTabWidget::pane {{
-                border: 1px solid #46515d;
+                border: 1px solid #4f6172;
+                border-radius: {group_radius}px;
                 top: -1px;
-                background-color: #242930;
+                background-color: #1a2027;
             }}
             QTabBar::tab {{
-                background: #1f242a;
-                border: 1px solid #46515d;
+                background: #1b2128;
+                border: 1px solid #435262;
+                border-bottom: none;
+                border-top-left-radius: {radius}px;
+                border-top-right-radius: {radius}px;
                 padding: {tab_padding_v}px {tab_padding_h}px;
+                margin-right: 4px;
+                color: #b7c5d4;
             }}
             QTabBar::tab:selected {{
-                background: #39424d;
+                background: #2d3945;
+                color: #f2f7fb;
+                border-color: #7599bf;
+                font-weight: 700;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: #24303a;
+            }}
+            QHeaderView::section {{
+                background-color: #20262e;
+                color: #d8e4ef;
+                border: 1px solid #435262;
+                padding: {field_padding}px;
+                font-weight: 600;
+            }}
+            QListWidget::item, QTreeWidget::item, QTableWidget::item {{
+                padding: {field_padding}px;
+            }}
+            QListWidget::item:selected, QTreeWidget::item:selected, QTableWidget::item:selected {{
+                background-color: #33485f;
+                color: #f6fbff;
+            }}
+            QTreeWidget::item:hover, QListWidget::item:hover {{
+                background-color: #25313d;
+            }}
+            QSplitter::handle {{
+                background-color: #1a2027;
+            }}
+            QSplitter::handle:hover {{
+                background-color: #324354;
+            }}
+            QScrollBar:vertical {{
+                background: #161b20;
+                width: 10px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #435565;
+                min-height: 28px;
+                border-radius: {radius}px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: #587088;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
+            QScrollBar:horizontal, QScrollBar::handle:horizontal,
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                background: transparent;
+                border: none;
+                height: 0px;
             }}
             QProgressBar {{
                 background-color: #242a31;
@@ -5313,7 +5446,20 @@ class MainWindow(QMainWindow):
         self.validation_summary_label.setProperty("role", "meterContext")
         self.build_summary_label.setProperty("role", "meterContext")
         self.loudness_summary_label.setProperty("role", "meterContext")
-        self.toolbar_dirty_label.setProperty("role", "busHeaderChip")
+        self.tree.setProperty("role", "navigationTree")
+        self.project_bus_list.setProperty("role", "navigationTree")
+        self.clip_table.setProperty("role", "editorTable")
+        self.validation_issue_list.setProperty("role", "resultList")
+        self.build_issue_list.setProperty("role", "resultList")
+        self.loudness_issue_list.setProperty("role", "resultList")
+        self.recent_projects_list.setProperty("role", "resultList")
+        self.log_output.setProperty("role", "resultSurface")
+        self.resources_preview_output.setProperty("role", "resultSurface")
+        self.build_preview_output.setProperty("role", "resultSurface")
+        self.validation_report_output.setProperty("role", "resultSurface")
+        self.build_report_output.setProperty("role", "resultSurface")
+        self.loudness_report_output.setProperty("role", "resultSurface")
+        self.toolbar_dirty_label.setProperty("role", "topStatusChip")
         self.workspace_dirty_label.setProperty("role", "busHeaderChip")
         self.workspace_report_focus_label.setProperty("role", "busHeaderChip")
         self.activity_dirty_label.setProperty("role", "busHeaderChip")
