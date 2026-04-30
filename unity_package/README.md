@@ -22,8 +22,8 @@
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.03/`
-- `AudioForgeUnityPackage-0.03.zip`
+- `AudioForgeUnityPackage-0.05/`
+- `AudioForgeUnityPackage-0.05.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 

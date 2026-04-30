@@ -15,6 +15,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--report-root", type=Path)
+    parser.add_argument("--export-dir", type=Path)
     parser.add_argument("--skip-pytest", action="store_true")
     return parser.parse_args()
 
@@ -23,6 +24,7 @@ def main() -> int:
     args = parse_args()
     workspace = args.workspace.resolve()
     report_root = (args.report_root or (workspace / "reports" / "unity_package_release")).resolve()
+    export_dir = (args.export_dir or (workspace / "reports" / "internal_release_smoke" / "export")).resolve()
     report_root.mkdir(parents=True, exist_ok=True)
 
     sync_command = [sys.executable, str(workspace / "tools" / "sync_unity_integration_package.py")]
@@ -31,6 +33,8 @@ def main() -> int:
         str(workspace / "tools" / "run_full_chain_check.py"),
         "--workspace",
         str(workspace),
+        "--export-dir",
+        str(export_dir),
         "--report-dir",
         str(report_root / "checks"),
     ]

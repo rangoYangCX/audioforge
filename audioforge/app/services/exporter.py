@@ -4,7 +4,7 @@ import hashlib
 import json
 import shutil
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,12 +12,62 @@ from audioforge.app.models.audio_project import AudioProject, ClipModel, Validat
 from audioforge.app.services.audio_processor import AudioProcessor
 from audioforge.app.utils.constants import (
     DEFAULT_AUDIO_MANIFEST_FILENAME,
-    DEFAULT_EXPORT_ASSETS_DIRNAME,
     DEFAULT_BUILD_REPORT_FILENAME,
     DEFAULT_EVENT_ENUM_FILENAME,
+    DEFAULT_EXPORT_ASSETS_DIRNAME,
     DEFAULT_RUNTIME_DATA_FILENAME,
     SCHEMA_VERSION,
 )
+
+
+@dataclass(slots=True)
+class ExportRequest:
+    scope: str = "full"
+    selected_event_ids: tuple[str, ...] = ()
+    selection_label: str = "整个工程"
+
+
+@dataclass(slots=True)
+class ExportPlan:
+    requested_scope: str
+    effective_scope: str
+    reason: str
+    selection_label: str
+    selected_event_ids: tuple[str, ...] = ()
+    selected_asset_keys: tuple[str, ...] = ()
+    added_event_ids: tuple[str, ...] = ()
+    changed_event_ids: tuple[str, ...] = ()
+    removed_event_ids: tuple[str, ...] = ()
+    added_asset_keys: tuple[str, ...] = ()
+    changed_asset_keys: tuple[str, ...] = ()
+    removed_asset_keys: tuple[str, ...] = ()
+    rebuilt_asset_keys: tuple[str, ...] = ()
+    reused_asset_keys: tuple[str, ...] = ()
+    out_of_scope_dirty_asset_keys: tuple[str, ...] = ()
+    current_asset_entries: list[dict[str, object]] = field(default_factory=list)
+    current_runtime_payload: dict[str, object] = field(default_factory=dict)
+    previous_asset_paths: dict[str, str] = field(default_factory=dict)
+
+    def to_report_dict(self) -> dict[str, object]:
+        return {
+            "RequestedScope": self.requested_scope,
+            "EffectiveScope": self.effective_scope,
+            "Reason": self.reason,
+            "SelectionLabel": self.selection_label,
+            "SelectedEventIds": list(self.selected_event_ids),
+            "SelectedAssetKeys": list(self.selected_asset_keys),
+            "AddedEventIds": list(self.added_event_ids),
+            "ChangedEventIds": list(self.changed_event_ids),
+            "RemovedEventIds": list(self.removed_event_ids),
+            "AddedAssetKeys": list(self.added_asset_keys),
+            "ChangedAssetKeys": list(self.changed_asset_keys),
+            "RemovedAssetKeys": list(self.removed_asset_keys),
+            "RebuiltAssetKeys": list(self.rebuilt_asset_keys),
+            "ReusedAssetKeys": list(self.reused_asset_keys),
+            "OutOfScopeDirtyAssetKeys": list(self.out_of_scope_dirty_asset_keys),
+            "TotalEventCount": len(self.current_runtime_payload.get("Events", {})),
+            "TotalAssetCount": len(self.current_asset_entries),
+        }
 
 
 @dataclass(slots=True)
@@ -28,19 +78,36 @@ class ExportResult:
     manifest_file: Path
     report_file: Path
     assets_dir: Path
+    plan: ExportPlan
 
 
 class RuntimeExporter:
     def __init__(self) -> None:
         self.audio_processor = AudioProcessor()
 
-    def export(self, project: AudioProject, export_root: Path, issues: list[ValidationIssue], copy_assets: bool = True) -> ExportResult:
+    def export(
+        self,
+        project: AudioProject,
+        export_root: Path,
+        issues: list[ValidationIssue],
+        copy_assets: bool = True,
+        request: ExportRequest | None = None,
+        plan: ExportPlan | None = None,
+    ) -> ExportResult:
         parent = export_root.parent
         parent.mkdir(parents=True, exist_ok=True)
         temp_root = Path(tempfile.mkdtemp(prefix=f"{export_root.name}_", dir=str(parent)))
+        resolved_plan = plan or self.plan_export(project, export_root, request)
 
         try:
-            result = self._write_export(project, temp_root, issues, copy_assets=copy_assets)
+            result = self._write_export(
+                project,
+                temp_root,
+                issues,
+                copy_assets=copy_assets,
+                plan=resolved_plan,
+                previous_export_root=export_root,
+            )
             self._commit_export(temp_root, export_root)
             return ExportResult(
                 export_root=export_root,
@@ -49,10 +116,120 @@ class RuntimeExporter:
                 manifest_file=export_root / DEFAULT_AUDIO_MANIFEST_FILENAME,
                 report_file=export_root / DEFAULT_BUILD_REPORT_FILENAME,
                 assets_dir=export_root / DEFAULT_EXPORT_ASSETS_DIRNAME,
+                plan=resolved_plan,
             )
         except Exception:
             shutil.rmtree(temp_root, ignore_errors=True)
             raise
+
+    def plan_export(self, project: AudioProject, export_root: Path, request: ExportRequest | None = None) -> ExportPlan:
+        normalized_request = self._normalize_request(request)
+        current_runtime_payload = self._build_runtime_payload(project)
+        current_asset_entries = self._collect_asset_entries(project)
+        current_manifest_assets = self._build_manifest_payload(current_asset_entries).get("Assets", [])
+        current_event_map = dict(current_runtime_payload.get("Events", {}))
+        current_asset_map = {str(asset.get("AssetKey", "")): asset for asset in current_manifest_assets}
+
+        previous_manifest_payload = self._load_json_if_exists(export_root / DEFAULT_AUDIO_MANIFEST_FILENAME)
+        previous_runtime_payload = self._load_json_if_exists(export_root / DEFAULT_RUNTIME_DATA_FILENAME)
+        previous_asset_map = {
+            str(asset.get("AssetKey", "")): asset
+            for asset in (previous_manifest_payload or {}).get("Assets", [])
+        }
+        previous_event_map = dict((previous_runtime_payload or {}).get("Events", {}))
+        previous_assets_dir = export_root / DEFAULT_EXPORT_ASSETS_DIRNAME
+
+        added_event_ids = sorted(set(current_event_map) - set(previous_event_map))
+        removed_event_ids = sorted(set(previous_event_map) - set(current_event_map))
+        changed_event_ids = sorted(
+            event_id
+            for event_id in set(current_event_map) & set(previous_event_map)
+            if current_event_map[event_id] != previous_event_map[event_id]
+        )
+
+        added_asset_keys = sorted(set(current_asset_map) - set(previous_asset_map))
+        removed_asset_keys = sorted(set(previous_asset_map) - set(current_asset_map))
+        changed_asset_keys: list[str] = []
+        content_dirty_asset_keys: set[str] = set(added_asset_keys)
+        previous_asset_paths = {
+            asset_key: str(asset.get("ExportPath", ""))
+            for asset_key, asset in previous_asset_map.items()
+        }
+        for asset_key in sorted(set(current_asset_map) & set(previous_asset_map)):
+            current_asset = current_asset_map[asset_key]
+            previous_asset = previous_asset_map[asset_key]
+            metadata_changed = self._asset_metadata_signature(current_asset) != self._asset_metadata_signature(previous_asset)
+            content_changed = self._asset_content_signature(current_asset) != self._asset_content_signature(previous_asset)
+            previous_export_path = str(previous_asset.get("ExportPath", ""))
+            previous_asset_file = previous_assets_dir / previous_export_path if previous_export_path else None
+            if metadata_changed:
+                changed_asset_keys.append(asset_key)
+            if content_changed or previous_asset_file is None or not previous_asset_file.exists():
+                content_dirty_asset_keys.add(asset_key)
+
+        runtime_format_changed = bool(previous_runtime_payload) and current_runtime_payload.get("RuntimeAudioFormat") != previous_runtime_payload.get("RuntimeAudioFormat")
+        export_is_seeded = previous_manifest_payload is not None and previous_runtime_payload is not None and previous_assets_dir.exists()
+        force_full_reason: str | None = None
+        if normalized_request.scope == "full":
+            force_full_reason = "已按用户请求执行全量构建。"
+        elif not export_is_seeded:
+            force_full_reason = "目标目录缺少可复用的旧导出，已退回全量构建。"
+        elif runtime_format_changed:
+            force_full_reason = "运行时音频格式发生变化，必须重建全部资源。"
+
+        selected_event_ids = tuple(sorted(event_id for event_id in normalized_request.selected_event_ids if event_id in current_event_map))
+        selected_event_id_set = set(selected_event_ids)
+        selected_asset_keys = tuple(
+            sorted(
+                asset_key
+                for asset_key, asset in current_asset_map.items()
+                if selected_event_id_set & set(asset.get("ReferencedByEvents", []))
+            )
+        )
+
+        effective_scope = normalized_request.scope
+        out_of_scope_dirty_asset_keys: list[str] = []
+        if force_full_reason is not None:
+            rebuild_asset_keys = sorted(current_asset_map)
+            effective_scope = "full"
+            reason = force_full_reason
+        else:
+            rebuild_asset_key_set = set(content_dirty_asset_keys)
+            if normalized_request.scope == "selection":
+                selected_asset_key_set = set(selected_asset_keys)
+                out_of_scope_dirty_asset_keys = sorted(rebuild_asset_key_set - selected_asset_key_set)
+                if out_of_scope_dirty_asset_keys:
+                    effective_scope = "incremental"
+                    reason = "检测到选区外仍有脏资源；为保证完整包一致性，已自动扩展为增量构建。"
+                else:
+                    reason = "已按当前选区推导脏资源并执行选中构建；元数据文件仍会全量刷新。"
+            else:
+                reason = "将复用未变化资源，仅重建受影响音频，并全量刷新元数据文件。"
+            rebuild_asset_keys = sorted(rebuild_asset_key_set)
+
+        rebuild_asset_key_set = set(rebuild_asset_keys)
+        reused_asset_keys = sorted(asset_key for asset_key in current_asset_map if asset_key not in rebuild_asset_key_set)
+
+        return ExportPlan(
+            requested_scope=normalized_request.scope,
+            effective_scope=effective_scope,
+            reason=reason,
+            selection_label=normalized_request.selection_label,
+            selected_event_ids=selected_event_ids,
+            selected_asset_keys=selected_asset_keys,
+            added_event_ids=tuple(added_event_ids),
+            changed_event_ids=tuple(changed_event_ids),
+            removed_event_ids=tuple(removed_event_ids),
+            added_asset_keys=tuple(added_asset_keys),
+            changed_asset_keys=tuple(changed_asset_keys),
+            removed_asset_keys=tuple(removed_asset_keys),
+            rebuilt_asset_keys=tuple(rebuild_asset_keys),
+            reused_asset_keys=tuple(reused_asset_keys),
+            out_of_scope_dirty_asset_keys=tuple(out_of_scope_dirty_asset_keys),
+            current_asset_entries=current_asset_entries,
+            current_runtime_payload=current_runtime_payload,
+            previous_asset_paths=previous_asset_paths,
+        )
 
     def _write_export(
         self,
@@ -60,6 +237,8 @@ class RuntimeExporter:
         export_root: Path,
         issues: list[ValidationIssue],
         copy_assets: bool,
+        plan: ExportPlan,
+        previous_export_root: Path,
     ) -> ExportResult:
         export_root.mkdir(parents=True, exist_ok=True)
 
@@ -69,12 +248,12 @@ class RuntimeExporter:
         report_file = export_root / DEFAULT_BUILD_REPORT_FILENAME
         assets_dir = export_root / DEFAULT_EXPORT_ASSETS_DIRNAME
 
-        asset_entries = self._collect_asset_entries(project)
+        asset_entries = plan.current_asset_entries
         if copy_assets:
-            self._copy_assets(asset_entries, assets_dir)
+            self._materialize_assets(asset_entries, plan, previous_export_root, assets_dir)
 
         data_file.write_text(
-            json.dumps(self._build_runtime_payload(project), ensure_ascii=False, indent=2),
+            json.dumps(plan.current_runtime_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         enum_file.write_text(self._build_event_enum(project), encoding="utf-8")
@@ -84,7 +263,7 @@ class RuntimeExporter:
         )
         report_file.write_text(
             json.dumps(
-                self._build_report_payload(project, issues, [data_file, enum_file, manifest_file, report_file], assets_dir),
+                self._build_report_payload(project, issues, [data_file, enum_file, manifest_file, report_file], assets_dir, plan),
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -98,6 +277,7 @@ class RuntimeExporter:
             manifest_file=manifest_file,
             report_file=report_file,
             assets_dir=assets_dir,
+            plan=plan,
         )
 
     def _commit_export(self, temp_root: Path, export_root: Path) -> None:
@@ -187,6 +367,7 @@ class RuntimeExporter:
                     "LoopEndMs": entry["LoopEndMs"],
                     "FileSize": entry["FileSize"],
                     "Hash": entry["Hash"],
+                    "BuildFingerprint": entry["BuildFingerprint"],
                     "ReferencedByEvents": entry["ReferencedByEvents"],
                 }
             )
@@ -198,6 +379,7 @@ class RuntimeExporter:
         issues: list[ValidationIssue],
         exported_files: list[Path],
         assets_dir: Path,
+        plan: ExportPlan,
     ) -> dict[str, object]:
         return {
             "ProjectVersion": project.project_version,
@@ -209,6 +391,7 @@ class RuntimeExporter:
             "ExportedFiles": [path.name for path in exported_files],
             "AssetsDirectory": assets_dir.name,
             "Issues": [asdict(issue) for issue in issues],
+            "BuildPlan": plan.to_report_dict(),
         }
 
     def _collect_asset_entries(self, project: AudioProject) -> list[dict[str, object]]:
@@ -231,6 +414,7 @@ class RuntimeExporter:
                 )
 
         entries: list[dict[str, object]] = []
+        runtime_format = project.settings.runtime_audio_format.lower()
         for asset_key in sorted(owners):
             source_path = source_paths.get(asset_key)
             export_path = export_paths[asset_key]
@@ -243,7 +427,7 @@ class RuntimeExporter:
                     "SourcePath": str(source_path) if source_path else "",
                     "ExportPath": export_path,
                     "SourceFormat": source_path.suffix.lstrip(".").lower() if source_path else "",
-                    "RuntimeFormat": project.settings.runtime_audio_format.lower(),
+                    "RuntimeFormat": runtime_format,
                     "TrimStartMs": clip.trim_start_ms,
                     "TrimEndMs": clip.trim_end_ms,
                     "FadeInMs": clip.fade_in_ms,
@@ -252,6 +436,7 @@ class RuntimeExporter:
                     "LoopEndMs": clip.loop_end_ms,
                     "FileSize": file_size,
                     "Hash": file_hash,
+                    "BuildFingerprint": self._build_asset_fingerprint(file_hash, runtime_format, clip),
                     "ReferencedByEvents": sorted(owners[asset_key]),
                     "Clip": clip,
                     "ProjectSettings": project.settings,
@@ -259,21 +444,48 @@ class RuntimeExporter:
             )
         return entries
 
-    def _copy_assets(self, asset_entries: list[dict[str, object]], assets_dir: Path) -> None:
+    def _materialize_assets(
+        self,
+        asset_entries: list[dict[str, object]],
+        plan: ExportPlan,
+        previous_export_root: Path,
+        assets_dir: Path,
+    ) -> None:
         assets_dir.mkdir(parents=True, exist_ok=True)
-        for entry in asset_entries:
-            source_path = entry["SourcePath"]
-            if not source_path:
+        entries_by_key = {str(entry["AssetKey"]): entry for entry in asset_entries}
+        for asset_key in plan.rebuilt_asset_keys:
+            entry = entries_by_key.get(asset_key)
+            if entry is None:
                 continue
-            source = Path(source_path)
-            if not source.exists():
-                continue
-            target = assets_dir / str(entry["ExportPath"])
-            clip = entry["Clip"]
-            project_settings = entry["ProjectSettings"]
-            self.audio_processor.export_clip(clip, project_settings, target)
+            self._export_asset_entry(entry, assets_dir)
 
-    def _resolve_asset_export_path(self, clip, runtime_audio_format: str) -> str:
+        previous_assets_dir = previous_export_root / DEFAULT_EXPORT_ASSETS_DIRNAME
+        for asset_key in plan.reused_asset_keys:
+            entry = entries_by_key.get(asset_key)
+            if entry is None:
+                continue
+            previous_export_path = plan.previous_asset_paths.get(asset_key) or str(entry["ExportPath"])
+            previous_asset_path = previous_assets_dir / previous_export_path
+            if previous_asset_path.exists():
+                target = assets_dir / str(entry["ExportPath"])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(previous_asset_path, target)
+                continue
+            self._export_asset_entry(entry, assets_dir)
+
+    def _export_asset_entry(self, entry: dict[str, object], assets_dir: Path) -> None:
+        source_path = str(entry["SourcePath"])
+        if not source_path:
+            return
+        source = Path(source_path)
+        if not source.exists():
+            return
+        target = assets_dir / str(entry["ExportPath"])
+        clip = entry["Clip"]
+        project_settings = entry["ProjectSettings"]
+        self.audio_processor.export_clip(clip, project_settings, target)
+
+    def _resolve_asset_export_path(self, clip: ClipModel, runtime_audio_format: str) -> str:
         base_path = clip.export_path or clip.asset_key or clip.id
         normalized = base_path.replace("\\", "/")
         suffix = f".{runtime_audio_format.lower()}"
@@ -288,3 +500,65 @@ class RuntimeExporter:
             for chunk in iter(lambda: stream.read(8192), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    def _normalize_request(self, request: ExportRequest | None) -> ExportRequest:
+        if request is None:
+            return ExportRequest()
+        normalized_scope = str(request.scope or "full").strip().lower()
+        if normalized_scope not in {"full", "incremental", "selection"}:
+            normalized_scope = "full"
+        selected_event_ids = tuple(dict.fromkeys(str(event_id) for event_id in request.selected_event_ids if str(event_id).strip()))
+        selection_label = str(request.selection_label or "整个工程").strip() or "整个工程"
+        return ExportRequest(
+            scope=normalized_scope,
+            selected_event_ids=selected_event_ids,
+            selection_label=selection_label,
+        )
+
+    def _load_json_if_exists(self, file_path: Path) -> dict[str, object] | None:
+        if not file_path.exists():
+            return None
+        try:
+            return json.loads(file_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+
+    def _build_asset_fingerprint(self, file_hash: str, runtime_format: str, clip: ClipModel) -> str:
+        payload = {
+            "Hash": file_hash,
+            "RuntimeFormat": runtime_format,
+            "TrimStartMs": clip.trim_start_ms,
+            "TrimEndMs": clip.trim_end_ms,
+            "FadeInMs": clip.fade_in_ms,
+            "FadeOutMs": clip.fade_out_ms,
+            "LoopStartMs": clip.loop_start_ms,
+            "LoopEndMs": clip.loop_end_ms,
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    def _asset_content_signature(self, asset: dict[str, object]) -> tuple[object, ...]:
+        return (
+            asset.get("BuildFingerprint") or asset.get("Hash"),
+            asset.get("RuntimeFormat"),
+            asset.get("TrimStartMs"),
+            asset.get("TrimEndMs"),
+            asset.get("FadeInMs"),
+            asset.get("FadeOutMs"),
+            asset.get("LoopStartMs"),
+            asset.get("LoopEndMs"),
+        )
+
+    def _asset_metadata_signature(self, asset: dict[str, object]) -> tuple[object, ...]:
+        return (
+            asset.get("SourcePath"),
+            asset.get("ExportPath"),
+            asset.get("SourceFormat"),
+            asset.get("RuntimeFormat"),
+            asset.get("TrimStartMs"),
+            asset.get("TrimEndMs"),
+            asset.get("FadeInMs"),
+            asset.get("FadeOutMs"),
+            asset.get("LoopStartMs"),
+            asset.get("LoopEndMs"),
+            tuple(asset.get("ReferencedByEvents", [])),
+        )

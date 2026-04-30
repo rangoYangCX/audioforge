@@ -59,6 +59,52 @@ def _apply_event_form(
     QApplication.processEvents()
 
 
+def test_selected_build_preview_updates_scope_and_plan_labels(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.show()
+    QApplication.processEvents()
+    controller.new_project()
+    QApplication.processEvents()
+
+    export_root = tmp_path / "Export"
+    controller.project.settings.export_root = str(export_root)
+    controller.project.settings.source_audio_format = "wav"
+    controller.project.settings.runtime_audio_format = "wav"
+
+    primary_wav = write_wav_fixture(tmp_path / "wav" / "UI_Click_A.wav", frequency_hz=440.0, duration_seconds=0.2)
+    secondary_wav = write_wav_fixture(tmp_path / "wav" / "UI_Click_B.wav", frequency_hz=660.0, duration_seconds=0.2)
+    controller.import_audio_files_as_events(
+        [str(primary_wav), str(secondary_wav)],
+        template={
+            "bus_name": "UI",
+            "asset_prefix": "ui/preview",
+            "tags": ["ui"],
+        },
+    )
+    QApplication.processEvents()
+
+    controller.select_node("event", "UI_Click_A")
+    QApplication.processEvents()
+    selection_index = controller.window.build_scope_combo.findData("selection")
+    controller.window.build_scope_combo.setCurrentIndex(selection_index)
+
+    controller.preview_export_diff()
+    QApplication.processEvents()
+
+    preview_text = controller.window.build_preview_output.toPlainText()
+
+    assert controller.window.build_scope_target_label.text() == "当前范围：事件 UI_Click_A"
+    assert "请求 选中构建" in controller.window.build_plan_summary_label.text()
+    assert "请求范围：选中构建" in preview_text
+    assert "实际执行：全量构建" in preview_text
+    assert "构建目标：事件 UI_Click_A" in preview_text
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_full_authoring_flow_from_wav_import_to_export(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 

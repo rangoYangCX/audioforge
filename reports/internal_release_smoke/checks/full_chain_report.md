@@ -1,6 +1,6 @@
 # AudioForge Full-Chain Report
 
-- Generated At: 2026-04-30T04:11:33Z
+- Generated At: 2026-04-30T10:17:20Z
 - Overall: PASS
 - Workspace: C:\Users\EDY\wwise
 - Export Dir: C:\Users\EDY\wwise\reports\internal_release_smoke\export
@@ -23,18 +23,18 @@
 - platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0
 - rootdir: C:\Users\EDY\wwise
 - configfile: pyproject.toml
-- collected 62 items
+- collected 65 items
 - tests\unit\test_developer_handoff_sample.py .                            [  1%]
-- tests\unit\test_exporter.py ....                                         [  8%]
-- tests\unit\test_full_chain_check.py ..                                   [ 11%]
-- tests\unit\test_main_controller_full_flow.py ......                      [ 20%]
-- tests\unit\test_main_controller_layout.py .............................. [ 69%]
-- .....                                                                    [ 77%]
-- tests\unit\test_preview_bus_mixer.py ..                                  [ 80%]
-- tests\unit\test_project_serializer.py .                                  [ 82%]
-- tests\unit\test_recovery_service.py .                                    [ 83%]
+- tests\unit\test_exporter.py ......                                       [ 10%]
+- tests\unit\test_full_chain_check.py ..                                   [ 13%]
+- tests\unit\test_main_controller_full_flow.py .......                     [ 24%]
+- tests\unit\test_main_controller_layout.py .............................. [ 70%]
+- .....                                                                    [ 78%]
+- tests\unit\test_preview_bus_mixer.py ..                                  [ 81%]
+- tests\unit\test_project_serializer.py .                                  [ 83%]
+- tests\unit\test_recovery_service.py .                                    [ 84%]
 - tests\unit\test_validator.py ..........                                  [100%]
-- ============================= 62 passed in 11.75s =============================
+- ============================= 65 passed in 25.45s =============================
 
 ### export_bundle - PASS
 

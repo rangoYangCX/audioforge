@@ -153,6 +153,8 @@ class MainWindow(QMainWindow):
         self._pending_main_splitter_sizes: list[int] | None = None
         self._pending_content_top_splitter_sizes: list[int] | None = None
         self._pending_layout_flush = False
+        self._build_status_summary_override: str | None = None
+        self._build_status_detail_override: str | None = None
         self._closing_main_window = False
         self._loading_clip_details = False
         self._clip_lookup: dict[str, object] = {}
@@ -472,6 +474,18 @@ class MainWindow(QMainWindow):
         self.sort_order_combo.addItems(["升序", "降序"])
         self.sort_clips_button = QPushButton("排序")
         self.preview_export_diff_button = QPushButton("预览导出差异")
+        self.build_scope_combo = QComboBox()
+        self.build_scope_combo.addItem("增量构建（默认）", "incremental")
+        self.build_scope_combo.addItem("全量构建", "full")
+        self.build_scope_combo.addItem("选中构建", "selection")
+        self.build_scope_target_label = QLabel("当前范围：整个工程")
+        self.build_scope_target_label.setWordWrap(True)
+        self.build_scope_hint_label = QLabel("默认只重建受影响音频资源，元数据文件会全量刷新。")
+        self.build_scope_hint_label.setWordWrap(True)
+        self.build_plan_summary_label = QLabel("尚未生成构建计划。")
+        self.build_plan_summary_label.setWordWrap(True)
+        self.build_plan_detail_label = QLabel("点击“预览导出差异”或执行构建后，这里会显示重建、复用和移除计划。")
+        self.build_plan_detail_label.setWordWrap(True)
         self.loudness_scan_button = QPushButton("响度扫描")
         self.recent_projects_combo = QComboBox()
         self.recent_projects_combo.setMinimumWidth(280)
@@ -759,6 +773,13 @@ class MainWindow(QMainWindow):
         build_layout = QVBoxLayout(self.build_overview_group)
         build_layout.addWidget(QLabel("休闲游戏推荐流程：WAV 源资源 -> OGG 运行时导出"))
         build_layout.addWidget(QLabel("建议交付：AudioData.json、AudioManifest.json、AudioEventID.cs 与轻量音频资源目录"))
+        build_scope_form = QFormLayout()
+        build_scope_form.addRow("构建范围", self.build_scope_combo)
+        build_scope_form.addRow("当前选区", self.build_scope_target_label)
+        build_layout.addLayout(build_scope_form)
+        build_layout.addWidget(self.build_scope_hint_label)
+        build_layout.addWidget(self.build_plan_summary_label)
+        build_layout.addWidget(self.build_plan_detail_label)
         build_layout.addWidget(self.preview_export_diff_button)
         build_layout.addStretch(1)
 
@@ -1086,7 +1107,6 @@ class MainWindow(QMainWindow):
         self.workspace_splitter.addWidget(self.activity_panel)
         self.workspace_splitter.setStretchFactor(0, 8)
         self.workspace_splitter.setStretchFactor(1, 1)
-        self.activity_panel.hide()
         self._set_workspace_splitter_sizes(self._default_workspace_splitter_sizes)
 
         workspace_container = QWidget()
@@ -2835,12 +2855,18 @@ class MainWindow(QMainWindow):
         self.buses_overview_hint_label.setText(
             f"当前浏览总线 {current_project_bus}。可直接切默认总线、挂到 Master，或回到事件总线继续调整。"
         )
-        self.build_workspace_status_label.setText(
-            f"导出目录 {export_root} | 运行时格式 {runtime_format} | 最近结果页 {current_results_title}。"
-        )
-        self.build_overview_hint_label.setText(
-            f"导出目录 {export_root}，运行时格式 {runtime_format}。构建后优先回看 {current_results_title}。"
-        )
+        if self._build_status_detail_override is not None:
+            self.build_workspace_status_label.setText(self._build_status_detail_override)
+        else:
+            self.build_workspace_status_label.setText(
+                f"导出目录 {export_root} | 运行时格式 {runtime_format} | 最近结果页 {current_results_title}。"
+            )
+        if self._build_status_summary_override is not None:
+            self.build_overview_hint_label.setText(self._build_status_summary_override)
+        else:
+            self.build_overview_hint_label.setText(
+                f"导出目录 {export_root}，运行时格式 {runtime_format}。构建后优先回看 {current_results_title}。"
+            )
         self.validation_overview_hint_label.setText(
             f"{self.validation_filter_status_label.text()} 当前结果页为 {current_results_title}。"
         )
@@ -4345,8 +4371,38 @@ class MainWindow(QMainWindow):
                 highlight_items.append({"title": f"构建摘要 | {line}", "detail": line})
         self._set_report_items(self.build_issue_list, highlight_items)
         self._restore_report_panel_state(self.build_issue_list, self.build_report_output, panel_state)
-        self.build_summary_label.setText("构建问题中心：优先看 Schema、BusConfigs、资源差异与导出数量。")
-        self.report_detail_label.setText("构建报告已刷新，生成预览已同步。")
+        if self._build_status_summary_override is None:
+            self.build_summary_label.setText("构建问题中心：优先看 Schema、BusConfigs、资源差异与导出数量。")
+        if self._build_status_detail_override is None:
+            self.report_detail_label.setText("构建报告已刷新，生成预览已同步。")
+        self._update_workspace_summary_labels()
+
+    def current_build_scope(self) -> str:
+        return str(self.build_scope_combo.currentData() or "incremental")
+
+    def set_build_selection_context(self, summary: str, detail: str) -> None:
+        self.build_scope_target_label.setText(summary)
+        self.build_scope_hint_label.setText(detail)
+
+    def set_build_plan_summary(self, summary: str, detail: str) -> None:
+        self.build_plan_summary_label.setText(summary)
+        self.build_plan_detail_label.setText(detail)
+
+    def set_build_status(self, summary: str, detail: str, *, activate_results: bool = False) -> None:
+        self._build_status_summary_override = summary
+        self._build_status_detail_override = detail
+        self.build_summary_label.setText(summary)
+        self.build_workspace_status_label.setText(detail)
+        self.report_detail_label.setText(detail)
+        self.report_detail_label.setToolTip(detail)
+        if activate_results:
+            self.report_pages.setCurrentIndex(2)
+            self.report_tabs.setCurrentIndex(2)
+        self._update_workspace_summary_labels()
+
+    def clear_build_status(self) -> None:
+        self._build_status_summary_override = None
+        self._build_status_detail_override = None
         self._update_workspace_summary_labels()
 
     def set_loudness_report(self, report_text: str, rows: list[dict[str, object]] | None = None, summary_text: str | None = None) -> None:
@@ -4679,7 +4735,6 @@ class MainWindow(QMainWindow):
         self.audio_meter_right_bar.setValue(self._meter_progress(right_peak_db))
         self.momentary_plot.set_series(source.momentary_history or [], processed.momentary_history or [])
         self.short_term_plot.set_series(source.short_term_history or [], processed.short_term_history or [])
-        self.show_loudness_view()
 
     def clear_preview_audio_metrics(self, reason: str) -> None:
         self._held_true_peak_db = None

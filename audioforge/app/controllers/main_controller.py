@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, new_id
 from audioforge.app.services.audio_meter_service import AudioMeterService
 from audioforge.app.services.command_history import CommandHistory, EditorSnapshot
-from audioforge.app.services.exporter import RuntimeExporter
+from audioforge.app.services.exporter import ExportPlan, ExportRequest, RuntimeExporter
 from audioforge.app.services.playback_service import PlaybackService
 from audioforge.app.services.preview_audio_renderer import PreviewAudioRenderer
 from audioforge.app.services.preview_bus_mixer import MASTER_BUS_NAME, PreviewBusMixer
@@ -199,6 +199,7 @@ class MainController:
         self.window.set_history_actions_enabled(self.history.can_undo(), self.history.can_redo())
         self.window.set_dirty_state(self.is_dirty)
         self._update_object_context()
+        self._sync_build_selection_context()
         self.window.apply_navigation_state(navigation_state)
 
     @property
@@ -331,6 +332,7 @@ class MainController:
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
         self._sync_multi_selection_affordances()
         self._update_object_context()
+        self._sync_build_selection_context()
         self.window.apply_navigation_state(navigation_state)
 
     def select_nodes(self, nodes: list[tuple[str, str]]) -> None:
@@ -350,6 +352,7 @@ class MainController:
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
         self._sync_multi_selection_affordances()
         self._update_object_context()
+        self._sync_build_selection_context()
 
     def navigate_to_parent(self) -> None:
         if self.selected_event_id is not None:
@@ -1460,6 +1463,90 @@ class MainController:
         bus_names = sorted({event.bus for event in self.current_events})
         return "、".join(bus_names) if bus_names else "-"
 
+    def _build_scope_label(self, scope: str) -> str:
+        return {
+            "full": "全量构建",
+            "incremental": "增量构建",
+            "selection": "选中构建",
+        }.get(scope, scope or "构建")
+
+    def _collect_folder_event_ids(self, folder_id: str | None) -> list[str]:
+        if folder_id is None or folder_id not in self.project.folders:
+            return []
+        folder = self.project.folders[folder_id]
+        event_ids = [event_id for event_id in folder.child_event_ids if event_id in self.project.events]
+        for child_folder_id in folder.child_folder_ids:
+            event_ids.extend(self._collect_folder_event_ids(child_folder_id))
+        return event_ids
+
+    def _resolve_build_selection_context(self) -> tuple[list[str], str, str]:
+        if self.selected_event_ids:
+            event_ids = [event_id for event_id in self.selected_event_ids if event_id in self.project.events]
+            if len(event_ids) == 1:
+                return (
+                    event_ids,
+                    f"当前范围：事件 {event_ids[0]}",
+                    "选中构建会以当前事件为脏根；若选区外也有脏资源，会自动扩展为增量构建。",
+                )
+            return (
+                event_ids,
+                f"当前范围：{len(event_ids)} 个选中事件",
+                f"选中构建会以这 {len(event_ids)} 个事件为脏根；元数据文件仍会全量刷新。",
+            )
+        if self.selected_event_id is not None and self.selected_event_id in self.project.events:
+            return (
+                [self.selected_event_id],
+                f"当前范围：事件 {self.selected_event_id}",
+                "选中构建会以当前事件为脏根；若选区外也有脏资源，会自动扩展为增量构建。",
+            )
+        if self.selected_folder_id is not None and self.selected_folder_id in self.project.folders:
+            folder = self.project.folders[self.selected_folder_id]
+            event_ids = self._collect_folder_event_ids(folder.id)
+            return (
+                event_ids,
+                f"当前范围：文件夹 {folder.name}（{len(event_ids)} 个事件）",
+                "选中构建会覆盖当前文件夹及其子文件夹内的事件；若工程还有其他脏资源，会自动扩展为增量构建。",
+            )
+        return (
+            [],
+            "当前范围：整个工程",
+            "增量和全量构建覆盖整个工程；如需选中构建，请先选择事件或包含事件的文件夹。",
+        )
+
+    def _sync_build_selection_context(self) -> None:
+        _, summary, detail = self._resolve_build_selection_context()
+        self.window.set_build_selection_context(summary, detail)
+
+    def _selection_build_unavailable_message(self) -> str:
+        return "当前选区没有可导出的事件，请先选择事件或包含事件的文件夹。"
+
+    def _current_build_request(self) -> ExportRequest | None:
+        scope = self.window.current_build_scope()
+        selected_event_ids, summary, detail = self._resolve_build_selection_context()
+        self.window.set_build_selection_context(summary, detail)
+        selection_label = summary.replace("当前范围：", "", 1).strip() or "整个工程"
+        if scope == "selection" and not selected_event_ids:
+            return None
+        return ExportRequest(
+            scope=scope,
+            selected_event_ids=tuple(selected_event_ids if scope == "selection" else ()),
+            selection_label=selection_label,
+        )
+
+    def _format_build_plan_summary(self, plan: ExportPlan) -> tuple[str, str]:
+        summary = (
+            f"请求 {self._build_scope_label(plan.requested_scope)} | 实际 {self._build_scope_label(plan.effective_scope)} | "
+            f"重建 {len(plan.rebuilt_asset_keys)} | 复用 {len(plan.reused_asset_keys)} | 移除 {len(plan.removed_asset_keys)}"
+        )
+        detail_parts = [
+            f"目标 {plan.selection_label}",
+            f"事件 新增 {len(plan.added_event_ids)} / 变更 {len(plan.changed_event_ids)} / 移除 {len(plan.removed_event_ids)}",
+            plan.reason,
+        ]
+        if plan.out_of_scope_dirty_asset_keys:
+            detail_parts.append(f"选区外附带脏资源 {len(plan.out_of_scope_dirty_asset_keys)}")
+        return summary, " | ".join(detail_parts)
+
     def _update_object_context(self) -> None:
         if len(self.selected_event_ids) > 1:
             selected_events = self.current_events
@@ -1711,31 +1798,76 @@ class MainController:
         self.window.show_validation_summary(issues)
 
     def build_project(self) -> None:
+        build_request = self._current_build_request()
+        if build_request is None:
+            message = self._selection_build_unavailable_message()
+            self.window.set_build_plan_summary("选中构建未就绪。", message)
+            self.window.set_build_status("选中构建无法开始。", message, activate_results=True)
+            self.window.set_build_report("构建未开始\n\n原因：当前选区没有可导出的事件。\n请先选择事件或包含事件的文件夹。")
+            self.window.show_report_tab(2)
+            self.window.append_log(f"选中构建已中止：{message}")
+            return
+
+        requested_scope_label = self._build_scope_label(build_request.scope)
+        self.window.build_execute_button.setEnabled(False)
+        self.window.build_button.setEnabled(False)
+        self.window.set_build_status(
+            "正在构建导出，请稍候。",
+            f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 正在导出到：{self.project.settings.export_root}",
+            activate_results=True,
+        )
+        self.window.append_log(f"已开始构建导出：模式={requested_scope_label} 目标={build_request.selection_label}")
+        self.window.show_report_tab(2)
+        self.application.processEvents()
+
         issues = self.validator.validate(self.project)
         error_count = sum(1 for issue in issues if issue.severity == "Error")
         self.window.set_validation_report(self._format_validation_report(issues), issues)
         if error_count:
             self.window.append_log(f"构建已中止，存在 {error_count} 个错误。")
+            self.window.set_build_plan_summary(
+                "构建已中止。",
+                f"{requested_scope_label} 在校验阶段被拦截：存在 {error_count} 个错误。",
+            )
+            self.window.set_build_status(
+                "构建已中止。",
+                f"校验阶段发现 {error_count} 个错误，请先在校验修复页处理后再重新构建。",
+            )
             self.window.show_report_tab(1)
             self.window.show_validation_summary(issues)
+            self.window.build_execute_button.setEnabled(True)
+            self.window.build_button.setEnabled(True)
             return
 
         export_root = Path(self.project.settings.export_root)
         if not export_root.is_absolute():
             export_root = Path.cwd() / export_root
 
+        plan: ExportPlan | None = None
         try:
-            result = self.exporter.export(self.project, export_root, issues, copy_assets=True)
+            plan = self.exporter.plan_export(self.project, export_root, build_request)
+            plan_summary, plan_detail = self._format_build_plan_summary(plan)
+            self.window.set_build_plan_summary(plan_summary, plan_detail)
+            result = self.exporter.export(self.project, export_root, issues, copy_assets=True, request=build_request, plan=plan)
             build_report = self._format_build_report(result.report_file, result.manifest_file)
         except Exception as exc:
             failure_message = f"构建失败：{exc}"
             self.window.append_log(failure_message)
+            self.window.set_build_status(
+                "构建失败。",
+                f"模式：{requested_scope_label} | 导出目录：{export_root} | 原因：{exc}",
+                activate_results=True,
+            )
+            if plan is not None:
+                plan_summary, plan_detail = self._format_build_plan_summary(plan)
+                self.window.set_build_plan_summary(plan_summary, plan_detail)
             self.window.set_build_report(
                 "\n".join(
                     [
                         "构建失败",
                         "",
                         f"工程：{self.project.name}",
+                        f"请求范围：{requested_scope_label}",
                         f"导出目录：{export_root}",
                         f"原因：{exc}",
                     ]
@@ -1743,20 +1875,46 @@ class MainController:
             )
             self.window.show_report_tab(2)
             QMessageBox.critical(self.window, "构建失败", str(exc))
+            self.window.build_execute_button.setEnabled(True)
+            self.window.build_button.setEnabled(True)
             return
 
         self.window.append_log(f"构建完成：{result.data_file}")
         self.window.append_log(f"已生成清单：{result.manifest_file}")
+        effective_scope_label = self._build_scope_label(result.plan.effective_scope)
+        scope_display = requested_scope_label if effective_scope_label == requested_scope_label else f"{requested_scope_label} -> {effective_scope_label}"
+        plan_summary, plan_detail = self._format_build_plan_summary(result.plan)
+        self.window.set_build_plan_summary(plan_summary, plan_detail)
+        self.window.set_build_status(
+            "构建完成。",
+            f"模式：{scope_display} | 已导出到：{result.data_file} | 清单：{result.manifest_file}",
+            activate_results=True,
+        )
         self.window.set_build_report(build_report)
         self.window.show_report_tab(2)
+        self.window.build_execute_button.setEnabled(True)
+        self.window.build_button.setEnabled(True)
 
     def preview_export_diff(self) -> None:
+        self.window.clear_build_status()
+        build_request = self._current_build_request()
+        if build_request is None:
+            message = self._selection_build_unavailable_message()
+            self.window.set_build_plan_summary("选中构建未就绪。", message)
+            self.window.set_build_report("构建计划不可用\n\n原因：当前选区没有可导出的事件。\n请先选择事件或包含事件的文件夹。")
+            self.window.show_report_tab(2)
+            self.window.append_log(f"选中构建预览已中止：{message}")
+            return
         export_root = Path(self.project.settings.export_root)
         if not export_root.is_absolute():
             export_root = Path.cwd() / export_root
         try:
-            report = self._format_export_diff_preview(export_root)
+            plan = self.exporter.plan_export(self.project, export_root, build_request)
+            plan_summary, plan_detail = self._format_build_plan_summary(plan)
+            self.window.set_build_plan_summary(plan_summary, plan_detail)
+            report = self._format_export_diff_preview(export_root, plan)
         except Exception as exc:
+            self.window.set_build_plan_summary("构建计划生成失败。", str(exc))
             report = f"导出差异预览失败\n\n导出目录：{export_root}\n原因：{exc}"
             self.window.append_log(f"导出差异预览失败：{exc}")
         self.window.set_build_report(report)
@@ -1838,7 +1996,18 @@ class MainController:
         report_payload = json.loads(report_file.read_text(encoding="utf-8"))
         manifest_payload = json.loads(manifest_file.read_text(encoding="utf-8"))
         runtime_payload = json.loads((report_file.parent / "AudioData.json").read_text(encoding="utf-8"))
+        build_plan = report_payload.get("BuildPlan", {})
+        requested_scope = self._build_scope_label(str(build_plan.get("RequestedScope", "full")))
+        effective_scope = self._build_scope_label(str(build_plan.get("EffectiveScope", "full")))
         lines = [
+            f"请求构建范围：{requested_scope}",
+            f"实际执行范围：{effective_scope}",
+            f"构建目标：{build_plan.get('SelectionLabel', '整个工程')}",
+            f"计划说明：{build_plan.get('Reason', '-')}",
+            f"重建资源：{len(build_plan.get('RebuiltAssetKeys', []))}",
+            f"复用资源：{len(build_plan.get('ReusedAssetKeys', []))}",
+            f"移除资源：{len(build_plan.get('RemovedAssetKeys', []))}",
+            "",
             f"工程版本：{report_payload.get('ProjectVersion', 'n/a')}",
             f"Schema 版本：{report_payload.get('SchemaVersion', 'n/a')}",
             f"事件数：{report_payload.get('EventCount', 0)}",
@@ -1849,6 +2018,19 @@ class MainController:
             "",
             f"导出总线数：{len(runtime_payload.get('BusConfigs', []))}",
         ]
+        if build_plan.get("OutOfScopeDirtyAssetKeys"):
+            lines.append(f"选区外附带脏资源：{len(build_plan.get('OutOfScopeDirtyAssetKeys', []))}")
+            for asset_key in build_plan.get("OutOfScopeDirtyAssetKeys", [])[:12]:
+                lines.append(f"- {asset_key}")
+            lines.append("")
+        rebuilt_assets = build_plan.get("RebuiltAssetKeys", [])
+        if rebuilt_assets:
+            lines.append(f"本次实际重建：{len(rebuilt_assets)}")
+            for asset_key in rebuilt_assets[:20]:
+                lines.append(f"- {asset_key}")
+            if len(rebuilt_assets) > 20:
+                lines.append(f"…… 还有 {len(rebuilt_assets) - 20} 个重建资源")
+            lines.append("")
         for bus_payload in runtime_payload.get("BusConfigs", [])[:10]:
             lines.append(
                 f"- {bus_payload.get('Name', '')} -> {bus_payload.get('ParentBus', MASTER_BUS_NAME)} [{bus_payload.get('VolumeDb', 0.0):.1f}dB muted={bus_payload.get('IsMuted', False)}]"
@@ -1867,9 +2049,19 @@ class MainController:
             lines.append(f"…… 还有 {len(manifest_payload.get('Assets', [])) - 20} 个资源")
         return "\n".join(lines)
 
-    def _format_export_diff_preview(self, export_root: Path) -> str:
-        lines = [f"导出目录：{export_root}", ""]
-        current_runtime_payload = self.exporter._build_runtime_payload(self.project)
+    def _format_export_diff_preview(self, export_root: Path, plan: ExportPlan) -> str:
+        lines = [
+            f"导出目录：{export_root}",
+            f"请求范围：{self._build_scope_label(plan.requested_scope)}",
+            f"实际执行：{self._build_scope_label(plan.effective_scope)}",
+            f"构建目标：{plan.selection_label}",
+            f"计划说明：{plan.reason}",
+            "",
+            f"事件变更：新增 {len(plan.added_event_ids)} | 变更 {len(plan.changed_event_ids)} | 移除 {len(plan.removed_event_ids)}",
+            f"资源计划：重建 {len(plan.rebuilt_asset_keys)} | 复用 {len(plan.reused_asset_keys)} | 移除 {len(plan.removed_asset_keys)}",
+            "",
+        ]
+        current_runtime_payload = plan.current_runtime_payload
         current_bus_configs = {str(bus.get("Name", "")): bus for bus in current_runtime_payload.get("BusConfigs", [])}
         lines.append(f"当前 BusConfigs：{len(current_bus_configs)}")
         for bus_name, bus_payload in list(current_bus_configs.items())[:12]:
@@ -1877,16 +2069,7 @@ class MainController:
                 f"- {bus_name}: parent={bus_payload.get('ParentBus', MASTER_BUS_NAME)} volume={bus_payload.get('VolumeDb', 0.0):.1f}dB muted={bus_payload.get('IsMuted', False)}"
             )
         lines.append("")
-        current_assets = self.exporter._build_manifest_payload(self.exporter._collect_asset_entries(self.project)).get("Assets", [])
-        current_asset_map = {str(asset.get("AssetKey", "")): asset for asset in current_assets}
-        manifest_file = export_root / "AudioManifest.json"
         data_file = export_root / "AudioData.json"
-        if not manifest_file.exists():
-            lines.append("目标目录还没有旧导出，本次将生成完整资源包。")
-            lines.append("BusConfigs 将随 AudioData.json 首次写出。")
-            lines.extend(f"- 新增 {asset_key}" for asset_key in sorted(current_asset_map))
-            return "\n".join(lines)
-
         if data_file.exists():
             previous_runtime_payload = json.loads(data_file.read_text(encoding="utf-8"))
             previous_bus_configs = {str(bus.get("Name", "")): bus for bus in previous_runtime_payload.get("BusConfigs", [])}
@@ -1905,36 +2088,35 @@ class MainController:
                 lines.extend(f"- 变更总线 {bus_name}" for bus_name in changed_buses[:12])
                 lines.append("")
 
-        previous_manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-        previous_asset_map = {str(asset.get("AssetKey", "")): asset for asset in previous_manifest.get("Assets", [])}
+        if plan.out_of_scope_dirty_asset_keys:
+            lines.append(f"选区外附带脏资源：{len(plan.out_of_scope_dirty_asset_keys)}")
+            lines.extend(f"- {asset_key}" for asset_key in plan.out_of_scope_dirty_asset_keys[:20])
+            lines.append("")
 
-        added = sorted(set(current_asset_map) - set(previous_asset_map))
-        removed = sorted(set(previous_asset_map) - set(current_asset_map))
-        changed: list[str] = []
-        for asset_key in sorted(set(current_asset_map) & set(previous_asset_map)):
-            current_asset = current_asset_map[asset_key]
-            previous_asset = previous_asset_map[asset_key]
-            if any(
-                current_asset.get(field) != previous_asset.get(field)
-                for field in ("ExportPath", "RuntimeFormat", "TrimStartMs", "TrimEndMs", "LoopStartMs", "LoopEndMs", "ReferencedByEvents")
-            ):
-                changed.append(asset_key)
-
-        if not added and not removed and not changed:
-            lines.append("没有检测到导出差异。")
+        if not plan.added_asset_keys and not plan.removed_asset_keys and not plan.changed_asset_keys:
+            lines.append("没有检测到音频资源差异。")
+            if plan.changed_event_ids or plan.added_event_ids or plan.removed_event_ids:
+                lines.append("本次仍会刷新元数据文件，以同步事件参数和总线配置变化。")
             return "\n".join(lines)
 
-        if added:
-            lines.append(f"新增资源：{len(added)}")
-            lines.extend(f"- {asset_key}" for asset_key in added[:20])
+        if plan.added_asset_keys:
+            lines.append(f"新增资源：{len(plan.added_asset_keys)}")
+            lines.extend(f"- {asset_key}" for asset_key in plan.added_asset_keys[:20])
             lines.append("")
-        if removed:
-            lines.append(f"移除资源：{len(removed)}")
-            lines.extend(f"- {asset_key}" for asset_key in removed[:20])
+        if plan.removed_asset_keys:
+            lines.append(f"移除资源：{len(plan.removed_asset_keys)}")
+            lines.extend(f"- {asset_key}" for asset_key in plan.removed_asset_keys[:20])
             lines.append("")
-        if changed:
-            lines.append(f"变更资源：{len(changed)}")
-            lines.extend(f"- {asset_key}" for asset_key in changed[:20])
+        if plan.changed_asset_keys:
+            lines.append(f"变更资源：{len(plan.changed_asset_keys)}")
+            lines.extend(f"- {asset_key}" for asset_key in plan.changed_asset_keys[:20])
+            lines.append("")
+        if plan.rebuilt_asset_keys:
+            lines.append(f"本次将重建资源：{len(plan.rebuilt_asset_keys)}")
+            lines.extend(f"- {asset_key}" for asset_key in plan.rebuilt_asset_keys[:20])
+            lines.append("")
+        if plan.reused_asset_keys:
+            lines.append(f"本次将复用资源：{len(plan.reused_asset_keys)}")
         return "\n".join(lines).strip()
 
     def _apply_event_import_template(self, event: EventModel, template: dict[str, object] | None) -> None:

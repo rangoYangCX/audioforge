@@ -4,10 +4,13 @@ AudioForge Unity 端对接开发文档（第一期）
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
 > 当前文档同步日期：2026-04-30。
-> 当前工具版本：AudioForge 0.04。
+> 当前工具版本：AudioForge 0.05。
 
 0.1 版本增量
 
+- AudioForge 0.05 新增：构建交付页支持全量构建、增量构建、选中构建三种范围，并提供构建计划预览与即时构建反馈。
+- AudioForge 0.05 新增：导出器会基于上次成功导出结果复用未变化资源，仅重建脏资源；`AudioData.json`、`AudioManifest.json`、`AudioEventID.cs` 仍保持全量刷新，因此 Unity 运行时契约不变。
+- AudioForge 0.05 新增：`AudioManifest.json` 为每个资源写出 `BuildFingerprint`，`BuildReport.json` 写出 `BuildPlan`（含 `RequestedScope`、`EffectiveScope`、`SelectionLabel`、`RebuiltAssetKeys`、`ReusedAssetKeys` 等字段），便于大工程联调、CI 和差异审计。
 - AudioForge 0.04 新增：片段波形编辑台、波形缩放/游标/聚焦选区操作、片段淡入 `FadeInMs`、片段淡出 `FadeOutMs`。
 - AudioForge 0.04 新增：导出阶段会把 `TrimStartMs`、`TrimEndMs`、`FadeInMs`、`FadeOutMs` 直接烘焙进导出的运行时音频文件，而不只是停留在编辑器侧试听。
 - AudioForge 0.04 新增：`AudioData.json` 与 `AudioManifest.json` 会写出 `FadeInMs`、`FadeOutMs`，用于调试、审计和后续 Unity 端扩展消费。
@@ -16,7 +19,7 @@ AudioForge Unity 端对接开发文档（第一期）
 0. 当前状态
 
 - 当前工具端适用目标：UI / SFX / BGM 为主、事件驱动为主、接受轻量 SDK 的手游休闲项目。
-- 最近一次仓库内验证结果：`pytest` 62 项通过；真实 WAV 烟雾工程 PASS；全链路检查通过。
+- 最近一次仓库内验证结果：`pytest` 65 项通过；真实 WAV 烟雾工程 PASS；全链路检查通过。
 - 当前参考运行时定位：开发参考实现，可直接用于空项目联调与生产版 SDK 的起步实现，不等于最终生产版音频系统。
 
 1. 文档定位
@@ -26,9 +29,10 @@ AudioForge Unity 端对接开发文档（第一期）
 如果你是第一次接手该 SDK，推荐阅读顺序固定为：
 
 1. 先通读本文档，明确边界、输入输出和最小验收标准。
-2. 再阅读 `unity_package/README.md`，明确独立包与验证镜像的维护边界。
-3. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
-4. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
+2. 再阅读 `CHANGELOG.md`，确认当前版本相对上一版到底改了什么。
+3. 再阅读 `unity_package/README.md`，明确独立包与验证镜像的维护边界。
+4. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
+5. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
 
 本期交接的核心原则只有一条：Unity 端只依赖导出产物，不依赖工具源码，不读取 `.afproj`，也不要求在 Unity 项目中嵌入 Python 运行环境。
 
@@ -38,6 +42,7 @@ AudioForge Unity 端对接开发文档（第一期）
 
 - `<你的实际导出目录>/AudioData.json`
 - `<你的实际导出目录>/AudioManifest.json`
+- `<你的实际导出目录>/BuildReport.json`
 - `<你的实际导出目录>/AudioEventID.cs`
 - `<你的实际导出目录>/Assets/**`
 - `unity_package/Assets/AudioForgeRuntime/**`
@@ -161,6 +166,10 @@ Assets/
 
 导出资源清单。主要用于资源完整性校验、打包比对和排查资源缺失，不应替代 `AudioData.json` 作为业务播放主数据。
 
+自 AudioForge 0.05 起，每个资源条目会额外写出 `BuildFingerprint`。该字段用于工具端区分“资源内容真的变了，需要重建音频”与“只有引用关系或导出审计信息变化”，便于增量构建和 CI 审计；Unity 运行时不必依赖它建立播放逻辑。
+
+工具端自 AudioForge 0.05 起还会额外输出 `BuildReport.json`。它不是运行时必需文件，但建议在联调、CI 或大工程接入时一并保留，用于解释本次构建的 `RequestedScope`、`EffectiveScope`、`SelectionLabel`、重建资源数、复用资源数，以及是否因选区外脏资源自动升级为增量构建。
+
 6.3 AudioEventID.cs
 
 可选的事件常量文件。用于减少业务层硬编码字符串，但不应让 SDK 强依赖其存在。
@@ -168,6 +177,8 @@ Assets/
 6.4 Assets/
 
 运行时音频资源目录。Unity 端建议通过 `AssetKey + RuntimeAudioFormat` 定位文件，而不是依赖源文件路径。
+
+补充说明：自 AudioForge 0.05 起，工具端支持增量构建和选中构建，但这只影响导出阶段如何生成和复用音频资源，不改变 Unity 端收到的目录结构、路径规则或运行时消费方式。
 
 7. 数据字段语义
 
