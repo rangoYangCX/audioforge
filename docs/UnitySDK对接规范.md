@@ -4,6 +4,14 @@ AudioForge Unity 端对接开发文档（第一期）
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
 > 当前文档同步日期：2026-04-30。
+> 当前工具版本：AudioForge 0.04。
+
+0.1 版本增量
+
+- AudioForge 0.04 新增：片段波形编辑台、波形缩放/游标/聚焦选区操作、片段淡入 `FadeInMs`、片段淡出 `FadeOutMs`。
+- AudioForge 0.04 新增：导出阶段会把 `TrimStartMs`、`TrimEndMs`、`FadeInMs`、`FadeOutMs` 直接烘焙进导出的运行时音频文件，而不只是停留在编辑器侧试听。
+- AudioForge 0.04 新增：`AudioData.json` 与 `AudioManifest.json` 会写出 `FadeInMs`、`FadeOutMs`，用于调试、审计和后续 Unity 端扩展消费。
+- AudioForge 0.04 更新：Unity 参考运行时已显式读取 `FadeInMs`、`FadeOutMs`，并在调试记录中展示 Clip 的 Trim / Fade / Loop 元数据；当前仍未将 Fade 作为独立运行时 DSP 规则再次执行。
 
 0. 当前状态
 
@@ -75,6 +83,7 @@ Assets/
 - 静态校验。
 - 导出 `AudioData.json`、`AudioManifest.json`、`AudioEventID.cs` 和运行时音频资源。
 - 提供本地试听与响度分析，帮助音频同学确认配置。
+- 自 AudioForge 0.04 起，片段裁剪与淡入淡出会在导出时直接烘焙进运行时音频资源。
 - 当前工具端的所有音高相关参数，包括基础音高、随机音高和 Combo 连击步进，已统一按保时长变调提供参考听感；该行为当前不写入额外导出字段。
 - 当前工具端 UI 已提供问题中心、总线浏览状态、响度报告、批量导入模板、恢复布局、事件树多选、批量改总线和事件搜索定位等辅助能力，但这些都不影响导出契约本身。
 
@@ -188,8 +197,15 @@ Assets/
 - `ClipId`：事件内唯一标识。
 - `AssetKey`：运行时资源键。
 - `Weight`：`Random` 模式下的离散权重，不是百分比。
-- `TrimStartMs`、`TrimEndMs`：当前主要作为元数据保留，不要求 Unity 一期实现样本级裁剪。
+- `TrimStartMs`、`TrimEndMs`：自 AudioForge 0.04 起，工具端导出时会把裁剪结果直接烘焙进运行时音频文件；字段仍保留在 `AudioData.json` 和 `AudioManifest.json` 中，供 Unity 端调试、校验或后续扩展消费。
+- `FadeInMs`、`FadeOutMs`：自 AudioForge 0.04 起新增。工具端导出时会把淡入淡出结果直接烘焙进运行时音频文件；字段同时写入 `AudioData.json` 和 `AudioManifest.json`。当前 Unity 参考运行时已显式读取，并在调试记录中可见，但不会再对已导出的音频做第二次独立 Fade 处理。
 - `LoopStartMs`、`LoopEndMs`：为后续完整 Loop 支持预留，第一期不开放编辑，也不要求运行时实现样本级 Loop 点。
+
+7.2.1 Unity 当前消费边界
+
+- 如果 Unity 直接播放 AudioForge 导出的运行时音频文件，那么裁剪和淡入淡出的听感已经同步，无需再在 Unity 里二次执行一遍。
+- 当前参考运行时会把 `TrimStartMs`、`TrimEndMs`、`FadeInMs`、`FadeOutMs`、`LoopStartMs`、`LoopEndMs` 读入 `AudioForgeClipConfig`，并在调试面板中展示，便于 Unity 开发核对工具端导出结果。
+- 当前参考运行时没有把 `FadeInMs`、`FadeOutMs` 用作独立运行时规则再次处理，这属于后续可选扩展，不影响导出结果落地。
 
 7.3 BusConfig 字段
 

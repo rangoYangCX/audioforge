@@ -1,83 +1,147 @@
 {
   "Assets": [
     {
-      "AssetKey": "sfx_level_check_02",
-      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_level_check_02.ogg",
-      "ExportPath": "sfx_level_check_02.ogg",
+      "AssetKey": "anim_celebration",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\熔岩活动_音效\\anim_celebration.ogg",
+      "ExportPath": "anim_celebration.ogg",
       "SourceFormat": "ogg",
       "RuntimeFormat": "ogg",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
-      "FileSize": 14653,
-      "Hash": "434ac02e62393ab7507dc30e2213d54e1300c2cf3e284ac3c6d1daaa6ee86772",
+      "FileSize": 220431,
+      "Hash": "1a807eee8b5ea89ea3d7701c3cf326dfb6651b0a9a11cd91e66ae3adf22ceb62",
       "ReferencedByEvents": [
-        "sfx_level_check_02"
+        "anim_celebration"
       ]
     },
     {
-      "AssetKey": "sfx_level_check_03",
-      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_level_check_03.ogg",
-      "ExportPath": "sfx_level_check_03.ogg",
+      "AssetKey": "anim_fail_drop_down",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\熔岩活动_音效\\anim_fail_drop_down.ogg",
+      "ExportPath": "anim_fail_drop_down.ogg",
       "SourceFormat": "ogg",
       "RuntimeFormat": "ogg",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
-      "FileSize": 7066,
-      "Hash": "811422a62c1081cd79dfaae452ba66a2c31672c49d7c863570cea7b1176aa0c5",
+      "FileSize": 97506,
+      "Hash": "fc583f3e7ab6782298dcc166c7f9eadf748084d39d3580b11c261fd8bb3057ac",
       "ReferencedByEvents": [
-        "sfx_level_check_03"
+        "anim_fail_drop_down"
       ]
     },
     {
-      "AssetKey": "sfx_tile_hint_02",
-      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_tile_hint_02.ogg",
-      "ExportPath": "sfx_tile_hint_02.ogg",
+      "AssetKey": "propeller_spin",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\熔岩活动_音效\\propeller_spin.ogg",
+      "ExportPath": "propeller_spin.ogg",
       "SourceFormat": "ogg",
       "RuntimeFormat": "ogg",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
-      "FileSize": 34422,
-      "Hash": "2eb608480f7628ac24e1c19f92bf1b064a81c5cfeae0343e2bbd52202f6294df",
+      "FileSize": 119269,
+      "Hash": "bd3032ae4b0c1b4b2cb554490a1df646b3dceac24ad57fddc2f6f08be2d10d44",
       "ReferencedByEvents": [
-        "sfx_tile_hint_02"
+        "propeller_spin"
       ]
     },
     {
-      "AssetKey": "sfx_tile_undo_02",
-      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_tile_undo_02.ogg",
-      "ExportPath": "sfx_tile_undo_02.ogg",
-      "SourceFormat": "ogg",
+      "AssetKey": "ui/click_01",
+      "SourcePath": "",
+      "ExportPath": "ui/click_01.ogg",
+      "SourceFormat": "",
       "RuntimeFormat": "ogg",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
-      "FileSize": 29978,
-      "Hash": "8bf6655e5477aceb4840b059498ac65de61da746888c0d6c2582c060806ec3fb",
+      "FileSize": 0,
+      "Hash": "",
       "ReferencedByEvents": [
-        "sfx_tile_undo_02"
+        "UI_Click_Normal"
       ]
     },
     {
-      "AssetKey": "sfx_tile_undo_03",
-      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\tile-核心手感优化\\tile_核心手感优化\\sfx_tile_undo_03.ogg",
-      "ExportPath": "sfx_tile_undo_03.ogg",
+      "AssetKey": "ui_RongYan_descend",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\ui_RongYan_descend.ogg",
+      "ExportPath": "ui_RongYan_descend.ogg",
       "SourceFormat": "ogg",
       "RuntimeFormat": "ogg",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
-      "FileSize": 24733,
-      "Hash": "2ec1ee2c4252d8702f61ca4ae96f0c0e6598795034a2f2ff48cc511ba0d5ae27",
+      "FileSize": 232186,
+      "Hash": "d6f8fcd5ccb185c728895a7c2d161a707a794a4770f21989fed34b8ddef961a5",
       "ReferencedByEvents": [
-        "sfx_tile_undo_03"
+        "ui_RongYan_descend"
+      ]
+    },
+    {
+      "AssetKey": "ui_avatar_appear",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\熔岩活动_音效\\ui_avatar_appear.ogg",
+      "ExportPath": "ui_avatar_appear.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 12126,
+      "Hash": "e9f449315796d21a39ad566a276379a99c51803c9f4d138b0e55c2bc93ccb86d",
+      "ReferencedByEvents": [
+        "ui_avatar_appear"
+      ]
+    },
+    {
+      "AssetKey": "ui_score_complete",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\熔岩活动_音效\\ui_score_complete.ogg",
+      "ExportPath": "ui_score_complete.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 19251,
+      "Hash": "c35d4b236e0566d882917845b9b9f6cec3493fede9db4bd9b77759158b66d7c4",
+      "ReferencedByEvents": [
+        "ui_score_complete"
+      ]
+    },
+    {
+      "AssetKey": "ui_score_tick",
+      "SourcePath": "C:\\Users\\EDY\\Documents\\Studio One\\Songs\\2026-03-10 EDY 螺丝排序-熔岩\\Mixdown\\熔岩活动_音效\\ui_score_tick.ogg",
+      "ExportPath": "ui_score_tick.ogg",
+      "SourceFormat": "ogg",
+      "RuntimeFormat": "ogg",
+      "TrimStartMs": 0,
+      "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
+      "LoopStartMs": 0,
+      "LoopEndMs": 0,
+      "FileSize": 8187,
+      "Hash": "cb40073fdd221a68c28bf22872dd97c01cd395d80ab63783aa6d3b7cf82a15d0",
+      "ReferencedByEvents": [
+        "ui_score_tick"
       ]
     }
   ]

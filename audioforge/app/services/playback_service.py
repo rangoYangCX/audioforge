@@ -48,6 +48,8 @@ class PlaybackService:
         trim_start_ms: int = 0,
         event_id: str | None = None,
         trim_end_ms: int = 0,
+        fade_in_ms: int = 0,
+        fade_out_ms: int = 0,
     ) -> str:
         if not self.is_available():
             return "pygame、numpy、scipy 或 soundfile 不可用；真实试听不可用。"
@@ -57,6 +59,8 @@ class PlaybackService:
                 file_path,
                 trim_start_ms=trim_start_ms,
                 trim_end_ms=trim_end_ms,
+                fade_in_ms=fade_in_ms,
+                fade_out_ms=fade_out_ms,
                 pitch_cents=pitch_cents,
                 preserve_timing_pitch_cents=preserve_timing_pitch_cents,
                 target_sample_rate=PREVIEW_PLAYBACK_SAMPLE_RATE,
@@ -85,7 +89,7 @@ class PlaybackService:
                 )
             )
         total_pitch_cents = pitch_cents + preserve_timing_pitch_cents
-        return f"本地试听成功（音量 {volume_db:.2f} dB，音高 {total_pitch_cents} cents，裁剪 {trim_start_ms}-{trim_end_ms} ms）"
+        return f"本地试听成功（音量 {volume_db:.2f} dB，音高 {total_pitch_cents} cents，裁剪 {trim_start_ms}-{trim_end_ms} ms，淡入 {fade_in_ms} ms，淡出 {fade_out_ms} ms）"
 
     def refresh_bus_volumes(self, effective_volume_db_resolver: Callable[[str, float], float]) -> None:
         self._cleanup_finished_voices()

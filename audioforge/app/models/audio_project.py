@@ -47,6 +47,8 @@ class ClipModel:
     weight: int = 1
     trim_start_ms: int = 0
     trim_end_ms: int = 0
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
     loop_start_ms: int = 0
     loop_end_ms: int = 0
     tags: list[str] = field(default_factory=list)

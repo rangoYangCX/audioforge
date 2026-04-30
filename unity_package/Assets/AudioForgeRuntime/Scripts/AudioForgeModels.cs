@@ -15,6 +15,8 @@ public sealed class AudioForgeClipConfig
     public int Weight;
     public int TrimStartMs;
     public int TrimEndMs;
+    public int FadeInMs;
+    public int FadeOutMs;
     public int LoopStartMs;
     public int LoopEndMs;
 }
@@ -141,6 +143,12 @@ public sealed class AudioForgeDebugEventRecord
     public string BusName;
     public string Result;
     public string Message;
+    public int TrimStartMs;
+    public int TrimEndMs;
+    public int FadeInMs;
+    public int FadeOutMs;
+    public int LoopStartMs;
+    public int LoopEndMs;
     public float VolumeDb;
     public int PitchCents;
     public int ComboStep;

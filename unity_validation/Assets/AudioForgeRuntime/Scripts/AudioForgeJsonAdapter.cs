@@ -126,6 +126,8 @@ public static class AudioForgeJsonAdapter
                         Weight = ReadInt(clipPayload, "Weight"),
                         TrimStartMs = ReadInt(clipPayload, "TrimStartMs"),
                         TrimEndMs = ReadInt(clipPayload, "TrimEndMs"),
+                        FadeInMs = ReadInt(clipPayload, "FadeInMs"),
+                        FadeOutMs = ReadInt(clipPayload, "FadeOutMs"),
                         LoopStartMs = ReadInt(clipPayload, "LoopStartMs"),
                         LoopEndMs = ReadInt(clipPayload, "LoopEndMs"),
                     });

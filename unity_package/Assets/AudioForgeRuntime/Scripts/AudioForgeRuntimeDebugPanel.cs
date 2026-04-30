@@ -74,7 +74,7 @@ public sealed class AudioForgeRuntimeDebugPanel : MonoBehaviour
         {
             AudioForgeDebugEventRecord record = eventRecords[index];
             GUILayout.Label(string.Format(
-                "[{0:0.00}] {1} | {2} | Clip={3} | Pitch={4} | Combo={5} | Preserve={6} | CacheHit={7} | {8}",
+                "[{0:0.00}] {1} | {2} | Clip={3} | Pitch={4} | Combo={5} | Preserve={6} | CacheHit={7} | Trim={8}-{9} | Fade={10}/{11} | Loop={12}-{13} | {14}",
                 record.Timestamp,
                 record.EventId,
                 record.Result,
@@ -83,6 +83,12 @@ public sealed class AudioForgeRuntimeDebugPanel : MonoBehaviour
                 record.ComboStep,
                 record.UsedTimePreservingPitch,
                 record.CacheHit,
+                record.TrimStartMs,
+                record.TrimEndMs,
+                record.FadeInMs,
+                record.FadeOutMs,
+                record.LoopStartMs,
+                record.LoopEndMs,
                 record.Message));
         }
 

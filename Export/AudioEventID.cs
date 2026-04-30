@@ -1,8 +1,11 @@
 public enum AudioEventID
 {
-    sfx_level_check_02,
-    sfx_level_check_03,
-    sfx_tile_hint_02,
-    sfx_tile_undo_02,
-    sfx_tile_undo_03
+    UI_Click_Normal,
+    anim_celebration,
+    anim_fail_drop_down,
+    propeller_spin,
+    ui_RongYan_descend,
+    ui_avatar_appear,
+    ui_score_complete,
+    ui_score_tick
 }

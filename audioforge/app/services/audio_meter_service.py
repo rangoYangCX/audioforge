@@ -59,6 +59,8 @@ class AudioMeterService:
         preserve_timing_pitch_cents: int = 0,
         trim_start_ms: int = 0,
         trim_end_ms: int = 0,
+        fade_in_ms: int = 0,
+        fade_out_ms: int = 0,
     ) -> AudioMeterSnapshot:
         if not self.is_available():
             return AudioMeterSnapshot(available=False, reason="soundfile、numpy、pyloudnorm 或 scipy 不可用。")
@@ -84,6 +86,8 @@ class AudioMeterService:
                 file_path,
                 trim_start_ms=trim_start_ms,
                 trim_end_ms=trim_end_ms,
+                fade_in_ms=fade_in_ms,
+                fade_out_ms=fade_out_ms,
                 pitch_cents=pitch_cents,
                 preserve_timing_pitch_cents=preserve_timing_pitch_cents,
             )

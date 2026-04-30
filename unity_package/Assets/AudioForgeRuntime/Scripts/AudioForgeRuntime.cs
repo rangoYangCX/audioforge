@@ -751,6 +751,12 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         record.BusName = busName ?? string.Empty;
         record.Result = result;
         record.Message = message;
+        record.TrimStartMs = clipConfig != null ? clipConfig.TrimStartMs : 0;
+        record.TrimEndMs = clipConfig != null ? clipConfig.TrimEndMs : 0;
+        record.FadeInMs = clipConfig != null ? clipConfig.FadeInMs : 0;
+        record.FadeOutMs = clipConfig != null ? clipConfig.FadeOutMs : 0;
+        record.LoopStartMs = clipConfig != null ? clipConfig.LoopStartMs : 0;
+        record.LoopEndMs = clipConfig != null ? clipConfig.LoopEndMs : 0;
         record.VolumeDb = volumeDb;
         record.PitchCents = pitchCents;
         record.ComboStep = comboStep;

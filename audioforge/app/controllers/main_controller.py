@@ -134,7 +134,7 @@ class MainController:
         self.window.save_project_button.clicked.connect(self.save_project)
         self.window.saveProjectAsRequested.connect(self.save_project_as)
         self.window.validate_button.clicked.connect(self.validate_project)
-        self.window.build_button.clicked.connect(self.build_project)
+        self.window.buildRequested.connect(self.build_project)
         self.window.tree.nodeSelected.connect(self.select_node)
         self.window.tree.nodesSelectionChanged.connect(self.select_nodes)
         self.window.tree.nodeMoved.connect(self.handle_tree_move)
@@ -153,6 +153,7 @@ class MainController:
         self.window.redoRequested.connect(self.redo)
         self.window.previewRequested.connect(self.preview_current_event)
         self.window.previewClipRequested.connect(self.preview_selected_clip)
+        self.window.previewClipSegmentRequested.connect(self.preview_selected_clip_segment)
         self.window.importClipsRequested.connect(self.import_clips)
         self.window.importAudioAsEventsRequested.connect(self.import_audio_files_as_events)
         self.window.removeClipsRequested.connect(self.remove_selected_clips)
@@ -873,7 +874,7 @@ class MainController:
                     new_value = min(MAX_CLIP_WEIGHT, max(MIN_CLIP_WEIGHT, int(raw_value)))
                 except ValueError:
                     return False
-            elif field_name in {"trim_start_ms", "trim_end_ms", "loop_start_ms", "loop_end_ms"}:
+            elif field_name in {"trim_start_ms", "trim_end_ms", "fade_in_ms", "fade_out_ms", "loop_start_ms", "loop_end_ms"}:
                 try:
                     new_value = min(MAX_CLIP_TIME_MS, max(MIN_CLIP_TIME_MS, int(raw_value)))
                 except ValueError:
@@ -1092,6 +1093,8 @@ class MainController:
                 preserve_timing_pitch_cents=preview_preserve_timing_pitch_cents,
                 trim_start_ms=clip.trim_start_ms,
                 trim_end_ms=clip.trim_end_ms,
+                fade_in_ms=clip.fade_in_ms,
+                fade_out_ms=clip.fade_out_ms,
             )
             self.window.set_preview_audio_metrics(
                 self.audio_meter_service.analyze_file(
@@ -1101,6 +1104,8 @@ class MainController:
                     preserve_timing_pitch_cents=preview_preserve_timing_pitch_cents,
                     trim_start_ms=clip.trim_start_ms,
                     trim_end_ms=clip.trim_end_ms,
+                    fade_in_ms=clip.fade_in_ms,
+                    fade_out_ms=clip.fade_out_ms,
                 ),
                 clip_id=result.clip_id or "-",
                 asset_key=result.asset_key or "-",
@@ -1133,6 +1138,8 @@ class MainController:
             preserve_timing_pitch_cents=event.pitch_cents,
             trim_start_ms=clip.trim_start_ms,
             trim_end_ms=clip.trim_end_ms,
+            fade_in_ms=clip.fade_in_ms,
+            fade_out_ms=clip.fade_out_ms,
         )
         self.window.set_preview_audio_metrics(
             self.audio_meter_service.analyze_file(
@@ -1142,12 +1149,61 @@ class MainController:
                 preserve_timing_pitch_cents=event.pitch_cents,
                 trim_start_ms=clip.trim_start_ms,
                 trim_end_ms=clip.trim_end_ms,
+                fade_in_ms=clip.fade_in_ms,
+                fade_out_ms=clip.fade_out_ms,
             ),
             clip_id=clip.id,
             asset_key=clip.asset_key,
         )
         self.window.append_log(
             f"试听片段 {clip.id}：资源={clip.asset_key} 事件={event.id} 总线后={effective_volume_db:.2f}dB 播放={playback_message}"
+        )
+
+    def preview_selected_clip_segment(self, clip_id: str, start_ms: int, end_ms: int) -> None:
+        event = self.current_event
+        if event is None:
+            return
+        clip = next((item for item in event.clips if item.id == clip_id), None)
+        if clip is None:
+            return
+        if not clip.source_path:
+            self.window.clear_preview_audio_metrics("当前片段没有可分析的源文件。")
+            self.window.append_log(f"局部试听被拒绝：{clip_id} 没有源文件。")
+            return
+        segment_start_ms = max(MIN_CLIP_TIME_MS, int(start_ms))
+        segment_end_ms = max(segment_start_ms + 1, int(end_ms))
+        segment_length_ms = max(1, segment_end_ms - segment_start_ms)
+        segment_fade_ms = min(40, max(8, segment_length_ms // 12))
+        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, event.volume_db)
+        playback_message = self.playback_service.play_file(
+            clip.source_path,
+            effective_volume_db,
+            tracked_base_volume_db=event.volume_db,
+            bus_name=event.bus,
+            event_id=event.id,
+            pitch_cents=0,
+            preserve_timing_pitch_cents=event.pitch_cents,
+            trim_start_ms=segment_start_ms,
+            trim_end_ms=segment_end_ms,
+            fade_in_ms=segment_fade_ms,
+            fade_out_ms=segment_fade_ms,
+        )
+        self.window.set_preview_audio_metrics(
+            self.audio_meter_service.analyze_file(
+                clip.source_path,
+                effective_volume_db,
+                pitch_cents=0,
+                preserve_timing_pitch_cents=event.pitch_cents,
+                trim_start_ms=segment_start_ms,
+                trim_end_ms=segment_end_ms,
+                fade_in_ms=segment_fade_ms,
+                fade_out_ms=segment_fade_ms,
+            ),
+            clip_id=clip.id,
+            asset_key=clip.asset_key,
+        )
+        self.window.append_log(
+            f"局部试听片段 {clip.id}：资源={clip.asset_key} 区间={segment_start_ms}-{segment_end_ms} ms 总线后={effective_volume_db:.2f}dB 播放={playback_message}"
         )
 
     def stop_current_event_preview(self) -> None:

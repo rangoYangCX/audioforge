@@ -32,6 +32,8 @@ class PreviewAudioRenderer:
         *,
         trim_start_ms: int = 0,
         trim_end_ms: int = 0,
+        fade_in_ms: int = 0,
+        fade_out_ms: int = 0,
         pitch_cents: int = 0,
         preserve_timing_pitch_cents: int = 0,
         target_sample_rate: int | None = None,
@@ -49,6 +51,7 @@ class PreviewAudioRenderer:
 
         processed = self._normalize_channels(audio_data.astype(np.float32, copy=False))
         processed = self._apply_trim(processed, sample_rate, trim_start_ms, trim_end_ms)
+        processed = self._apply_fades(processed, sample_rate, fade_in_ms, fade_out_ms)
         processed = self._apply_pitch(processed, pitch_cents)
         processed = self._apply_pitch_preserve_duration(processed, preserve_timing_pitch_cents)
         output_sample_rate = sample_rate
@@ -104,6 +107,24 @@ class PreviewAudioRenderer:
         if start_frame >= end_frame:
             return audio_data[0:0]
         return audio_data[start_frame:end_frame]
+
+    def _apply_fades(self, audio_data, sample_rate: int, fade_in_ms: int, fade_out_ms: int):
+        if audio_data.size == 0:
+            return audio_data
+        total_frames = audio_data.shape[0]
+        fade_in_frames = min(total_frames, max(0, int(sample_rate * (fade_in_ms / 1000.0))))
+        fade_out_frames = min(total_frames, max(0, int(sample_rate * (fade_out_ms / 1000.0))))
+        if fade_in_frames <= 0 and fade_out_frames <= 0:
+            return audio_data
+        envelope = np.ones(total_frames, dtype=np.float32)
+        if fade_in_frames > 0:
+            envelope[:fade_in_frames] = np.linspace(0.0, 1.0, fade_in_frames, dtype=np.float32)
+        if fade_out_frames > 0:
+            envelope[-fade_out_frames:] = np.minimum(
+                envelope[-fade_out_frames:],
+                np.linspace(1.0, 0.0, fade_out_frames, dtype=np.float32),
+            )
+        return audio_data * envelope[:, np.newaxis]
 
     def _apply_pitch(self, audio_data, pitch_cents: int):
         if pitch_cents == 0 or audio_data.size == 0:

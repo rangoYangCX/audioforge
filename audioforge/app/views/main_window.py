@@ -8,7 +8,7 @@ except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QCloseEvent, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QBrush, QColor, QCloseEvent, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -76,6 +76,7 @@ from audioforge.app.utils.constants import (
     PROJECT_EXTENSION,
 )
 from audioforge.app.widgets.clip_table import ClipTableWidget
+from audioforge.app.widgets.clip_waveform_editor import ClipWaveformEditor
 from audioforge.app.widgets.event_tree import EventTreeWidget
 from audioforge.app.widgets.loudness_history_plot import LoudnessHistoryPlot
 from audioforge.app.views.shell_components import AppShell, CompatibilityTabWidget, DetachedToolWindow, TaskSidebar
@@ -127,7 +128,9 @@ class MainWindow(QMainWindow):
     applyDefaultBusToAllRequested = Signal()
     bulkEventBusRequested = Signal(str)
     clipEdited = Signal(str, str, str)
+    buildRequested = Signal()
     previewClipRequested = Signal(str)
+    previewClipSegmentRequested = Signal(str, int, int)
     importAudioAsEventsRequested = Signal(list, object, dict)
     reportTargetRequested = Signal(str, str)
 
@@ -140,11 +143,11 @@ class MainWindow(QMainWindow):
         self._loading_event = False
         self._close_handler = None
         self._ui_scale = 1.0
-        self._default_workspace_splitter_sizes = [930, 150]
+        self._default_workspace_splitter_sizes = [1090, 0]
         self._default_main_splitter_sizes = [300, 1120]
         self._default_content_top_splitter_sizes = [700, 360]
         self._default_focus_content_splitter_sizes = [760, 320]
-        self._minimum_report_panel_height = 140
+        self._minimum_report_panel_height = 0
         self._last_docked_main_splitter_sizes = list(self._default_main_splitter_sizes)
         self._pending_workspace_splitter_sizes: list[int] | None = None
         self._pending_main_splitter_sizes: list[int] | None = None
@@ -328,20 +331,66 @@ class MainWindow(QMainWindow):
         self.clip_trim_end_spin = QSpinBox()
         self.clip_trim_end_spin.setRange(MIN_CLIP_TIME_MS, MAX_CLIP_TIME_MS)
         self.clip_trim_end_spin.setToolTip("单位 ms。0 表示使用文件尾；若源文件可读取，将自动按音频实际时长限制。")
+        self.clip_fade_in_spin = QSpinBox()
+        self.clip_fade_in_spin.setRange(MIN_CLIP_TIME_MS, MAX_CLIP_TIME_MS)
+        self.clip_fade_in_spin.setToolTip("单位 ms。控制当前裁剪区域的淡入长度。")
+        self.clip_fade_out_spin = QSpinBox()
+        self.clip_fade_out_spin.setRange(MIN_CLIP_TIME_MS, MAX_CLIP_TIME_MS)
+        self.clip_fade_out_spin.setToolTip("单位 ms。控制当前裁剪区域的淡出长度。")
         self.clip_loop_start_spin = QSpinBox()
         self.clip_loop_start_spin.setRange(MIN_CLIP_TIME_MS, MAX_CLIP_TIME_MS)
         self.clip_loop_start_spin.setToolTip("单位 ms。若源文件可读取，将自动按音频实际时长限制。")
-        self.clip_loop_start_spin.setEnabled(False)
         self.clip_loop_end_spin = QSpinBox()
         self.clip_loop_end_spin.setRange(MIN_CLIP_TIME_MS, MAX_CLIP_TIME_MS)
         self.clip_loop_end_spin.setToolTip("单位 ms。0 表示不设循环终点；若源文件可读取，将自动按音频实际时长限制。")
-        self.clip_loop_end_spin.setEnabled(False)
         self.clip_tags_detail_edit = QLineEdit()
         self.clip_tags_detail_edit.setPlaceholderText("ui, click")
-        self.clip_preview_hint_label = QLabel("选择片段后可在此调整资源键、裁剪、循环和标签。")
+        self.clip_preview_hint_label = QLabel("选择片段后可在此精修裁剪、淡入淡出、循环和局部试听。")
+        self.clip_preview_hint_label.setWordWrap(True)
+        self.clip_preview_hint_label.setMaximumHeight(40)
+        self.clip_preview_hint_label.setProperty("role", "clipPreviewHint")
+        self.clip_waveform_editor = ClipWaveformEditor()
+        self.clip_playhead_label = QLabel("游标 0 ms")
+        self.clip_waveform_zoom_out_button = QPushButton("缩小")
+        self.clip_waveform_zoom_reset_button = QPushButton("全段")
+        self.clip_waveform_frame_selection_button = QPushButton("聚焦选区")
+        self.clip_waveform_zoom_in_button = QPushButton("放大")
+        self.clip_set_start_from_playhead_button = QPushButton("起点=游标")
+        self.clip_set_end_from_playhead_button = QPushButton("终点=游标")
+        self.clip_set_loop_from_selection_button = QPushButton("循环=选区")
+        self.clip_clear_loop_button = QPushButton("清循环")
         self.clip_preview_button = QPushButton("试听片段")
+        self.clip_preview_segment_button = QPushButton("试听局部")
         self.clip_copy_asset_key_button = QPushButton("复制资源键")
         self.clip_locate_source_button = QPushButton("定位源文件")
+        for compact_button in [
+            self.clip_waveform_zoom_out_button,
+            self.clip_waveform_zoom_reset_button,
+            self.clip_waveform_frame_selection_button,
+            self.clip_waveform_zoom_in_button,
+            self.clip_set_start_from_playhead_button,
+            self.clip_set_end_from_playhead_button,
+            self.clip_set_loop_from_selection_button,
+            self.clip_clear_loop_button,
+            self.clip_preview_button,
+            self.clip_preview_segment_button,
+            self.clip_copy_asset_key_button,
+            self.clip_locate_source_button,
+        ]:
+            compact_button.setProperty("role", "clipCompactButton")
+        for compact_spin in [
+            self.clip_trim_start_spin,
+            self.clip_trim_end_spin,
+            self.clip_fade_in_spin,
+            self.clip_fade_out_spin,
+            self.clip_loop_start_spin,
+            self.clip_loop_end_spin,
+            self.clip_weight_detail_spin,
+        ]:
+            compact_spin.setProperty("role", "clipCompactSpin")
+        self.clip_asset_detail_edit.setProperty("role", "clipCompactField")
+        self.clip_source_detail_edit.setProperty("role", "clipCompactField")
+        self.clip_tags_detail_edit.setProperty("role", "clipCompactField")
         self.build_preview_output = QPlainTextEdit()
         self.build_preview_output.setReadOnly(True)
         self.build_preview_output.setPlaceholderText("导出差异、构建摘要和交付文本会显示在这里。")
@@ -483,7 +532,8 @@ class MainWindow(QMainWindow):
         self.preview_button = QPushButton("试听")
         self.stop_preview_event_button = QPushButton("停事件")
         self.stop_preview_bus_button = QPushButton("停总线")
-        self.build_button = QPushButton("构建导出")
+        self.build_button = QPushButton("构建交付")
+        self.build_execute_button = QPushButton("开始构建导出")
         self.import_clips_button = QPushButton("导入音频")
         self.remove_clips_button = QPushButton("移除片段")
         self.bulk_weight_button = QPushButton("批量权重")
@@ -767,27 +817,79 @@ class MainWindow(QMainWindow):
         clip_list_layout.addWidget(self.clip_filter_edit)
         clip_list_layout.addWidget(self.clip_table)
 
-        clip_detail_group = QGroupBox("片段详情")
-        clip_detail_layout = QFormLayout(clip_detail_group)
-        clip_detail_layout.addRow("当前片段", self.clip_selected_label)
-        clip_detail_layout.addRow("源路径", self.clip_source_detail_edit)
-        clip_detail_layout.addRow("资源键", self.clip_asset_detail_edit)
-        clip_detail_layout.addRow("权重", self.clip_weight_row)
-        clip_detail_layout.addRow("起始裁剪", self.clip_trim_start_spin)
-        clip_detail_layout.addRow("结束裁剪", self.clip_trim_end_spin)
-        clip_detail_layout.addRow("循环起点", self.clip_loop_start_spin)
-        clip_detail_layout.addRow("循环终点", self.clip_loop_end_spin)
-        clip_detail_layout.addRow("标签", self.clip_tags_detail_edit)
-        clip_detail_layout.addRow("提示", self.clip_preview_hint_label)
+        clip_detail_group = QGroupBox("片段编辑台")
+        clip_detail_layout = QVBoxLayout(clip_detail_group)
+        clip_detail_layout.setSpacing(10)
+        clip_header_card = QFrame()
+        clip_header_card.setObjectName("ModeIntroCard")
+        clip_header_layout = QVBoxLayout(clip_header_card)
+        clip_header_layout.setContentsMargins(14, 12, 14, 12)
+        clip_header_layout.setSpacing(6)
+        clip_header_layout.addWidget(self.clip_selected_label)
+        clip_header_layout.addWidget(self.clip_preview_hint_label)
+
+        clip_timing_card = QFrame()
+        clip_timing_card.setObjectName("ModeIntroCard")
+        clip_timing_layout = QVBoxLayout(clip_timing_card)
+        clip_timing_layout.setContentsMargins(10, 10, 10, 10)
+        clip_timing_layout.setSpacing(6)
+        clip_timing_layout.addWidget(self.clip_waveform_editor)
+        clip_waveform_action_row = QHBoxLayout()
+        clip_waveform_action_row.setContentsMargins(0, 0, 0, 0)
+        clip_waveform_action_row.setSpacing(6)
+        clip_waveform_action_row.addWidget(self.clip_playhead_label)
+        clip_waveform_action_row.addStretch(1)
+        clip_waveform_action_row.addWidget(self.clip_set_start_from_playhead_button)
+        clip_waveform_action_row.addWidget(self.clip_set_end_from_playhead_button)
+        clip_waveform_action_row.addWidget(self.clip_set_loop_from_selection_button)
+        clip_waveform_action_row.addWidget(self.clip_clear_loop_button)
+        clip_waveform_action_row.addWidget(self.clip_waveform_zoom_out_button)
+        clip_waveform_action_row.addWidget(self.clip_waveform_zoom_reset_button)
+        clip_waveform_action_row.addWidget(self.clip_waveform_frame_selection_button)
+        clip_waveform_action_row.addWidget(self.clip_waveform_zoom_in_button)
+        clip_timing_layout.addLayout(clip_waveform_action_row)
+        clip_time_grid = QGridLayout()
+        clip_time_grid.setContentsMargins(0, 0, 0, 0)
+        clip_time_grid.setHorizontalSpacing(8)
+        clip_time_grid.setVerticalSpacing(6)
+        clip_time_grid.addWidget(QLabel("起始"), 0, 0)
+        clip_time_grid.addWidget(self.clip_trim_start_spin, 0, 1)
+        clip_time_grid.addWidget(QLabel("结束"), 0, 2)
+        clip_time_grid.addWidget(self.clip_trim_end_spin, 0, 3)
+        clip_time_grid.addWidget(QLabel("淡入"), 1, 0)
+        clip_time_grid.addWidget(self.clip_fade_in_spin, 1, 1)
+        clip_time_grid.addWidget(QLabel("淡出"), 1, 2)
+        clip_time_grid.addWidget(self.clip_fade_out_spin, 1, 3)
+        clip_time_grid.addWidget(QLabel("循环起点"), 2, 0)
+        clip_time_grid.addWidget(self.clip_loop_start_spin, 2, 1)
+        clip_time_grid.addWidget(QLabel("循环终点"), 2, 2)
+        clip_time_grid.addWidget(self.clip_loop_end_spin, 2, 3)
+        clip_timing_layout.addLayout(clip_time_grid)
+
+        clip_meta_card = QFrame()
+        clip_meta_card.setObjectName("ModeIntroCard")
+        clip_meta_layout = QFormLayout(clip_meta_card)
+        clip_meta_layout.setContentsMargins(14, 12, 14, 12)
+        clip_meta_layout.setSpacing(8)
+        clip_meta_layout.addRow("源路径", self.clip_source_detail_edit)
+        clip_meta_layout.addRow("资源键", self.clip_asset_detail_edit)
+        clip_meta_layout.addRow("权重", self.clip_weight_row)
+        clip_meta_layout.addRow("标签", self.clip_tags_detail_edit)
+
         clip_action_row = QWidget()
         clip_action_layout = QHBoxLayout(clip_action_row)
         clip_action_layout.setContentsMargins(0, 0, 0, 0)
         clip_action_layout.setSpacing(8)
         clip_action_layout.addWidget(self.clip_preview_button)
+        clip_action_layout.addWidget(self.clip_preview_segment_button)
         clip_action_layout.addWidget(self.clip_copy_asset_key_button)
         clip_action_layout.addWidget(self.clip_locate_source_button)
         clip_action_layout.addStretch(1)
-        clip_detail_layout.addRow("快捷动作", clip_action_row)
+        clip_detail_layout.addWidget(clip_header_card)
+        clip_detail_layout.addWidget(clip_timing_card)
+        clip_detail_layout.addWidget(clip_meta_card)
+        clip_detail_layout.addWidget(clip_action_row)
+        clip_detail_layout.addStretch(1)
 
         clip_tools_group = QGroupBox("批量编辑与排序")
         clip_tools_layout = QFormLayout(clip_tools_group)
@@ -923,10 +1025,7 @@ class MainWindow(QMainWindow):
             ("buses", "总线与混音", "将当前事件总线、总线浏览器和 Master 输出整合为独立混音工作区。"),
             ("validation", "校验修复", "直接进入问题中心，按校验结果修复对象与资源。"),
             ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
-            ("results", "结果中心", "统一查看日志、校验报告、构建报告和响度扫描，作为收尾页使用。"),
-            ("validation-results", "校验结果", "直接进入校验专页，适合从左侧导航快速回看问题清单并继续修复。"),
-            ("build-results", "构建结果", "直接进入构建结果专页，集中查看构建摘要、问题定位和交付预览。"),
-            ("loudness-results", "响度结果", "直接进入响度专页，查看超标项、条目细节和完整扫描输出。"),
+            ("results", "结果中心", "统一回看日志、构建输出和响度扫描；校验修复仍在专门工作区完成。"),
         ]:
             page, host_layout = self._build_workspace_mode_page(title, description)
             self._workspace_mode_pages[mode] = page
@@ -987,6 +1086,7 @@ class MainWindow(QMainWindow):
         self.workspace_splitter.addWidget(self.activity_panel)
         self.workspace_splitter.setStretchFactor(0, 8)
         self.workspace_splitter.setStretchFactor(1, 1)
+        self.activity_panel.hide()
         self._set_workspace_splitter_sizes(self._default_workspace_splitter_sizes)
 
         workspace_container = QWidget()
@@ -1114,6 +1214,115 @@ class MainWindow(QMainWindow):
         layout.addWidget(description_label)
         return card
 
+    def _card_icon_name_for_title(self, title: str) -> str:
+        if any(token in title for token in ["事件", "对象"]):
+            return "event"
+        if any(token in title for token in ["资源", "片段", "批处理"]):
+            return "content"
+        if any(token in title for token in ["总线", "混音", "Routing", "Bus"]):
+            return "bus"
+        if any(token in title for token in ["校验", "问题"]):
+            return "validate"
+        if any(token in title for token in ["构建", "导出", "生成", "交付"]):
+            return "generate"
+        if any(token in title for token in ["响度", "电平", "测量"]):
+            return "audio"
+        if any(token in title for token in ["日志", "结果", "报告"]):
+            return "report"
+        if any(token in title for token in ["工程", "欢迎"]):
+            return "app"
+        return "focus_panel"
+
+    def _card_tone_for_icon(self, icon_name: str) -> str:
+        return {
+            "event": "event",
+            "content": "content",
+            "bus": "bus",
+            "validate": "validate",
+            "generate": "generate",
+            "audio": "audio",
+            "report": "report",
+            "app": "app",
+        }.get(icon_name, "neutral")
+
+    def _card_eyebrow_for_icon(self, icon_name: str) -> str:
+        return {
+            "event": "事件控制",
+            "content": "资源编排",
+            "bus": "混音路由",
+            "validate": "问题修复",
+            "generate": "交付流程",
+            "audio": "响度监视",
+            "report": "结果回看",
+            "app": "工程上下文",
+            "focus_panel": "当前焦点",
+        }.get(icon_name, "当前焦点")
+
+    def _build_card_title_row(self, title: str, icon_name: str | None = None) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        icon_key = icon_name or self._card_icon_name_for_title(title)
+        icon = load_app_icon(icon_key)
+        if not icon.isNull():
+            icon_label = QLabel()
+            icon_label.setProperty("role", "cardIconBubble")
+            icon_label.setProperty("cardTone", self._card_tone_for_icon(icon_key))
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setFixedSize(36, 36)
+            pixmap = icon.pixmap(QSize(18, 18))
+            if not pixmap.isNull():
+                icon_label.setPixmap(pixmap)
+            layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignTop)
+        text_column = QWidget()
+        text_layout = QVBoxLayout(text_column)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(1)
+        eyebrow_label = QLabel(self._card_eyebrow_for_icon(icon_key))
+        eyebrow_label.setObjectName("CardEyebrowLabel")
+        eyebrow_label.setProperty("role", "cardEyebrow")
+        title_label = QLabel(title)
+        title_label.setObjectName("CardTitleLabel")
+        title_label.setProperty("role", "workspaceSectionTitle")
+        title_label.setWordWrap(True)
+        text_layout.addWidget(eyebrow_label)
+        text_layout.addWidget(title_label)
+        layout.addWidget(text_column, 1)
+        return row
+
+    def _wrap_emphasis_card(
+        self,
+        title: str,
+        content: QWidget,
+        *,
+        description: str | None = None,
+        icon_name: str | None = None,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("EmphasisCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+        layout.addWidget(self._build_card_title_row(title, icon_name))
+        if description:
+            description_label = QLabel(description)
+            description_label.setWordWrap(True)
+            description_label.setProperty("role", "workspaceSectionSummary")
+            layout.addWidget(description_label)
+        if isinstance(content, QGroupBox):
+            content.setTitle("")
+            content.setProperty("role", "contentCardInner")
+        elif isinstance(content, QFrame):
+            content.setProperty("role", "contentCardInnerFrame")
+        layout.addWidget(content)
+        return card
+
+    def _wrap_workspace_widget(self, widget: QWidget) -> QWidget:
+        if isinstance(widget, QGroupBox):
+            return self._wrap_emphasis_card(widget.title(), widget)
+        return widget
+
     def _build_workspace_action_bar(
         self,
         title: str,
@@ -1173,11 +1382,9 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
-        title_label = QLabel(title)
-        title_label.setProperty("role", "workspaceSectionTitle")
         summary_label.setProperty("role", "workspaceSectionSummary")
         summary_label.setWordWrap(True)
-        layout.addWidget(title_label)
+        layout.addWidget(self._build_card_title_row(title))
         layout.addWidget(summary_label)
         if shortcut_specs:
             layout.addLayout(self._build_workspace_shortcut_grid(shortcut_specs))
@@ -1189,9 +1396,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(6)
-        title_label = QLabel(title)
-        title_label.setProperty("role", "workspaceSectionTitle")
-        layout.addWidget(title_label)
+        layout.addWidget(self._build_card_title_row(title))
         for line in lines:
             label = QLabel(line)
             label.setWordWrap(True)
@@ -1205,12 +1410,14 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(6)
-        title_label = QLabel(title)
-        title_label.setProperty("role", "emptyStateTitle")
         description_label = QLabel(description)
         description_label.setWordWrap(True)
         description_label.setProperty("role", "emptyStateBody")
-        layout.addWidget(title_label)
+        title_row = self._build_card_title_row(title)
+        title_label = title_row.findChild(QLabel, "CardTitleLabel")
+        if title_label is not None:
+            title_label.setProperty("role", "emptyStateTitle")
+        layout.addWidget(title_row)
         layout.addWidget(description_label)
         return card
 
@@ -1228,7 +1435,7 @@ class MainWindow(QMainWindow):
         event_splitter = QSplitter()
         event_splitter.setOrientation(Qt.Orientation.Horizontal)
         event_splitter.setChildrenCollapsible(False)
-        event_splitter.addWidget(overview_panel)
+        event_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
         event_splitter.addWidget(self.events_workspace_tabs)
         event_splitter.setStretchFactor(0, 2)
         event_splitter.setStretchFactor(1, 5)
@@ -1267,7 +1474,7 @@ class MainWindow(QMainWindow):
                     ("参数画布", lambda: self.events_workspace_tabs.setCurrentIndex(0), "event", 0, 0),
                     ("响度监视", self.show_loudness_view, "audio", 0, 1),
                     ("资源片段", lambda: self.set_active_contents_category("片段"), "content", 1, 0),
-                    ("校验结果", lambda: self._activate_workspace_mode("validation-results"), "report", 1, 1),
+                    ("进入校验修复", lambda: self._activate_workspace_mode("validation"), "validate", 1, 1),
                 ],
             )
         )
@@ -1280,8 +1487,8 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(self.object_header_frame)
-        layout.addWidget(self.reference_group)
+        layout.addWidget(self._wrap_emphasis_card("当前对象", self.object_header_frame, icon_name="event"))
+        layout.addWidget(self._wrap_emphasis_card("对象引用", self.reference_group, icon_name="route"))
         layout.addStretch(1)
         return panel
 
@@ -1320,7 +1527,7 @@ class MainWindow(QMainWindow):
         workspace_splitter = QSplitter()
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(overview_panel)
+        workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
         workspace_splitter.addWidget(self.contents_tabs)
         workspace_splitter.setStretchFactor(0, 2)
         workspace_splitter.setStretchFactor(1, 5)
@@ -1337,7 +1544,7 @@ class MainWindow(QMainWindow):
                     ("导入音频", self._request_clip_import, "content"),
                     ("批量权重", self._request_bulk_weight, "audio"),
                     ("生成预览", lambda: self.set_active_contents_category("生成"), "generate"),
-                    ("导出差异", self.previewExportDiffRequested.emit, "report"),
+                    ("进入构建交付", lambda: self._activate_workspace_mode("build"), "generate"),
                 ],
             )
         )
@@ -1363,7 +1570,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(self.project_settings_group)
+        layout.addWidget(self._wrap_emphasis_card("工程设置", self.project_settings_group, icon_name="app"))
         layout.addStretch(1)
         return panel
 
@@ -1380,7 +1587,7 @@ class MainWindow(QMainWindow):
         workspace_splitter = QSplitter()
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(overview_panel)
+        workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
         workspace_splitter.addWidget(bus_surface)
         workspace_splitter.setStretchFactor(0, 2)
         workspace_splitter.setStretchFactor(1, 5)
@@ -1417,13 +1624,13 @@ class MainWindow(QMainWindow):
                 [
                     ("导出设置", lambda: self._activate_workspace_mode("build"), "generate", 0, 0),
                     ("导出差异", self.previewExportDiffRequested.emit, "report", 0, 1),
-                    ("构建结果", lambda: self._activate_workspace_mode("build-results"), "report", 1, 0),
+                    ("开始构建", self.buildRequested.emit, "generate", 1, 0),
                     ("校验修复", lambda: self._activate_workspace_mode("validation"), "validate", 1, 1),
                 ],
             )
         )
-        layout.addWidget(self.generation_settings_group)
-        layout.addWidget(self.build_overview_group)
+        layout.addWidget(self._wrap_emphasis_card("导出设置", self.generation_settings_group, icon_name="generate"))
+        layout.addWidget(self._wrap_emphasis_card("生成概览", self.build_overview_group, icon_name="report"))
         layout.addStretch(1)
         return panel
 
@@ -1441,12 +1648,19 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(10)
         right_layout.addWidget(self.build_preview_group, 1)
+        build_execute_row = QHBoxLayout()
+        build_execute_row.setContentsMargins(0, 0, 0, 0)
+        build_execute_row.setSpacing(8)
+        self.build_execute_button.setProperty("role", "workspaceActionButton")
+        build_execute_row.addWidget(self.build_execute_button)
+        build_execute_row.addStretch(1)
+        right_layout.addLayout(build_execute_row)
         right_layout.addWidget(delivery_followup)
 
         workspace_splitter = QSplitter()
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(overview_panel)
+        workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
         workspace_splitter.addWidget(right_panel)
         workspace_splitter.setStretchFactor(0, 2)
         workspace_splitter.setStretchFactor(1, 5)
@@ -1462,8 +1676,8 @@ class MainWindow(QMainWindow):
                 [
                     ("校验", self.validate_button.click, "validate"),
                     ("导出差异", self.previewExportDiffRequested.emit, "report"),
-                    ("构建导出", self.build_button.click, "generate"),
-                    ("查看结果", lambda: self._activate_workspace_mode("build-results"), "report"),
+                    ("开始构建", self.buildRequested.emit, "generate"),
+                    ("交付回看", lambda: self.show_report_tab(2), "report"),
                 ],
             )
         )
@@ -1519,7 +1733,7 @@ class MainWindow(QMainWindow):
         workspace_splitter = QSplitter()
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(self._build_validation_overview_panel(filter_card))
+        workspace_splitter.addWidget(self._wrap_overview_scroll(self._build_validation_overview_panel(filter_card)))
         workspace_splitter.addWidget(self._build_report_center_page(self.validation_summary_label, self.validation_issue_list, self.validation_report_output))
         workspace_splitter.setStretchFactor(0, 2)
         workspace_splitter.setStretchFactor(1, 5)
@@ -1780,7 +1994,7 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(8)
         right_layout.addWidget(self.report_header)
         right_layout.addWidget(self.report_pages, 1)
-        workspace_splitter.addWidget(self._build_results_overview_panel())
+        workspace_splitter.addWidget(self._wrap_overview_scroll(self._build_results_overview_panel()))
         workspace_splitter.addWidget(right_panel)
         workspace_splitter.setStretchFactor(0, 2)
         workspace_splitter.setStretchFactor(1, 5)
@@ -1790,33 +2004,30 @@ class MainWindow(QMainWindow):
     def _build_activity_panel(self) -> QWidget:
         panel = QWidget()
         panel.setMinimumHeight(self._minimum_report_panel_height)
+        panel.setMaximumHeight(0)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        layout.addWidget(self._build_panel_header("活动与结果入口", "log"))
+        layout.setSpacing(0)
 
         body = QFrame()
         body.setObjectName("ActivityPanel")
         body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(12, 10, 12, 10)
-        body_layout.setSpacing(10)
+        body_layout.setContentsMargins(12, 6, 12, 6)
+        body_layout.setSpacing(8)
 
-        text_column = QVBoxLayout()
-        text_column.setContentsMargins(0, 0, 0, 0)
-        text_column.setSpacing(4)
-        self.activity_summary_label.setProperty("role", "modeCardTitle")
-        self.activity_hint_label.setProperty("role", "modeCardDescription")
-        self.activity_hint_label.setWordWrap(True)
-        text_column.addWidget(self.activity_summary_label)
-        text_column.addWidget(self.activity_hint_label)
+        activity_entry_label = QLabel("结果入口")
+        activity_entry_label.setProperty("role", "busHeaderChip")
+        self.activity_hint_label.setText("点击进入独立结果页")
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
+        action_row.setSpacing(6)
         results_button = QPushButton("结果中心")
         validate_button = QPushButton("校验结果")
         build_button = QPushButton("构建结果")
         loudness_button = QPushButton("响度结果")
+        for compact_button in [results_button, validate_button, build_button, loudness_button]:
+            compact_button.setProperty("role", "activityCompactButton")
         results_button.clicked.connect(lambda: self._activate_workspace_mode("results"))
         validate_button.clicked.connect(lambda: self.show_report_tab(1))
         build_button.clicked.connect(lambda: self.show_report_tab(2))
@@ -1826,9 +2037,9 @@ class MainWindow(QMainWindow):
         action_row.addWidget(build_button)
         action_row.addWidget(loudness_button)
         action_row.addStretch(1)
-        text_column.addLayout(action_row)
 
-        body_layout.addLayout(text_column, 1)
+        body_layout.addWidget(activity_entry_label)
+        body_layout.addLayout(action_row, 1)
         body_layout.addWidget(self.activity_report_focus_label)
         body_layout.addWidget(self.activity_dirty_label)
         layout.addWidget(body)
@@ -1839,9 +2050,6 @@ class MainWindow(QMainWindow):
         surface_key = {
             "validation": "validation",
             "results": "results",
-            "validation-results": "validation",
-            "build-results": "results",
-            "loudness-results": "results",
         }.get(mode)
         if surface_key is None:
             return
@@ -1970,9 +2178,6 @@ class MainWindow(QMainWindow):
             "validation": "校验修复",
             "build": "构建交付",
             "results": "结果中心",
-            "validation-results": "校验结果",
-            "build-results": "构建结果",
-            "loudness-results": "响度结果",
         }
         self._active_workspace_mode = mode
         self.task_sidebar.set_active_mode(mode)
@@ -1981,6 +2186,18 @@ class MainWindow(QMainWindow):
         self.activity_hint_label.setText(self._current_workspace_context_text())
 
     def _activate_workspace_mode(self, mode: str) -> None:
+        if mode == "validation-results":
+            mode = "validation"
+        elif mode == "build-results":
+            self._active_report_index = 2
+            self.report_pages.setCurrentIndex(2)
+            self.report_tabs.setCurrentIndex(2)
+            mode = "results"
+        elif mode == "loudness-results":
+            self._active_report_index = 3
+            self.report_pages.setCurrentIndex(3)
+            self.report_tabs.setCurrentIndex(3)
+            mode = "results"
         if mode == "home":
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["home"])
         elif mode == "resources":
@@ -2008,8 +2225,6 @@ class MainWindow(QMainWindow):
             self._active_report_index = 1
             self.report_pages.setCurrentIndex(1)
             self.report_tabs.setCurrentIndex(1)
-            workspace_total = max(sum(self.workspace_splitter.sizes()), sum(self._default_workspace_splitter_sizes))
-            self._set_workspace_splitter_sizes([int(workspace_total * 0.68), int(workspace_total * 0.32)])
         elif mode == "build":
             self._mount_workspace_surface("build")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["build"])
@@ -2018,24 +2233,6 @@ class MainWindow(QMainWindow):
         elif mode == "results":
             self._mount_workspace_surface("results")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["results"])
-        elif mode == "validation-results":
-            self._mount_workspace_surface("validation-results")
-            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["validation-results"])
-            self._active_report_index = 1
-            self.report_pages.setCurrentIndex(1)
-            self.report_tabs.setCurrentIndex(1)
-        elif mode == "build-results":
-            self._mount_workspace_surface("build-results")
-            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["build-results"])
-            self._active_report_index = 2
-            self.report_pages.setCurrentIndex(2)
-            self.report_tabs.setCurrentIndex(2)
-        elif mode == "loudness-results":
-            self._mount_workspace_surface("loudness-results")
-            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["loudness-results"])
-            self._active_report_index = 3
-            self.report_pages.setCurrentIndex(3)
-            self.report_tabs.setCurrentIndex(3)
         self._set_workspace_mode(mode)
         self._update_object_bus_status()
 
@@ -2092,7 +2289,7 @@ class MainWindow(QMainWindow):
         self._pending_layout_flush = False
         if self._pending_workspace_splitter_sizes is not None:
             sizes = [int(value) for value in self._pending_workspace_splitter_sizes]
-            self.workspace_splitter.setSizes(sizes)
+            self.workspace_splitter.setSizes([max(0, sizes[0]), 0])
             self._pending_workspace_splitter_sizes = None
         if self._pending_main_splitter_sizes is not None and not self._explorer_detached:
             sizes = [int(value) for value in self._pending_main_splitter_sizes]
@@ -2104,7 +2301,11 @@ class MainWindow(QMainWindow):
             self._pending_content_top_splitter_sizes = None
 
     def _set_workspace_splitter_sizes(self, sizes: list[int]) -> None:
-        self._pending_workspace_splitter_sizes = [int(value) for value in sizes]
+        normalized = [int(value) for value in sizes]
+        if len(normalized) < 2:
+            normalized = [normalized[0] if normalized else sum(self._default_workspace_splitter_sizes), 0]
+        normalized[1] = 0
+        self._pending_workspace_splitter_sizes = normalized
         if self.isVisible():
             self._schedule_layout_flush()
 
@@ -2435,7 +2636,7 @@ class MainWindow(QMainWindow):
         editor_index = self.editor_tabs.currentIndex()
         if self._active_workspace_mode == "home":
             editor_title = "欢迎页"
-        elif self._active_workspace_mode in {"validation", "results", "validation-results", "build-results", "loudness-results"}:
+        elif self._active_workspace_mode in {"validation", "results"}:
             editor_title = f"结果/{self._report_page_titles[self._active_report_index].replace('当前：', '')}"
         elif self._active_workspace_mode == "events":
             editor_title = f"事件设计/{self.events_workspace_tabs.tabText(self.events_workspace_tabs.currentIndex())}"
@@ -2774,13 +2975,29 @@ class MainWindow(QMainWindow):
             self._sync_weight_preset_combo(self.clip_weight_preset_combo, 1)
             self.clip_trim_start_spin.setValue(0)
             self.clip_trim_end_spin.setValue(0)
+            self.clip_fade_in_spin.setValue(0)
+            self.clip_fade_out_spin.setValue(0)
             self.clip_loop_start_spin.setValue(0)
             self.clip_loop_end_spin.setValue(0)
             self.clip_tags_detail_edit.clear()
-            self.clip_preview_hint_label.setText("选择片段后可在此调整资源键、裁剪、循环和标签。快捷键：Delete 删除，Ctrl+C 复制资源键。")
+            self.clip_waveform_editor.clear()
+            self.clip_playhead_label.setText("游标 0 ms")
+            self.clip_preview_hint_label.setText("选择片段后可直接在波形上拖拽裁剪、淡入淡出和循环区；滚轮缩放，双击聚焦选区，并可局部试听。")
             self.clip_preview_button.setEnabled(False)
+            self.clip_preview_segment_button.setEnabled(False)
             self.clip_copy_asset_key_button.setEnabled(False)
             self.clip_locate_source_button.setEnabled(False)
+            for button in [
+                self.clip_waveform_zoom_out_button,
+                self.clip_waveform_zoom_reset_button,
+                self.clip_waveform_frame_selection_button,
+                self.clip_waveform_zoom_in_button,
+                self.clip_set_start_from_playhead_button,
+                self.clip_set_end_from_playhead_button,
+                self.clip_set_loop_from_selection_button,
+                self.clip_clear_loop_button,
+            ]:
+                button.setEnabled(False)
             self._loading_clip_details = False
             return
 
@@ -2792,30 +3009,53 @@ class MainWindow(QMainWindow):
         self._sync_weight_preset_combo(self.clip_weight_preset_combo, clip.weight)
         self.clip_trim_start_spin.setValue(clip.trim_start_ms)
         self.clip_trim_end_spin.setValue(clip.trim_end_ms)
+        self.clip_fade_in_spin.setValue(getattr(clip, "fade_in_ms", 0))
+        self.clip_fade_out_spin.setValue(getattr(clip, "fade_out_ms", 0))
         self.clip_loop_start_spin.setValue(clip.loop_start_ms)
         self.clip_loop_end_spin.setValue(clip.loop_end_ms)
         self.clip_tags_detail_edit.setText(", ".join(getattr(clip, "tags", [])))
+        self.clip_waveform_editor.set_clip(
+            clip.source_path,
+            trim_start_ms=clip.trim_start_ms,
+            trim_end_ms=clip.trim_end_ms,
+            fade_in_ms=getattr(clip, "fade_in_ms", 0),
+            fade_out_ms=getattr(clip, "fade_out_ms", 0),
+            loop_start_ms=clip.loop_start_ms,
+            loop_end_ms=clip.loop_end_ms,
+        )
+        self.clip_playhead_label.setText(f"游标 {self.clip_waveform_editor.playhead_ms()} ms")
         hint_segments = [
-            f"源文件：{clip.source_path or '未指定'}",
-            f"权重：相对值 {MIN_CLIP_WEIGHT}-{MAX_CLIP_WEIGHT}",
-            "Loop：一期未开放，当前不参与试听和运行时执行",
+            f"源：{os.path.basename(clip.source_path) if clip.source_path else '未指定'}",
+            "拖拽裁剪/淡入淡出/循环",
+            "滚轮缩放，双击聚焦，支持局部试听",
         ]
         if clip_duration_ms is not None:
-            hint_segments.append(f"可编辑时间范围：0-{clip_duration_ms} ms")
+            hint_segments.append(f"范围 0-{clip_duration_ms} ms")
             if any(value > clip_duration_ms for value in [clip.trim_start_ms, clip.loop_start_ms]) or any(value > clip_duration_ms for value in [clip.trim_end_ms, clip.loop_end_ms] if value > 0):
-                hint_segments.append("当前裁剪或循环值已超出源文件长度，请修正")
+                hint_segments.append("裁剪或循环已超出源文件长度")
         else:
-            hint_segments.append("无法读取音频时长，时间字段使用通用上限")
+            hint_segments.append("无法读取音频时长")
         selected_count = len(self.selected_clip_ids())
         if selected_count > 1:
-            hint_segments.insert(0, f"已选 {selected_count} 个片段，当前正在编辑首条")
+            hint_segments.insert(0, f"已选 {selected_count} 个片段，当前编辑首条")
         else:
-            hint_segments.insert(0, f"当前片段 {clip.id} 可直接精修")
-        hint_segments.append("Enter 可聚焦详情，Ctrl+C 可复制资源键")
+            hint_segments.insert(0, f"片段 {clip.id}")
         self.clip_preview_hint_label.setText(" | ".join(hint_segments))
         self.clip_preview_button.setEnabled(True)
+        self.clip_preview_segment_button.setEnabled(True)
         self.clip_copy_asset_key_button.setEnabled(True)
         self.clip_locate_source_button.setEnabled(True)
+        for button in [
+            self.clip_waveform_zoom_out_button,
+            self.clip_waveform_zoom_reset_button,
+            self.clip_waveform_frame_selection_button,
+            self.clip_waveform_zoom_in_button,
+            self.clip_set_start_from_playhead_button,
+            self.clip_set_end_from_playhead_button,
+            self.clip_set_loop_from_selection_button,
+            self.clip_clear_loop_button,
+        ]:
+            button.setEnabled(True)
         self._loading_clip_details = False
 
     def _apply_clip_time_limits(self, clip) -> int | None:
@@ -2832,11 +3072,120 @@ class MainWindow(QMainWindow):
         for spin_box in [
             self.clip_trim_start_spin,
             self.clip_trim_end_spin,
+            self.clip_fade_in_spin,
+            self.clip_fade_out_spin,
             self.clip_loop_start_spin,
             self.clip_loop_end_spin,
         ]:
             spin_box.setRange(MIN_CLIP_TIME_MS, maximum_ms)
         return duration_ms
+
+    def _sync_clip_waveform_from_controls(self) -> None:
+        self.clip_waveform_editor.set_selection(
+            self.clip_trim_start_spin.value(),
+            self.clip_trim_end_spin.value(),
+            self.clip_fade_in_spin.value(),
+            self.clip_fade_out_spin.value(),
+            emit_signal=False,
+        )
+        self.clip_waveform_editor.set_loop(
+            self.clip_loop_start_spin.value(),
+            self.clip_loop_end_spin.value(),
+            emit_signal=False,
+        )
+
+    def _handle_clip_timing_spin_change(self, field_name: str, value: int) -> None:
+        self._emit_selected_clip_detail_change(field_name, str(value))
+        if not self._loading_clip_details:
+            self._sync_clip_waveform_from_controls()
+
+    def _handle_clip_waveform_change(self, trim_start_ms: int, trim_end_ms: int, fade_in_ms: int, fade_out_ms: int) -> None:
+        if self._loading_clip_details:
+            return
+        updates: list[tuple[QSpinBox, int, str]] = [
+            (self.clip_trim_start_spin, trim_start_ms, "trim_start_ms"),
+            (self.clip_trim_end_spin, trim_end_ms, "trim_end_ms"),
+            (self.clip_fade_in_spin, fade_in_ms, "fade_in_ms"),
+            (self.clip_fade_out_spin, fade_out_ms, "fade_out_ms"),
+        ]
+        changed_fields: list[tuple[str, int]] = []
+        self._loading_clip_details = True
+        for spin_box, new_value, field_name in updates:
+            if spin_box.value() != new_value:
+                spin_box.setValue(new_value)
+                changed_fields.append((field_name, new_value))
+        self._loading_clip_details = False
+        for field_name, new_value in changed_fields:
+            self._emit_selected_clip_detail_change(field_name, str(new_value))
+
+    def _handle_clip_waveform_loop_change(self, loop_start_ms: int, loop_end_ms: int) -> None:
+        if self._loading_clip_details:
+            return
+        updates: list[tuple[QSpinBox, int, str]] = [
+            (self.clip_loop_start_spin, loop_start_ms, "loop_start_ms"),
+            (self.clip_loop_end_spin, loop_end_ms, "loop_end_ms"),
+        ]
+        changed_fields: list[tuple[str, int]] = []
+        self._loading_clip_details = True
+        for spin_box, new_value, field_name in updates:
+            if spin_box.value() != new_value:
+                spin_box.setValue(new_value)
+                changed_fields.append((field_name, new_value))
+        self._loading_clip_details = False
+        for field_name, new_value in changed_fields:
+            self._emit_selected_clip_detail_change(field_name, str(new_value))
+
+    def _handle_clip_waveform_playhead_change(self, playhead_ms: int) -> None:
+        self.clip_playhead_label.setText(f"游标 {playhead_ms} ms")
+
+    def _set_clip_trim_start_from_playhead(self) -> None:
+        if self._loading_clip_details:
+            return
+        maximum_start = self.clip_trim_end_spin.value() - 1 if self.clip_trim_end_spin.value() > 0 else max(MIN_CLIP_TIME_MS, self.clip_waveform_editor.duration_ms() - 1)
+        target_value = min(self.clip_waveform_editor.playhead_ms(), maximum_start)
+        self.clip_trim_start_spin.setValue(max(MIN_CLIP_TIME_MS, target_value))
+
+    def _set_clip_trim_end_from_playhead(self) -> None:
+        if self._loading_clip_details:
+            return
+        playhead_ms = self.clip_waveform_editor.playhead_ms()
+        minimum_end = self.clip_trim_start_spin.value() + 1
+        target_value = max(minimum_end, playhead_ms)
+        if self.clip_waveform_editor.duration_ms() > 0 and target_value >= self.clip_waveform_editor.duration_ms():
+            target_value = 0
+        self.clip_trim_end_spin.setValue(target_value)
+
+    def _set_clip_loop_from_selection(self) -> None:
+        if self._loading_clip_details:
+            return
+        self.clip_loop_start_spin.setValue(self.clip_trim_start_spin.value())
+        selection_end = self.clip_trim_end_spin.value()
+        if selection_end == 0 and self.clip_waveform_editor.duration_ms() > 0:
+            selection_end = self.clip_waveform_editor.duration_ms()
+        self.clip_loop_end_spin.setValue(max(self.clip_loop_start_spin.value() + 1, selection_end))
+
+    def _clear_clip_loop(self) -> None:
+        if self._loading_clip_details:
+            return
+        self.clip_loop_start_spin.setValue(0)
+        self.clip_loop_end_spin.setValue(0)
+
+    def _request_selected_clip_segment_preview(self) -> None:
+        clip_ids = self.selected_clip_ids()
+        if not clip_ids:
+            return
+        playhead_ms = self.clip_waveform_editor.playhead_ms()
+        duration_ms = self.clip_waveform_editor.duration_ms()
+        if duration_ms > 0:
+            segment_start_ms = max(MIN_CLIP_TIME_MS, playhead_ms - 120)
+            segment_end_ms = min(duration_ms, segment_start_ms + 1500)
+            if segment_end_ms <= segment_start_ms:
+                segment_end_ms = min(duration_ms, max(segment_start_ms + 1, playhead_ms + 600))
+        else:
+            segment_start_ms = self.clip_trim_start_spin.value()
+            segment_end_ms = self.clip_trim_end_spin.value()
+        if segment_end_ms > segment_start_ms:
+            self.previewClipSegmentRequested.emit(clip_ids[0], segment_start_ms, segment_end_ms)
 
     def _populate_weight_preset_combo(self, combo: QComboBox) -> None:
         combo.addItem("自定义", None)
@@ -2909,10 +3258,10 @@ class MainWindow(QMainWindow):
         left_column = QVBoxLayout()
         right_column = QVBoxLayout()
         for widget in left_widgets:
-            left_column.addWidget(widget)
+            left_column.addWidget(self._wrap_workspace_widget(widget))
         left_column.addStretch(1)
         for widget in right_widgets:
-            right_column.addWidget(widget)
+            right_column.addWidget(self._wrap_workspace_widget(widget))
         right_column.addStretch(1)
         left_container = QWidget()
         left_container.setLayout(left_column)
@@ -2935,6 +3284,16 @@ class MainWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(page)
+        return scroll
+
+    def _wrap_overview_scroll(self, panel: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(panel)
+        scroll.setMinimumWidth(318)
         return scroll
 
     def _build_meter_stat_card(self, title: str, value_label: QLabel, unit_text: str) -> QWidget:
@@ -4025,11 +4384,7 @@ class MainWindow(QMainWindow):
         self.workspace_report_focus_label.setText(report_title)
         self.activity_report_focus_label.setText(report_title)
         if index == 1:
-            self._activate_workspace_mode("validation-results")
-        elif index == 2:
-            self._activate_workspace_mode("build-results")
-        elif index == 3:
-            self._activate_workspace_mode("loudness-results")
+            self._activate_workspace_mode("validation")
         else:
             self._activate_workspace_mode("results")
         self._update_object_bus_status()
@@ -4425,6 +4780,8 @@ class MainWindow(QMainWindow):
         self.global_search_edit.returnPressed.connect(self._request_global_search)
         self.global_search_edit.textChanged.connect(self._sync_global_search_fields)
         self.global_search_button.clicked.connect(self._request_global_search)
+        self.build_button.clicked.connect(lambda: self._activate_workspace_mode("build"))
+        self.build_execute_button.clicked.connect(self.buildRequested.emit)
         self.object_parent_button.clicked.connect(self.navigateParentRequested.emit)
         self.reference_parent_value_button.clicked.connect(self.navigateParentRequested.emit)
         self.reference_bus_value_button.clicked.connect(lambda: self.set_active_property_category("事件"))
@@ -4445,6 +4802,7 @@ class MainWindow(QMainWindow):
         self.clear_meter_button.clicked.connect(self.clear_peak_hold)
         self.loudness_scan_button.clicked.connect(self.loudnessScanRequested.emit)
         self.clip_preview_button.clicked.connect(self._request_selected_clip_preview)
+        self.clip_preview_segment_button.clicked.connect(self._request_selected_clip_segment_preview)
         self.clip_copy_asset_key_button.clicked.connect(self._copy_selected_clip_asset_keys)
         self.clip_locate_source_button.clicked.connect(self._locate_selected_clip_source)
         self.clip_table.itemSelectionChanged.connect(self._sync_clip_detail_from_table)
@@ -4502,10 +4860,23 @@ class MainWindow(QMainWindow):
         self.clip_weight_detail_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("weight", str(value)))
         self.clip_weight_detail_spin.valueChanged.connect(lambda value: self._sync_weight_preset_combo(self.clip_weight_preset_combo, value))
         self.clip_weight_preset_combo.currentIndexChanged.connect(lambda: self._apply_weight_preset(self.clip_weight_detail_spin, self.clip_weight_preset_combo))
-        self.clip_trim_start_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("trim_start_ms", str(value)))
-        self.clip_trim_end_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("trim_end_ms", str(value)))
-        self.clip_loop_start_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("loop_start_ms", str(value)))
-        self.clip_loop_end_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("loop_end_ms", str(value)))
+        self.clip_trim_start_spin.valueChanged.connect(lambda value: self._handle_clip_timing_spin_change("trim_start_ms", value))
+        self.clip_trim_end_spin.valueChanged.connect(lambda value: self._handle_clip_timing_spin_change("trim_end_ms", value))
+        self.clip_fade_in_spin.valueChanged.connect(lambda value: self._handle_clip_timing_spin_change("fade_in_ms", value))
+        self.clip_fade_out_spin.valueChanged.connect(lambda value: self._handle_clip_timing_spin_change("fade_out_ms", value))
+        self.clip_loop_start_spin.valueChanged.connect(lambda value: self._handle_clip_timing_spin_change("loop_start_ms", value))
+        self.clip_loop_end_spin.valueChanged.connect(lambda value: self._handle_clip_timing_spin_change("loop_end_ms", value))
+        self.clip_waveform_editor.selectionChanged.connect(self._handle_clip_waveform_change)
+        self.clip_waveform_editor.loopChanged.connect(self._handle_clip_waveform_loop_change)
+        self.clip_waveform_editor.playheadChanged.connect(self._handle_clip_waveform_playhead_change)
+        self.clip_waveform_zoom_out_button.clicked.connect(self.clip_waveform_editor.zoom_out)
+        self.clip_waveform_zoom_reset_button.clicked.connect(self.clip_waveform_editor.reset_view)
+        self.clip_waveform_frame_selection_button.clicked.connect(self.clip_waveform_editor.frame_selection)
+        self.clip_waveform_zoom_in_button.clicked.connect(self.clip_waveform_editor.zoom_in)
+        self.clip_set_start_from_playhead_button.clicked.connect(self._set_clip_trim_start_from_playhead)
+        self.clip_set_end_from_playhead_button.clicked.connect(self._set_clip_trim_end_from_playhead)
+        self.clip_set_loop_from_selection_button.clicked.connect(self._set_clip_loop_from_selection)
+        self.clip_clear_loop_button.clicked.connect(self._clear_clip_loop)
         self.clip_tags_detail_edit.editingFinished.connect(lambda: self._emit_selected_clip_detail_change("tags", self.clip_tags_detail_edit.text()))
         self.bulk_clip_weight_spin.valueChanged.connect(lambda value: self._sync_weight_preset_combo(self.bulk_weight_preset_combo, value))
         self.bulk_weight_preset_combo.currentIndexChanged.connect(lambda: self._apply_weight_preset(self.bulk_clip_weight_spin, self.bulk_weight_preset_combo))
@@ -4918,9 +5289,6 @@ class MainWindow(QMainWindow):
             "validation": load_app_icon("validate"),
             "build": load_app_icon("generate"),
             "results": load_app_icon("report"),
-            "validation-results": load_app_icon("validate"),
-            "build-results": load_app_icon("generate"),
-            "loudness-results": load_app_icon("audio"),
         }
         for mode, icon in sidebar_icon_map.items():
             button = self.task_sidebar.button(mode)
@@ -4974,6 +5342,22 @@ class MainWindow(QMainWindow):
             }}
             QPushButton:pressed, QToolButton:pressed {{
                 background-color: #2b3138;
+            }}
+            QPushButton[role="clipCompactButton"] {{
+                padding: 4px 8px;
+                min-height: 20px;
+            }}
+            QPushButton[role="activityCompactButton"] {{
+                padding: 3px 8px;
+                min-height: 18px;
+            }}
+            QSpinBox[role="clipCompactSpin"], QLineEdit[role="clipCompactField"] {{
+                min-height: 22px;
+                padding: 2px 6px;
+            }}
+            QLabel[role="clipPreviewHint"] {{
+                color: #b9c7d8;
+                font-size: 11px;
             }}
             #HeroPanel {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -5030,6 +5414,12 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 #1c232a, stop:1 #222c35);
                 border: 1px solid #4d6070;
+                border-radius: {group_radius}px;
+            }}
+            #EmphasisCard {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1b232b, stop:1 #24303a);
+                border: 1px solid #5a7085;
                 border-radius: {group_radius}px;
             }}
             #EmptyStateCard {{
@@ -5149,6 +5539,51 @@ class MainWindow(QMainWindow):
             }}
             QLabel[role="emptyStateBody"] {{
                 color: #b8c9d9;
+            }}
+            QLabel[role="cardEyebrow"] {{
+                color: #8da9c5;
+                font-size: {object_type_size - 1}px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }}
+            QLabel[role="cardIconBubble"] {{
+                background-color: #2b3947;
+                border: 1px solid #6f8aa4;
+                border-radius: 18px;
+                padding: 0px;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="event"] {{
+                background-color: #21374a;
+                border-color: #77a9d6;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="content"] {{
+                background-color: #213844;
+                border-color: #75b4c8;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="bus"] {{
+                background-color: #233729;
+                border-color: #7fcf95;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="validate"] {{
+                background-color: #463027;
+                border-color: #d4a36f;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="generate"] {{
+                background-color: #4b3123;
+                border-color: #e0ac73;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="audio"] {{
+                background-color: #2b314a;
+                border-color: #8fa2de;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="report"] {{
+                background-color: #2b3842;
+                border-color: #7eb3d3;
+            }}
+            QLabel[role="cardIconBubble"][cardTone="app"] {{
+                background-color: #3a2f22;
+                border-color: #d0a26f;
             }}
             QLabel[role="meterTitle"] {{
                 color: #8e9aa8;
@@ -5334,6 +5769,28 @@ class MainWindow(QMainWindow):
                 margin-top: 12px;
                 font-weight: 600;
                 background-color: #20262d;
+            }}
+            QGroupBox[role="contentCardInner"] {{
+                border: none;
+                border-radius: 0px;
+                margin-top: 0px;
+                padding-top: 0px;
+                background-color: transparent;
+            }}
+            QGroupBox[role="contentCardInner"]::title {{
+                color: transparent;
+                left: 0px;
+                padding: 0px;
+                margin: 0px;
+            }}
+            QFrame[role="contentCardInnerFrame"] {{
+                background-color: transparent;
+                border: none;
+                border-radius: 0px;
+            }}
+            QFrame#ObjectHeader[role="contentCardInnerFrame"] QLabel {{
+                background: transparent;
+                border: none;
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;

@@ -68,15 +68,12 @@ class TaskSidebar(QFrame):
             self._buttons[mode] = button
             layout.addWidget(button)
 
-        results_title = QLabel("结果与收尾")
+        results_title = QLabel("结果回看")
         results_title.setProperty("role", "sidebarTitle")
         layout.addWidget(results_title)
 
         result_specs = [
             ("results", "结果中心"),
-            ("validation-results", "校验结果"),
-            ("build-results", "构建结果"),
-            ("loudness-results", "响度结果"),
         ]
         for mode, label in result_specs:
             button = QPushButton(label)
