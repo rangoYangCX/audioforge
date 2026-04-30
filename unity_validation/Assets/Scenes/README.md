@@ -1,5 +1,7 @@
 # Validation Scenes
 
+当前文档同步日期：2026-04-30
+
 这个目录用于放 Unity 空项目验证场景。
 
 推荐保留一个最小场景，例如 `Validation.unity`，只验证这些内容：

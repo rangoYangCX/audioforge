@@ -1,5 +1,7 @@
 # AudioForge Full-Chain Report
 
+> 这是 2026-04-23 生成的样板工程检查快照，用于说明开发对接样板的导出结构与覆盖面；仓库最新基线请以 `reports/internal_release_smoke/checks/full_chain_report.md` 为准。
+
 - Generated At: 2026-04-23T09:05:26Z
 - Overall: PASS
 - Workspace: C:\Users\EDY\wwise
@@ -47,7 +49,7 @@
 - buses=3
 - manifest_assets=29
 
-### unity_validation_package - PASS
+### unity_validation_package - PASS（历史命名）
 
 - unity_validation_dir=C:\Users\EDY\wwise\unity_validation
 - runtime_files_checked=8

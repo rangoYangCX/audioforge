@@ -3,6 +3,8 @@ AudioForge Unity 端对接开发文档（第一期）
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
+> 当前文档同步日期：2026-04-30。
+
 0. 当前状态
 
 - 当前工具端适用目标：UI / SFX / BGM 为主、事件驱动为主、接受轻量 SDK 的手游休闲项目。
@@ -26,10 +28,10 @@ AudioForge Unity 端对接开发文档（第一期）
 
 第一期建议交接以下目录和文件：
 
-- `Export/AudioData.json`
-- `Export/AudioManifest.json`
-- `Export/AudioEventID.cs`
-- `Export/Assets/**`
+- `<你的实际导出目录>/AudioData.json`
+- `<你的实际导出目录>/AudioManifest.json`
+- `<你的实际导出目录>/AudioEventID.cs`
+- `<你的实际导出目录>/Assets/**`
 - `unity_package/Assets/AudioForgeRuntime/**`
 - `unity_validation/README.md`
 - `unity_package/README.md`
@@ -61,6 +63,8 @@ Assets/
 ```
 
 当前仓库根目录 `Export/` 样例里，默认可直接拿来验证的事件枚举已同步为：`sfx_level_check_02`、`sfx_level_check_03`、`sfx_tile_hint_02`、`sfx_tile_undo_02`、`sfx_tile_undo_03`。当前 Unity 运行时代码统一维护在 `unity_package`，`unity_validation` 里的 `AudioForgeBootstrap` / `AudioForgeEventPlayer` 镜像也已对齐到 `sfx_level_check_02`，避免空项目验证仍指向旧样例事件。
+
+如果你只是要拿仓库里的最新机器验证样例做联调，优先使用 `reports/internal_release_smoke/export/` 下的导出物，而不是把仓库根目录 `Export/` 误当成唯一基线来源。
 
 3. 工具端与 Unity 端边界
 
@@ -380,7 +384,7 @@ Combo 联调时请额外确认以下边界：
 
 16. 建议交接方式
 
-把本文件、`开发文档.md`、`unity_validation/README.md` 和 `Export/` 导出样例一起交给 Unity 程序同学。Unity 端先按本文件完成最小 SDK，再用空项目验证样例做联调回归。
+把本文件、`开发文档.md`、`unity_validation/README.md` 和本次实际导出目录一起交给 Unity 程序同学。Unity 端先按本文件完成最小 SDK，再用空项目验证样例做联调回归。
 
 建议按以下顺序交接：
 

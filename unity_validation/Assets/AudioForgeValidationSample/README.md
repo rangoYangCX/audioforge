@@ -1,5 +1,7 @@
 # AudioForge Validation Sample
 
+当前文档同步日期：2026-04-30
+
 这个目录代表 Unity 空项目验证工程里的示例骨架层，不承载运行时代码真源。
 
 ## 作用
@@ -13,7 +15,7 @@
 - `Assets/AudioForgeRuntime`：从 `unity_package` 同步来的运行时代码镜像。
 - `Assets/AudioForgeValidationSample`：示例场景、说明、测试对象约定。
 - `Assets/Scenes`：验证场景入口。
-- `Assets/StreamingAssets/AudioForge`：放工具导出的 JSON 和音频资源。
+- `Assets/StreamingAssets/AudioForge`：放工具导出的 JSON 和运行时音频资源。
 
 ## 最小验证对象
 

@@ -3,11 +3,13 @@
 > 本文档只负责说明 Unity 空项目验证步骤。
 > SDK 对接边界、运行时契约、字段语义、接入建议与验收标准，统一以 `docs/UnitySDK对接规范.md` 为准；后续不在本文档中维护并行版本的详细对接说明。
 
+> 当前文档同步日期：2026-04-30。
+
 ## 当前验证状态
 
 - 当前仓库内最近一次基线验证结果：`pytest` 62 项通过。
 - 真实 WAV 烟雾工程验证结果：PASS。
-- 最近一次全链路检查结果：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 验证包完整性。
+- 最近一次全链路检查结果：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 集成包完整性。
 
 这些结果说明当前仓库已经具备“工具端可导出、契约可检查、验证包可交接”的最低交付基线，但不代表已经完成正式项目内的最终联调。
 
@@ -60,7 +62,7 @@ unity_validation/
 这套验证流程要确认四件事：
 
 1. AudioForge 导出的 `AudioData.json` 能被 Unity 读取。
-2. 导出的 OGG 资源能从 `StreamingAssets` 正常加载。
+2. 导出的运行时音频资源能从 `StreamingAssets` 正常加载。
 3. 最小 Runtime 能按事件名触发播放。
 4. Random、Sequence、Combo、Cooldown、MaxInstances 这些行为至少在空项目里能走通基础链路。
 
@@ -79,14 +81,14 @@ unity_validation/
 4. 至少一个设置了 `TrimStartMs` 和 `TrimEndMs` 的 Clip。
 5. 项目设置里使用：
 	`Source Format = wav`
-	`Runtime Format = ogg`
+	`Runtime Format = wav`
 
 然后执行 Build，确认导出目录里至少有这些文件：
 
 1. `AudioData.json`
 2. `AudioManifest.json`
 3. `AudioEventID.cs`
-4. `Assets/` 目录，里面是导出的 `.ogg` 音频
+4. `Assets/` 目录，里面是导出的运行时音频
 
 ## 第一步：创建 Unity 空项目
 
@@ -128,9 +130,9 @@ Assets/
 		AudioData.json
 		Assets/
 		  ui/
-			 click_01.ogg
+			 click_01.wav
 		  battle/
-			 hit_01.ogg
+			 hit_01.wav
 ```
 
 ## 第四步：搭一个最小测试场景
@@ -212,8 +214,8 @@ Assets/
 
 ## 第七步：定位问题时怎么查
 
-1. 先看 `AudioData.json` 里的 `RuntimeAudioFormat`，确认是不是 `ogg`。
-2. 再看 `StreamingAssets/AudioForge/Assets` 下的真实扩展名是不是 `.ogg`。
+1. 先看 `AudioData.json` 里的 `RuntimeAudioFormat`，确认它和当前导出批次一致。
+2. 再看 `StreamingAssets/AudioForge/Assets` 下的真实扩展名是否和 `RuntimeAudioFormat` 对得上。
 3. 再看 `AssetKey` 和文件路径是否一致。
 4. 如果脚本已编译但没声音，优先检查：
 	音频是否真的导出了

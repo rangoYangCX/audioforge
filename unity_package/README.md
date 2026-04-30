@@ -2,6 +2,8 @@
 
 这个目录是 Unity 侧运行时资源的独立维护包，也是仓库内的唯一源码真源。
 
+当前文档同步日期：2026-04-30
+
 ## 目录定位
 
 - `unity_package/Assets/AudioForgeRuntime`：Unity 运行时脚本、Editor 工具和稳定 `.meta` 文件。
@@ -20,8 +22,8 @@
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.02/`
-- `AudioForgeUnityPackage-0.02.zip`
+- `AudioForgeUnityPackage-0.03/`
+- `AudioForgeUnityPackage-0.03.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 
