@@ -8,11 +8,10 @@ except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QBrush, QColor, QCloseEvent, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
-    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -79,6 +78,7 @@ from audioforge.app.utils.constants import (
 from audioforge.app.widgets.clip_table import ClipTableWidget
 from audioforge.app.widgets.event_tree import EventTreeWidget
 from audioforge.app.widgets.loudness_history_plot import LoudnessHistoryPlot
+from audioforge.app.views.shell_components import AppShell, CompatibilityTabWidget, DetachedToolWindow, TaskSidebar
 
 
 class ProjectBusTreeWidget(QTreeWidget):
@@ -96,118 +96,6 @@ class ProjectBusTreeWidget(QTreeWidget):
     def dropEvent(self, event) -> None:
         super().dropEvent(event)
         self.hierarchyChanged.emit()
-
-
-class DetachedToolWindow(QWidget):
-    closeRequested = Signal()
-
-    def __init__(self) -> None:
-        super().__init__(None, Qt.WindowType.Window)
-        self.setWindowFlag(Qt.WindowType.WindowMinMaxButtonsHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowTitleHint, True)
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        self.closeRequested.emit()
-        event.ignore()
-
-
-class TaskSidebar(QFrame):
-    modeRequested = Signal(str)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("TaskSidebar")
-        self._buttons: dict[str, QPushButton] = {}
-        self._button_group = QButtonGroup(self)
-        self._button_group.setExclusive(True)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-
-        title = QLabel("工作模式")
-        title.setProperty("role", "sidebarTitle")
-        layout.addWidget(title)
-
-        utility_specs = [
-            ("home", "欢迎页"),
-        ]
-        for mode, label in utility_specs:
-            button = QPushButton(label)
-            button.setCheckable(True)
-            button.setProperty("role", "taskNavButton")
-            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
-            self._button_group.addButton(button)
-            self._buttons[mode] = button
-            layout.addWidget(button)
-
-        workflow_title = QLabel("制作流程")
-        workflow_title.setProperty("role", "sidebarTitle")
-        layout.addWidget(workflow_title)
-
-        button_specs = [
-            ("resources", "资源整理"),
-            ("events", "事件设计"),
-            ("buses", "总线与混音"),
-            ("validation", "校验修复"),
-            ("build", "构建交付"),
-        ]
-        for mode, label in button_specs:
-            button = QPushButton(label)
-            button.setCheckable(True)
-            button.setProperty("role", "taskNavButton")
-            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
-            self._button_group.addButton(button)
-            self._buttons[mode] = button
-            layout.addWidget(button)
-
-        results_title = QLabel("结果与收尾")
-        results_title.setProperty("role", "sidebarTitle")
-        layout.addWidget(results_title)
-
-        result_specs = [
-            ("results", "结果中心"),
-            ("validation-results", "校验结果"),
-            ("build-results", "构建结果"),
-            ("loudness-results", "响度结果"),
-        ]
-        for mode, label in result_specs:
-            button = QPushButton(label)
-            button.setCheckable(True)
-            button.setProperty("role", "taskNavButton")
-            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
-            self._button_group.addButton(button)
-            self._buttons[mode] = button
-            layout.addWidget(button)
-
-        layout.addStretch(1)
-
-    def set_active_mode(self, mode: str) -> None:
-        for current_mode, button in self._buttons.items():
-            button.blockSignals(True)
-            button.setChecked(current_mode == mode)
-            button.blockSignals(False)
-
-    def button(self, mode: str) -> QPushButton | None:
-        return self._buttons.get(mode)
-
-
-class AppShell(QFrame):
-    def __init__(self, top_bar: QWidget, sidebar: QWidget, content: QWidget) -> None:
-        super().__init__()
-        self.setObjectName("AppShell")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
-        layout.addWidget(top_bar)
-
-        body = QWidget()
-        body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(10)
-        body_layout.addWidget(sidebar)
-        body_layout.addWidget(content, 1)
-        layout.addWidget(body, 1)
 
 
 class MainWindow(QMainWindow):
@@ -959,11 +847,17 @@ class MainWindow(QMainWindow):
         loudness_view_layout.addWidget(self._build_panel_header("响度监视器", "meter"))
         loudness_view_layout.addWidget(self._build_loudness_monitor_view())
 
-        self.property_tabs = QTabWidget()
+        self._property_compat_scroll_pages = {
+            1: self._build_property_compat_scroll("音频属性兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实编辑已迁到“总线与混音”工作区。"),
+            2: self._build_property_compat_scroll("生成兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实编辑已迁到“构建交付”工作区。"),
+            3: self._build_property_compat_scroll("工程兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实工程配置已收口到独立工作区。"),
+        }
+        self.property_tabs = CompatibilityTabWidget()
         self.property_tabs.addTab(QWidget(), "事件")
         self.property_tabs.addTab(QWidget(), "音频属性")
         self.property_tabs.addTab(QWidget(), "生成")
         self.property_tabs.addTab(QWidget(), "工程")
+        self.property_tabs.set_current_widget_resolver(self._current_property_compat_widget)
         self.property_tabs.hide()
 
         self.editor_tabs = QTabWidget()
@@ -1305,6 +1199,21 @@ class MainWindow(QMainWindow):
             layout.addWidget(label)
         return card
 
+    def _build_empty_state_card(self, title: str, description: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("EmptyStateCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(6)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "emptyStateTitle")
+        description_label = QLabel(description)
+        description_label.setWordWrap(True)
+        description_label.setProperty("role", "emptyStateBody")
+        layout.addWidget(title_label)
+        layout.addWidget(description_label)
+        return card
+
     def _build_events_workspace(self) -> QWidget:
         self.events_workspace_tabs = QTabWidget()
         design_page = self._build_two_column_page(
@@ -1624,14 +1533,7 @@ class MainWindow(QMainWindow):
         return workspace
 
     def _current_property_scroll_widget(self) -> QWidget | None:
-        index = self.property_tabs.currentIndex()
-        if index == 0:
-            return self.event_design_scroll
-        if index in {1, 3}:
-            return self.inline_bus_group
-        if index == 2:
-            return self.generation_settings_group
-        return None
+        return self._current_property_compat_widget()
 
     def _build_welcome_page(self) -> QWidget:
         page = QWidget()
@@ -1689,6 +1591,10 @@ class MainWindow(QMainWindow):
                 "结果中心：所有日志、校验、构建和响度结果都统一收口到这里。",
             ],
         )
+        first_run_card = self._build_empty_state_card(
+            "从空白工程开始也没关系",
+            "如果你还没有最近工程，可以直接新建一个模板工程，然后按“资源整理 -> 事件设计 -> 构建交付”的顺序完成第一次闭环。",
+        )
         mode_map = self._build_workspace_note_card(
             "工作区地图",
             [
@@ -1705,6 +1611,7 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(12)
         left_layout.addWidget(project_snapshot)
+        left_layout.addWidget(first_run_card)
         left_layout.addWidget(mode_map)
         left_layout.addStretch(1)
         right_column = QWidget()
@@ -1760,6 +1667,7 @@ class MainWindow(QMainWindow):
         results_splitter.setStretchFactor(0, 2)
         results_splitter.setStretchFactor(1, 5)
         layout.addWidget(results_splitter, 1)
+        layout.addWidget(self._build_empty_state_card("日志区当前为空", "这通常意味着你刚打开工程，或者当前操作还没有触发导入、校验或构建链路。"))
         return page
 
     def _build_validation_results_page(self) -> QWidget:
@@ -1778,6 +1686,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
+        layout.addWidget(self._build_empty_state_card("还没有新的校验批次", "当你还没有运行校验，或者当前问题已全部清空时，这里只保留回看和跳转入口。"))
         layout.addStretch(1)
         return page
 
@@ -1798,6 +1707,7 @@ class MainWindow(QMainWindow):
         top_splitter.setStretchFactor(0, 3)
         top_splitter.setStretchFactor(1, 2)
         layout.addWidget(top_splitter, 1)
+        layout.addWidget(self._build_empty_state_card("还没有构建批次", "先运行差异预览或构建导出，这里才会出现交付摘要、问题定位和完整输出。"))
         return page
 
     def _build_loudness_results_page(self) -> QWidget:
@@ -1822,6 +1732,7 @@ class MainWindow(QMainWindow):
         loudness_splitter.setStretchFactor(0, 2)
         loudness_splitter.setStretchFactor(1, 5)
         layout.addWidget(loudness_splitter, 1)
+        layout.addWidget(self._build_empty_state_card("还没有扫描结果", "先执行响度扫描，再回到这里查看超标项、通过项和逐条说明。"))
         return page
 
     def _build_results_overview_panel(self) -> QWidget:
@@ -2754,6 +2665,37 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter)
         return page
 
+    def _report_item_state(self, payload: dict[str, object]) -> str:
+        severity = str(payload.get("severity", "")).strip().casefold()
+        if severity == "error":
+            return "error"
+        if severity == "warning":
+            return "warning"
+        if severity == "info":
+            return "info"
+        title = str(payload.get("title", "")).casefold()
+        detail = str(payload.get("detail", "")).casefold()
+        haystack = f"{title} {detail}"
+        if any(token in haystack for token in ["超标", "失败", "error", "缺失"]):
+            return "error"
+        if any(token in haystack for token in ["警告", "warning", "差异", "risk"]):
+            return "warning"
+        if any(token in haystack for token in ["通过", "完成", "success", "已刷新"]):
+            return "success"
+        return "info"
+
+    def _apply_report_item_state(self, list_item: QListWidgetItem, payload: dict[str, object]) -> None:
+        state = self._report_item_state(payload)
+        palette = {
+            "error": (QColor("#ffd8d8"), QColor("#4a2327")),
+            "warning": (QColor("#ffe8bf"), QColor("#4b3a1c")),
+            "success": (QColor("#d9f6e6"), QColor("#1f3a31")),
+            "info": (QColor("#d8ecff"), QColor("#203948")),
+        }
+        foreground, background = palette.get(state, palette["info"])
+        list_item.setForeground(QBrush(foreground))
+        list_item.setBackground(QBrush(background))
+
     def _set_report_items(self, list_widget: QListWidget, items: list[dict[str, object]]) -> None:
         list_widget.clear()
         for item in items:
@@ -2761,6 +2703,7 @@ class MainWindow(QMainWindow):
             list_item = QListWidgetItem(label)
             list_item.setToolTip(str(item.get("detail", label)))
             list_item.setData(Qt.ItemDataRole.UserRole, item)
+            self._apply_report_item_state(list_item, item)
             list_widget.addItem(list_item)
         if items:
             list_widget.setCurrentRow(0)
@@ -2908,6 +2851,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(spin_box, 1)
         layout.addWidget(preset_combo)
         return row
+
+    def _build_property_compat_scroll(self, title: str, description: str) -> QScrollArea:
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(self._build_empty_state_card(title, description))
+        spacer = QWidget()
+        spacer.setMinimumHeight(1200)
+        layout.addWidget(spacer)
+        layout.addStretch(1)
+        return self._wrap_scrollable_page(content)
+
+    def _current_property_compat_widget(self) -> QWidget | None:
+        index = self.property_tabs.currentIndex()
+        if index == 0:
+            return self.event_design_scroll
+        return self._property_compat_scroll_pages.get(index)
 
     def _sync_weight_preset_combo(self, combo: QComboBox, value: int) -> None:
         index = combo.findData(value)
@@ -3135,11 +3096,25 @@ class MainWindow(QMainWindow):
             self.clip_table.setItem(row, 6, QTableWidgetItem(str(clip.loop_start_ms)))
             self.clip_table.setItem(row, 7, QTableWidgetItem(str(clip.loop_end_ms)))
             self.clip_table.setItem(row, 8, QTableWidgetItem(", ".join(getattr(clip, "tags", []))))
+            row_state = "success"
+            if not clip.source_path.strip() or not clip.asset_key.strip():
+                row_state = "error"
+            elif not getattr(clip, "tags", []):
+                row_state = "warning"
+            row_palette = {
+                "error": (QColor("#ffd8d8"), QColor("#3d2326")),
+                "warning": (QColor("#ffe7bc"), QColor("#40341e")),
+                "success": (QColor("#d7f4e3"), QColor("#20342b")),
+            }
+            row_foreground, row_background = row_palette[row_state]
             for column in range(9):
                 item = self.clip_table.item(row, column)
                 if item is None:
                     continue
                 flags = item.flags()
+                item.setForeground(QBrush(row_foreground))
+                if column == 0:
+                    item.setBackground(QBrush(row_background))
                 if column == 0:
                     item.setFlags(flags & ~Qt.ItemFlag.ItemIsEditable)
                 else:
@@ -5057,6 +5032,12 @@ class MainWindow(QMainWindow):
                 border: 1px solid #4d6070;
                 border-radius: {group_radius}px;
             }}
+            #EmptyStateCard {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #172028, stop:1 #1f2a34);
+                border: 1px dashed #62809d;
+                border-radius: {group_radius}px;
+            }}
             #ModeIntroCard, #ActivityPanel {{
                 background-color: #1b2026;
                 border: 1px solid #3f4854;
@@ -5160,6 +5141,14 @@ class MainWindow(QMainWindow):
             }}
             QLabel[role="workspaceChecklistLine"] {{
                 color: #c2cfdb;
+            }}
+            QLabel[role="emptyStateTitle"] {{
+                color: #eef6fe;
+                font-size: {object_title_size - 1}px;
+                font-weight: 700;
+            }}
+            QLabel[role="emptyStateBody"] {{
+                color: #b8c9d9;
             }}
             QLabel[role="meterTitle"] {{
                 color: #8e9aa8;
@@ -5390,6 +5379,11 @@ class MainWindow(QMainWindow):
             QListWidget::item:selected, QTreeWidget::item:selected, QTableWidget::item:selected {{
                 background-color: #33485f;
                 color: #f6fbff;
+            }}
+            QListWidget[role="resultList"]::item {{
+                border-radius: {radius}px;
+                margin: 3px 2px;
+                padding: {field_padding + 2}px;
             }}
             QTreeWidget::item:hover, QListWidget::item:hover {{
                 background-color: #25313d;
