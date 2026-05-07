@@ -2,11 +2,13 @@
 
 这个目录是 Unity 侧运行时资源的独立维护包，也是仓库内的唯一源码真源。
 
-当前文档同步日期：2026-04-30
+当前文档同步日期：2026-05-07
 
 ## 目录定位
 
 - `unity_package/Assets/AudioForgeRuntime`：Unity 运行时脚本、Editor 工具和稳定 `.meta` 文件。
+- `unity_package/Docs`：包内文档入口、速查说明和交付视角的阅读顺序。
+- `unity_package/Examples`：带注释的示范代码文件，供 Unity 程序按需复制和改造。
 - `unity_validation/Assets/AudioForgeRuntime`：用于空项目验证的镜像副本，不再作为手工维护入口。
 
 ## 维护规则
@@ -15,8 +17,19 @@
 2. 修改后执行 `python tools/sync_unity_integration_package.py`，把包内容同步到 `unity_validation` 验证工程。
 3. 交付给 Unity 程序时，优先直接交这个包目录，而不是从验证工程里手动挑文件。
 4. 执行 `python tools/run_full_chain_check.py` 时，会同时检查独立包和验证镜像是否一致。
-5. 如果要输出可直接交付的压缩包，执行 `python tools/package_unity_integration_package.py`，会生成版本化目录包和 zip。
+5. 如果要输出可直接交付的压缩包，执行 `python tools/package_unity_integration_package.py`，会生成版本化目录包和 zip，并自动把 canonical 文档副本与验证报告装入包内。
 6. 如果要做一轮完整的 Unity 包交付签收，执行 `python tools/run_unity_package_release.py --skip-pytest`，会依次完成同步、全链路检查、打包，并输出签收报告。
+
+## SDK 对接包内容
+
+执行 `python tools/package_unity_integration_package.py` 后，生成的包根目录会包含：
+
+- `Assets/AudioForgeRuntime/`：运行时代码、Editor 工具和 `.meta` 文件。
+- `Docs/README.md`、`Docs/QuickStart.md`：包内对接入口和最短接入说明。
+- `Docs/Canonical/`：从仓库主文档同步进包内的对接规范、联调清单、版本记录与空项目验证说明。
+- `Examples/`：带注释的示范代码文件，不会自动进入 Unity 工程，需要按需手工复制。
+- `Verification/`：最近一次机器验证报告与内部签收摘要。
+- `README.md`：包根总说明。
 
 ## 打包产物
 
@@ -34,7 +47,7 @@
 
 1. 将 `unity_package/Assets/AudioForgeRuntime` 整体复制到目标 Unity 项目的 `Assets` 目录。
 2. 将工具导出的 `AudioData.json`、`AudioManifest.json` 和 `Assets/**` 放到 `Assets/StreamingAssets/AudioForge/`。
-3. 按 `docs/UnitySDK对接规范.md` 或 `unity_validation/README.md` 完成初始化和空项目验证。
+3. 先阅读包内 `Docs/QuickStart.md`，再按 `Docs/Canonical/UnitySDK对接规范.md` 或 `unity_validation/README.md` 完成初始化和空项目验证。
 
 ## Inspector 搜索
 

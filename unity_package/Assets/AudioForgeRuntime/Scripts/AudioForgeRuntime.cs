@@ -38,6 +38,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     private readonly System.Random _random = new System.Random();
     private string _runtimeAudioFormat = "ogg";
     private IAudioForgeResourceProvider _resourceProvider;
+    private IAudioForgeResourceProvider _resourceProviderOverride;
     private bool _isInitializing;
 
     public static AudioForgeRuntime Instance { get; private set; }
@@ -107,6 +108,28 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     public string GetResourceProviderName()
     {
         return _resourceProvider == null ? "Uninitialized" : _resourceProvider.GetType().Name;
+    }
+
+    /// <summary>
+    /// 允许项目在初始化前注入自己的资源提供器，例如 Resources、Addressables 或 AssetBundle 版本。
+    /// 传入 null 时，会回退到默认的 StreamingAssets 提供器。
+    /// </summary>
+    public void SetResourceProvider(IAudioForgeResourceProvider resourceProvider)
+    {
+        _resourceProviderOverride = resourceProvider;
+        _clips.Clear();
+        _processedClips.Clear();
+
+        if (_resourceProviderOverride != null)
+        {
+            _resourceProvider = _resourceProviderOverride;
+            return;
+        }
+
+        if (IsReady)
+        {
+            _resourceProvider = CreateDefaultResourceProvider();
+        }
     }
 
     public float GetUnityMasterVolume()
@@ -266,7 +289,6 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
         // 参考运行时固定消费 StreamingAssets/AudioForge 下的导出契约，保持与文档和检查脚本一致。
         string jsonPath = Path.Combine(Application.streamingAssetsPath, "AudioForge", "AudioData.json");
-        string assetsRoot = Path.Combine(Application.streamingAssetsPath, "AudioForge", "Assets");
         if (!File.Exists(jsonPath))
         {
             Debug.LogError("AudioData.json not found: " + jsonPath);
@@ -277,7 +299,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         string json = File.ReadAllText(jsonPath);
         AudioForgeDatabase database = AudioForgeJsonAdapter.Parse(json);
         _runtimeAudioFormat = string.IsNullOrWhiteSpace(database.RuntimeAudioFormat) ? "ogg" : database.RuntimeAudioFormat;
-        _resourceProvider = new AudioForgeStreamingAssetsProvider(assetsRoot);
+        _resourceProvider = _resourceProviderOverride ?? CreateDefaultResourceProvider();
 
         EnsureBus(masterBusName);
         foreach (AudioForgeBusConfig busConfig in database.BusConfigs)
@@ -891,6 +913,12 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
         _clips[assetKey] = clip;
         onLoaded(clip);
+    }
+
+    private IAudioForgeResourceProvider CreateDefaultResourceProvider()
+    {
+        string assetsRoot = Path.Combine(Application.streamingAssetsPath, "AudioForge", "Assets");
+        return new AudioForgeStreamingAssetsProvider(assetsRoot);
     }
 
     private void CleanupFinishedVoices()

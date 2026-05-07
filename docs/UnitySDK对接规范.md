@@ -3,7 +3,7 @@ AudioForge Unity 端对接开发文档（第一期）
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-04-30。
+> 当前文档同步日期：2026-05-07。
 > 当前工具版本：AudioForge 0.05。
 
 0.1 版本增量
@@ -31,8 +31,9 @@ AudioForge Unity 端对接开发文档（第一期）
 1. 先通读本文档，明确边界、输入输出和最小验收标准。
 2. 再阅读 `CHANGELOG.md`，确认当前版本相对上一版到底改了什么。
 3. 再阅读 `unity_package/README.md`，明确独立包与验证镜像的维护边界。
-4. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
-5. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
+4. 再阅读 `unity_package/Docs/README.md` 和 `unity_package/Docs/QuickStart.md`，按交付包视角完成最小接入。
+5. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
+6. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
 
 本期交接的核心原则只有一条：Unity 端只依赖导出产物，不依赖工具源码，不读取 `.afproj`，也不要求在 Unity 项目中嵌入 Python 运行环境。
 
@@ -56,6 +57,18 @@ AudioForge Unity 端对接开发文档（第一期）
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
 
+自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
+
+- `Docs/README.md` 与 `Docs/QuickStart.md`：包内阅读入口与最短接入路径。
+- `Docs/Canonical/`：从仓库主文档同步进包内的 canonical 对接文档副本。
+- `Examples/`：带注释的示范代码文件，方便 Unity 程序按需复制和改造。
+- `Verification/`：当前机器验证报告与签收摘要，便于交接时说明“这包是怎么验过的”。
+
+推荐直接交给 Unity 程序同学的不是裸目录，而是：
+
+- `dist/AudioForgeUnityPackage-<version>/`
+- `dist/AudioForgeUnityPackage-<version>.zip`
+
 建议同时附带以下验证产物给 Unity 程序：
 
 - `reports/internal_release_smoke/release_signoff.md`
@@ -73,6 +86,21 @@ Assets/
 			AudioManifest.json
 			Assets/
 				...导出的音频资源...
+```
+
+当前标准 SDK 交付包结构建议理解为：
+
+```text
+AudioForgeUnityPackage-<version>/
+	Assets/
+		AudioForgeRuntime/
+	Docs/
+		README.md
+		QuickStart.md
+		Canonical/
+	Examples/
+	Verification/
+	README.md
 ```
 
 当前仓库根目录 `Export/` 样例里，默认可直接拿来验证的事件枚举已同步为：`sfx_level_check_02`、`sfx_level_check_03`、`sfx_tile_hint_02`、`sfx_tile_undo_02`、`sfx_tile_undo_03`。当前 Unity 运行时代码统一维护在 `unity_package`，`unity_validation` 里的 `AudioForgeBootstrap` / `AudioForgeEventPlayer` 镜像也已对齐到 `sfx_level_check_02`，避免空项目验证仍指向旧样例事件。
@@ -118,6 +146,8 @@ Assets/
 
 当前仓库自带的 `unity_package/Assets/AudioForgeRuntime/Scripts/AudioForgeRuntime.cs` 已补充一套参考实现：当 `useReferenceTimePreservingPitch = true` 时，会优先对运行时加载到的 `AudioClip` 生成保时长变调版本，并缓存后再交给 `AudioSource` 播放。对应算法入口位于 `AudioForgeTimePreservingPitchProcessor.cs`，可直接作为 Unity 端开发的参考起点。
 同时，仓库中已经给出完整参考脚本分工：`IAudioForgeResourceProvider.cs` 与 `AudioForgeStreamingAssetsProvider.cs` 负责资源加载抽象，`AudioForgeEventPlayer.cs` 与 `AudioForgeBootstrap.cs` 负责场景触发与验证引导，`AudioForgeRuntimeDebugPanel.cs` 用于联调观察运行时状态。
+
+自 2026-05-07 起，`AudioForgeRuntime` 还提供了 `SetResourceProvider(IAudioForgeResourceProvider resourceProvider)`。如果项目要把资源加载切到 `Resources`、Addressables、AssetBundle 或自建下载层，建议在第一次 `Initialize()` 之前完成注入，而不是直接改动播放主流程。
 当前参考调试面板除了基础事件/总线状态外，还会展示最近事件触发记录、总音高、是否走保时长变调、处理后 Clip 缓存是否命中、当前资源提供器类型、运行时音频格式，以及最近总线状态变化历史，便于 Unity 开发直接定位行为差异。
 
 5. 推荐对外 API
@@ -134,6 +164,7 @@ Assets/
 - `void SetBusVolume(string busName, float linearVolume)`
 - `void SetBusMuted(string busName, bool isMuted)`
 - `void SetUnityEventVolumeOffsetDb(string eventId, float volumeDbOffset)`
+- `void SetResourceProvider(IAudioForgeResourceProvider resourceProvider)`
 
 如果项目需要更完整接入，建议再预留：
 

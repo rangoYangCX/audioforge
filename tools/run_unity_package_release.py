@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -67,6 +68,7 @@ def main() -> int:
         ],
     }
     write_signoff(report_root, summary)
+    embed_signoff_in_release(report_root, release_root)
 
     print(f"Unity package release result: {summary['overall']}")
     print(f"Sign-off JSON: {report_root / 'unity_package_release_signoff.json'}")
@@ -137,6 +139,19 @@ def write_signoff(report_root: Path, summary: dict[str, object]) -> None:
     for risk in summary["residual_risks"]:
         lines.append(f"- {risk}")
     markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def embed_signoff_in_release(report_root: Path, release_root: Path) -> None:
+    if not release_root.exists():
+        return
+
+    verification_root = release_root / "Verification"
+    verification_root.mkdir(parents=True, exist_ok=True)
+
+    for file_name in ("unity_package_release_signoff.json", "unity_package_release_signoff.md"):
+        source_path = report_root / file_name
+        if source_path.exists():
+            shutil.copy2(source_path, verification_root / file_name)
 
 
 def render_command_section(name: str, payload: object) -> list[str]:
