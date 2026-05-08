@@ -3,11 +3,13 @@ AudioForge Unity 端对接开发文档（第一期）
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-05-07。
+> 当前文档同步日期：2026-05-08。
 > 当前工具版本：AudioForge 0.05。
 
 0.1 版本增量
 
+- 2026-05-08 维护更新：工具端构建改为后台执行，并新增运行期诊断日志与逐资源构建日志，主要用于修复大批量导出时的卡死定位问题；Unity 运行时契约不变。
+- 2026-05-08 维护更新：对“源格式与目标格式相同且无 Trim / Fade 处理”的音频资源，导出阶段改为直接复制，不再重复重编码；这会影响未来重新导出的音频文件生成路径，但不要求 Unity 侧改代码。
 - AudioForge 0.05 新增：构建交付页支持全量构建、增量构建、选中构建三种范围，并提供构建计划预览与即时构建反馈。
 - AudioForge 0.05 新增：导出器会基于上次成功导出结果复用未变化资源，仅重建脏资源；`AudioData.json`、`AudioManifest.json`、`AudioEventID.cs` 仍保持全量刷新，因此 Unity 运行时契约不变。
 - AudioForge 0.05 新增：`AudioManifest.json` 为每个资源写出 `BuildFingerprint`，`BuildReport.json` 写出 `BuildPlan`（含 `RequestedScope`、`EffectiveScope`、`SelectionLabel`、`RebuiltAssetKeys`、`ReusedAssetKeys` 等字段），便于大工程联调、CI 和差异审计。
@@ -19,7 +21,7 @@ AudioForge Unity 端对接开发文档（第一期）
 0. 当前状态
 
 - 当前工具端适用目标：UI / SFX / BGM 为主、事件驱动为主、接受轻量 SDK 的手游休闲项目。
-- 最近一次仓库内验证结果：`pytest` 65 项通过；真实 WAV 烟雾工程 PASS；全链路检查通过。
+- 最近一次仓库内完整验证结果：`pytest` 67 项通过；真实 WAV 烟雾工程 PASS；全链路检查通过；2026-05-08 的构建稳定性热修复额外通过 8 条聚焦回归。
 - 当前参考运行时定位：开发参考实现，可直接用于空项目联调与生产版 SDK 的起步实现，不等于最终生产版音频系统。
 
 1. 文档定位
@@ -56,6 +58,8 @@ AudioForge Unity 端对接开发文档（第一期）
 `python tools/package_unity_integration_package.py`
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
+
+2026-05-08 维护说明：当前这轮桌面工具热修复不会自动改动已经生成好的 `dist/AudioForgeUnityPackage-0.05/`。如果你需要把新的桌面导出稳定性修复也体现在交付物中，应重新导出样例并重新执行打包流程；若不重新打包，现有 SDK 包结构、接口和运行时代码保持不变。
 
 自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
 
@@ -106,6 +110,8 @@ AudioForgeUnityPackage-<version>/
 当前仓库根目录 `Export/` 样例里，默认可直接拿来验证的事件枚举已同步为：`sfx_level_check_02`、`sfx_level_check_03`、`sfx_tile_hint_02`、`sfx_tile_undo_02`、`sfx_tile_undo_03`。当前 Unity 运行时代码统一维护在 `unity_package`，`unity_validation` 里的 `AudioForgeBootstrap` / `AudioForgeEventPlayer` 镜像也已对齐到 `sfx_level_check_02`，避免空项目验证仍指向旧样例事件。
 
 如果你只是要拿仓库里的最新机器验证样例做联调，优先使用 `reports/internal_release_smoke/export/` 下的导出物，而不是把仓库根目录 `Export/` 误当成唯一基线来源。
+
+如果 Unity 同学已经拿到了之前生成的 `dist/AudioForgeUnityPackage-0.05/`，可以直接继续对接；这次维护更新主要改善的是桌面工具重新生成导出资源时的稳定性和可诊断性，而不是 Unity SDK 接口。
 
 3. 工具端与 Unity 端边界
 

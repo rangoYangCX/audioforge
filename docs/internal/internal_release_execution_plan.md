@@ -1,6 +1,6 @@
 # AudioForge 内部上线执行表
 
-当前文档同步日期：2026-04-30
+当前文档同步日期：2026-05-08
 
 ## 目标
 
@@ -40,7 +40,8 @@ python tools/run_full_chain_check.py --export-dir reports/internal_release_smoke
 
 ## 最新验证快照
 
-- 最近一次 `pytest`：62 项通过。
+- 最近一次完整 `pytest` 基线：67 项通过。
 - 最近一次真实素材烟雾验证：PASS，使用 12 个 WAV 样本，校验警告 0。
 - 最近一次全链路检查：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 集成包完整性。
+- 2026-05-08 构建稳定性热修复：8 条聚焦回归通过，问题文件 `game_bgm.ogg` 的同格式导出隔离探针通过。
 - 报告路径：`reports/internal_release_smoke/checks/full_chain_report.md`

@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from audioforge.app.models.audio_project import ClipModel, EventModel
+import audioforge.app.services.audio_processor as audio_processor_module
+from audioforge.app.models.audio_project import BusConfig, ClipModel, EventModel, MASTER_BUS_NAME, ProjectSettings
+from audioforge.app.services.audio_processor import AudioProcessor
 from audioforge.app.services.exporter import ExportRequest, RuntimeExporter
 from audioforge.app.services.validator import ProjectValidator
 
@@ -192,6 +194,30 @@ def test_runtime_exporter_selection_scope_expands_when_out_of_scope_assets_are_d
     assert plan.effective_scope == "incremental"
     assert plan.rebuilt_asset_keys == ("ui/click_primary", "ui/hover_secondary")
     assert plan.out_of_scope_dirty_asset_keys == ("ui/hover_secondary",)
+
+
+def test_audio_processor_copies_same_format_without_reencoding(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source_path = tmp_path / "fixtures" / "game_bgm.ogg"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_bytes = b"OggS passthrough fixture"
+    source_path.write_bytes(source_bytes)
+
+    clip = ClipModel.from_path(source_path, "bgm/game_bgm")
+    project_settings = ProjectSettings(
+        default_bus="BGM",
+        export_root=str(tmp_path / "Export"),
+        buses=["BGM"],
+        bus_configs=[BusConfig(name=MASTER_BUS_NAME), BusConfig(name="BGM")],
+        source_audio_format="ogg",
+        runtime_audio_format="ogg",
+    )
+    destination_path = tmp_path / "Export" / "Assets" / "bgm" / "game_bgm.ogg"
+
+    monkeypatch.setattr(audio_processor_module, "sf", None)
+
+    AudioProcessor().export_clip(clip, project_settings, destination_path)
+
+    assert destination_path.read_bytes() == source_bytes
 
 
 def _sha256(path: Path) -> str:

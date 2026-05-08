@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -10,6 +11,17 @@ from audioforge.app.models.audio_project import ClipModel, ValidationIssue
 from audioforge.app.services.recovery_service import RecoveryService
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
+
+
+def _wait_for_build_completion(controller: MainController, timeout_seconds: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        thread = getattr(controller, "_build_thread", None)
+        if thread is None or not thread.isRunning():
+            QApplication.processEvents()
+            return
+    raise AssertionError("Timed out waiting for background build to finish.")
 
 
 def test_selecting_folder_does_not_reset_active_property_tab(monkeypatch) -> None:
@@ -839,9 +851,18 @@ def test_build_project_handles_export_failure(monkeypatch) -> None:
     )
 
     controller = MainController()
-    monkeypatch.setattr(controller.exporter, "export", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("export boom")))
+
+    class BoomExporter:
+        def plan_export(self, project, export_root, request=None):
+            return controller.exporter.plan_export(project, export_root, request)
+
+        def export(self, *args, **kwargs):
+            raise RuntimeError("export boom")
+
+    monkeypatch.setattr(controller, "_create_build_exporter", lambda: BoomExporter())
 
     controller.build_project()
+    _wait_for_build_completion(controller)
 
     assert criticals
     assert criticals[0][0] == "构建失败"

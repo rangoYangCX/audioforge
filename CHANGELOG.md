@@ -8,7 +8,26 @@
 - 每个版本至少记录：新增能力、行为变化、修复项、验证结果。
 - Git 提交负责记录实现细节；本文件负责回答“这一版具体给用户带来了什么变化”。
 
-当前已补录的版本范围：0.03 - 0.05。
+当前已补录的版本范围：0.03 - 0.05，并使用 `Unreleased` 记录尚未单独发版的维护更新。
+
+## [Unreleased]
+
+### Changed
+
+- 工具端构建执行改为后台线程，长批量导出时界面保持可响应；构建进行中会阻止重复发起、关闭窗口和切换工程。
+- 启动入口新增运行期诊断日志、Python / 线程异常钩子和 Qt 消息落盘；构建链路新增逐资源开始 / 完成 / 失败日志，默认输出到 `%LOCALAPPDATA%/AudioForge/logs/`。
+- 对“源格式与目标格式相同且无 Trim / Fade 处理”的音频资源改为直接复制，不再执行无意义重编码；Unity 运行时契约不变。
+
+### Fixed
+
+- 修复大批量构建在 UI 线程同步导出时容易卡死甚至崩溃的问题。
+- 修复部分 OGG 资源在“同格式、无额外处理”路径下重复编码时可能卡住导出的问题。
+
+### Validation
+
+- `pytest tests/unit/test_main_controller_full_flow.py::test_build_project_returns_before_background_export_finishes tests/unit/test_main_controller_full_flow.py::test_full_authoring_flow_from_wav_import_to_export tests/unit/test_main_controller_full_flow.py::test_invalid_combo_and_instance_limits_block_build_consistently tests/unit/test_main_controller_layout.py::test_build_project_handles_export_failure`：4/4 通过。
+- `pytest tests/unit/test_exporter.py::test_audio_processor_copies_same_format_without_reencoding tests/unit/test_exporter.py::test_runtime_exporter_writes_bundle_and_assets tests/unit/test_exporter.py::test_runtime_exporter_is_stable_across_repeated_exports tests/unit/test_exporter.py::test_runtime_exporter_incremental_rebuilds_only_changed_assets`：4/4 通过。
+- 问题文件 `game_bgm.ogg` 的同格式导出隔离探针已通过，不再卡在 OGG 写出阶段。
 
 ## [0.05] - 2026-04-30
 

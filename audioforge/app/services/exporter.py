@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +20,9 @@ from audioforge.app.utils.constants import (
     DEFAULT_RUNTIME_DATA_FILENAME,
     SCHEMA_VERSION,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -98,6 +103,15 @@ class RuntimeExporter:
         parent.mkdir(parents=True, exist_ok=True)
         temp_root = Path(tempfile.mkdtemp(prefix=f"{export_root.name}_", dir=str(parent)))
         resolved_plan = plan or self.plan_export(project, export_root, request)
+        logger.info(
+            "Export started export_root=%s requested_scope=%s effective_scope=%s selection=%s rebuilt_assets=%d reused_assets=%d",
+            export_root,
+            resolved_plan.requested_scope,
+            resolved_plan.effective_scope,
+            resolved_plan.selection_label,
+            len(resolved_plan.rebuilt_asset_keys),
+            len(resolved_plan.reused_asset_keys),
+        )
 
         try:
             result = self._write_export(
@@ -109,6 +123,12 @@ class RuntimeExporter:
                 previous_export_root=export_root,
             )
             self._commit_export(temp_root, export_root)
+            logger.info(
+                "Export committed export_root=%s report_file=%s manifest_file=%s",
+                export_root,
+                export_root / DEFAULT_BUILD_REPORT_FILENAME,
+                export_root / DEFAULT_AUDIO_MANIFEST_FILENAME,
+            )
             return ExportResult(
                 export_root=export_root,
                 data_file=export_root / DEFAULT_RUNTIME_DATA_FILENAME,
@@ -119,6 +139,12 @@ class RuntimeExporter:
                 plan=resolved_plan,
             )
         except Exception:
+            logger.exception(
+                "Export failed export_root=%s selection=%s temp_root=%s",
+                export_root,
+                resolved_plan.selection_label,
+                temp_root,
+            )
             shutil.rmtree(temp_root, ignore_errors=True)
             raise
 
@@ -453,25 +479,68 @@ class RuntimeExporter:
     ) -> None:
         assets_dir.mkdir(parents=True, exist_ok=True)
         entries_by_key = {str(entry["AssetKey"]): entry for entry in asset_entries}
+        total_assets = len(plan.rebuilt_asset_keys) + len(plan.reused_asset_keys)
+        processed_assets = 0
+        logger.info(
+            "Asset materialization started assets_dir=%s rebuilt_assets=%d reused_assets=%d total_assets=%d",
+            assets_dir,
+            len(plan.rebuilt_asset_keys),
+            len(plan.reused_asset_keys),
+            total_assets,
+        )
         for asset_key in plan.rebuilt_asset_keys:
+            processed_assets += 1
             entry = entries_by_key.get(asset_key)
             if entry is None:
                 continue
-            self._export_asset_entry(entry, assets_dir)
+            target = assets_dir / str(entry["ExportPath"])
+            start_time = time.perf_counter()
+            self._log_asset_start("rebuild", processed_assets, total_assets, asset_key, entry, target)
+            try:
+                self._export_asset_entry(entry, assets_dir)
+            except Exception:
+                self._log_asset_failure("rebuild", processed_assets, total_assets, asset_key, target, start_time)
+                raise
+            self._log_asset_success("rebuild", processed_assets, total_assets, asset_key, target, start_time)
 
         previous_assets_dir = previous_export_root / DEFAULT_EXPORT_ASSETS_DIRNAME
         for asset_key in plan.reused_asset_keys:
+            processed_assets += 1
             entry = entries_by_key.get(asset_key)
             if entry is None:
                 continue
             previous_export_path = plan.previous_asset_paths.get(asset_key) or str(entry["ExportPath"])
             previous_asset_path = previous_assets_dir / previous_export_path
+            target = assets_dir / str(entry["ExportPath"])
+            start_time = time.perf_counter()
+            self._log_asset_start("reuse", processed_assets, total_assets, asset_key, entry, target)
             if previous_asset_path.exists():
-                target = assets_dir / str(entry["ExportPath"])
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(previous_asset_path, target)
+                try:
+                    shutil.copy2(previous_asset_path, target)
+                except Exception:
+                    self._log_asset_failure("reuse", processed_assets, total_assets, asset_key, target, start_time)
+                    raise
+                self._log_asset_success("reuse", processed_assets, total_assets, asset_key, target, start_time)
                 continue
-            self._export_asset_entry(entry, assets_dir)
+            logger.warning(
+                "Reusable asset source missing; falling back to rebuild index=%d total=%d asset_key=%s previous_asset=%s",
+                processed_assets,
+                total_assets,
+                asset_key,
+                previous_asset_path,
+            )
+            try:
+                self._export_asset_entry(entry, assets_dir)
+            except Exception:
+                self._log_asset_failure("reuse-fallback-rebuild", processed_assets, total_assets, asset_key, target, start_time)
+                raise
+            self._log_asset_success("reuse-fallback-rebuild", processed_assets, total_assets, asset_key, target, start_time)
+        logger.info(
+            "Asset materialization completed assets_dir=%s total_assets=%d",
+            assets_dir,
+            total_assets,
+        )
 
     def _export_asset_entry(self, entry: dict[str, object], assets_dir: Path) -> None:
         source_path = str(entry["SourcePath"])
@@ -484,6 +553,64 @@ class RuntimeExporter:
         clip = entry["Clip"]
         project_settings = entry["ProjectSettings"]
         self.audio_processor.export_clip(clip, project_settings, target)
+
+    def _log_asset_start(
+        self,
+        action: str,
+        index: int,
+        total: int,
+        asset_key: str,
+        entry: dict[str, object],
+        target: Path,
+    ) -> None:
+        logger.info(
+            "Asset %s started index=%d total=%d asset_key=%s source=%s target=%s file_size=%s",
+            action,
+            index,
+            total,
+            asset_key,
+            entry.get("SourcePath", ""),
+            target,
+            entry.get("FileSize", 0),
+        )
+
+    def _log_asset_success(
+        self,
+        action: str,
+        index: int,
+        total: int,
+        asset_key: str,
+        target: Path,
+        start_time: float,
+    ) -> None:
+        logger.info(
+            "Asset %s completed index=%d total=%d asset_key=%s target=%s elapsed_ms=%.2f",
+            action,
+            index,
+            total,
+            asset_key,
+            target,
+            (time.perf_counter() - start_time) * 1000.0,
+        )
+
+    def _log_asset_failure(
+        self,
+        action: str,
+        index: int,
+        total: int,
+        asset_key: str,
+        target: Path,
+        start_time: float,
+    ) -> None:
+        logger.exception(
+            "Asset %s failed index=%d total=%d asset_key=%s target=%s elapsed_ms=%.2f",
+            action,
+            index,
+            total,
+            asset_key,
+            target,
+            (time.perf_counter() - start_time) * 1000.0,
+        )
 
     def _resolve_asset_export_path(self, clip: ClipModel, runtime_audio_format: str) -> str:
         base_path = clip.export_path or clip.asset_key or clip.id

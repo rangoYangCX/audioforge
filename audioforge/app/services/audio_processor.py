@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 try:
@@ -20,10 +21,18 @@ class AudioProcessor:
         source_path = Path(clip.source_path)
         if not source_path.exists():
             raise FileNotFoundError(clip.source_path)
+
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        target_format = project_settings.runtime_audio_format.lower()
+        if self._can_passthrough_copy(clip, source_path, destination_path, target_format):
+            if not self._paths_match(source_path, destination_path):
+                shutil.copy2(source_path, destination_path)
+            return
+
         if sf is None:
             raise RuntimeError("soundfile is not available; audio conversion cannot run.")
 
-        audio_data, sample_rate = sf.read(str(source_path), always_2d=False)
+        audio_data, sample_rate = sf.read(str(source_path), always_2d=False, dtype="float32")
         total_frames = len(audio_data)
 
         start_frame = self._ms_to_frame(clip.trim_start_ms, sample_rate)
@@ -31,8 +40,6 @@ class AudioProcessor:
         trimmed_audio = audio_data[start_frame:end_frame]
         trimmed_audio = self._apply_fades(trimmed_audio, sample_rate, clip.fade_in_ms, clip.fade_out_ms)
 
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        target_format = project_settings.runtime_audio_format.lower()
         if target_format == "ogg":
             sf.write(str(destination_path), trimmed_audio, sample_rate, format="OGG", subtype="VORBIS")
             return
@@ -40,6 +47,28 @@ class AudioProcessor:
             sf.write(str(destination_path), trimmed_audio, sample_rate, format="WAV")
             return
         raise ValueError(f"Unsupported runtime audio format: {project_settings.runtime_audio_format}")
+
+    def _can_passthrough_copy(
+        self,
+        clip: ClipModel,
+        source_path: Path,
+        destination_path: Path,
+        target_format: str,
+    ) -> bool:
+        return (
+            source_path.suffix.lstrip(".").lower() == target_format
+            and clip.trim_start_ms <= 0
+            and clip.trim_end_ms <= 0
+            and clip.fade_in_ms <= 0
+            and clip.fade_out_ms <= 0
+            and not self._paths_match(source_path, destination_path)
+        )
+
+    def _paths_match(self, first: Path, second: Path) -> bool:
+        try:
+            return first.resolve() == second.resolve()
+        except OSError:
+            return first == second
 
     def _ms_to_frame(self, value_ms: int, sample_rate: int) -> int:
         if value_ms <= 0:

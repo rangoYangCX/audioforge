@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import copy
 import json
+import logging
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QObject, QSettings, QThread, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, new_id
+from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, ValidationIssue, new_id
 from audioforge.app.services.audio_meter_service import AudioMeterService
 from audioforge.app.services.command_history import CommandHistory, EditorSnapshot
 from audioforge.app.services.exporter import ExportPlan, ExportRequest, RuntimeExporter
@@ -27,6 +29,7 @@ from audioforge.app.utils.constants import (
     PROJECT_EXTENSION,
     SUPPORTED_AUDIO_EXTENSIONS,
 )
+from audioforge.app.utils.runtime_logging import get_runtime_log_config
 from audioforge.app.views.main_window import MainWindow
 
 
@@ -36,9 +39,97 @@ LOUDNESS_SCAN_THRESHOLDS = {
     "true_peak_max_dbtp": -1.0,
 }
 
+logger = logging.getLogger(__name__)
 
-class MainController:
+
+class _BuildWorker(QObject):
+    succeeded = Signal(object, object)
+    validation_blocked = Signal(object, int)
+    failed = Signal(str, object)
+    finished = Signal()
+
+    def __init__(
+        self,
+        project: AudioProject,
+        export_root: Path,
+        build_request: ExportRequest,
+        validator: ProjectValidator,
+        exporter: RuntimeExporter,
+    ) -> None:
+        super().__init__()
+        self.project = project
+        self.export_root = export_root
+        self.build_request = build_request
+        self.validator = validator
+        self.exporter = exporter
+
+    @Slot()
+    def run(self) -> None:
+        plan: ExportPlan | None = None
+        try:
+            logger.info(
+                "Build worker started scope=%s selection=%s export_root=%s event_count=%d",
+                self.build_request.scope,
+                self.build_request.selection_label,
+                self.export_root,
+                len(self.project.events),
+            )
+            issues = self.validator.validate(self.project)
+            error_count = sum(1 for issue in issues if issue.severity == "Error")
+            logger.info(
+                "Build worker validation completed scope=%s selection=%s errors=%d warnings=%d",
+                self.build_request.scope,
+                self.build_request.selection_label,
+                error_count,
+                sum(1 for issue in issues if issue.severity == "Warning"),
+            )
+            if error_count:
+                self.validation_blocked.emit(issues, error_count)
+                return
+
+            plan = self.exporter.plan_export(self.project, self.export_root, self.build_request)
+            logger.info(
+                "Build worker export plan prepared requested_scope=%s effective_scope=%s rebuilt_assets=%d reused_assets=%d",
+                plan.requested_scope,
+                plan.effective_scope,
+                len(plan.rebuilt_asset_keys),
+                len(plan.reused_asset_keys),
+            )
+            result = self.exporter.export(
+                self.project,
+                self.export_root,
+                issues,
+                copy_assets=True,
+                request=self.build_request,
+                plan=plan,
+            )
+            logger.info(
+                "Build worker succeeded export_root=%s report_file=%s",
+                result.export_root,
+                result.report_file,
+            )
+            self.succeeded.emit(result, issues)
+        except Exception as exc:
+            logger.exception(
+                "Build worker failed scope=%s selection=%s export_root=%s",
+                self.build_request.scope,
+                self.build_request.selection_label,
+                self.export_root,
+            )
+            self.failed.emit(str(exc), plan)
+        finally:
+            logger.info(
+                "Build worker finished scope=%s selection=%s export_root=%s",
+                self.build_request.scope,
+                self.build_request.selection_label,
+                self.export_root,
+            )
+            self.finished.emit()
+
+
+class MainController(QObject):
     def __init__(self) -> None:
+        super().__init__()
         self.application = QApplication.instance() or QApplication([])
         self.window = MainWindow()
         self.window.set_close_handler(self._handle_close_request)
@@ -59,6 +150,10 @@ class MainController:
         self.selected_folder_id: str | None = None
         self.is_dirty = False
         self._analysis_status: dict[str, dict[str, str]] = {}
+        self._build_thread: QThread | None = None
+        self._build_worker: _BuildWorker | None = None
+        self._active_build_scope_label: str | None = None
+        self._active_build_export_root: Path | None = None
         self._bind_events()
         self._restore_window_preferences()
         self.application.aboutToQuit.connect(self._save_window_preferences)
@@ -1681,6 +1776,9 @@ class MainController:
         self._save_recovery_snapshot()
 
     def _handle_close_request(self) -> bool:
+        if self._is_build_running():
+            QMessageBox.warning(self.window, "构建进行中", "当前仍有构建任务在后台执行，请等待构建完成后再关闭窗口。")
+            return False
         if not self.is_dirty:
             return True
         action = self.window.confirm_save_before_close()
@@ -1692,6 +1790,9 @@ class MainController:
         return self.save_project()
 
     def _confirm_abandon_unsaved_changes(self) -> bool:
+        if self._is_build_running():
+            QMessageBox.warning(self.window, "构建进行中", "当前仍有构建任务在后台执行，请等待构建完成后再切换工程。")
+            return False
         if not self.is_dirty:
             return True
         action = self.window.confirm_save_before_close()
@@ -1798,6 +1899,16 @@ class MainController:
         self.window.show_validation_summary(issues)
 
     def build_project(self) -> None:
+        if self._is_build_running():
+            logger.warning("Build request ignored because another build is already running.")
+            self.window.append_log("构建请求已忽略：当前已有构建任务在执行。")
+            self.window.set_build_status(
+                "构建正在进行中。",
+                "请等待当前构建完成后再发起新的构建请求。",
+                activate_results=True,
+            )
+            return
+
         build_request = self._current_build_request()
         if build_request is None:
             message = self._selection_build_unavailable_message()
@@ -1809,6 +1920,8 @@ class MainController:
             return
 
         requested_scope_label = self._build_scope_label(build_request.scope)
+        project_snapshot = copy.deepcopy(self.project)
+        log_config = get_runtime_log_config()
         self.window.build_execute_button.setEnabled(False)
         self.window.build_button.setEnabled(False)
         self.window.set_build_status(
@@ -1816,84 +1929,28 @@ class MainController:
             f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 正在导出到：{self.project.settings.export_root}",
             activate_results=True,
         )
+        self.window.set_build_plan_summary(
+            "正在生成构建计划。",
+            f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 已切换到后台构建，界面保持可响应。",
+        )
         self.window.append_log(f"已开始构建导出：模式={requested_scope_label} 目标={build_request.selection_label}")
+        if log_config is not None:
+            self.window.append_log(f"诊断日志路径：{log_config.latest_log}")
+        logger.info(
+            "Build requested scope=%s selection=%s export_root=%s project_name=%s",
+            build_request.scope,
+            build_request.selection_label,
+            self.project.settings.export_root,
+            self.project.name,
+        )
         self.window.show_report_tab(2)
-        self.application.processEvents()
-
-        issues = self.validator.validate(self.project)
-        error_count = sum(1 for issue in issues if issue.severity == "Error")
-        self.window.set_validation_report(self._format_validation_report(issues), issues)
-        if error_count:
-            self.window.append_log(f"构建已中止，存在 {error_count} 个错误。")
-            self.window.set_build_plan_summary(
-                "构建已中止。",
-                f"{requested_scope_label} 在校验阶段被拦截：存在 {error_count} 个错误。",
-            )
-            self.window.set_build_status(
-                "构建已中止。",
-                f"校验阶段发现 {error_count} 个错误，请先在校验修复页处理后再重新构建。",
-            )
-            self.window.show_report_tab(1)
-            self.window.show_validation_summary(issues)
-            self.window.build_execute_button.setEnabled(True)
-            self.window.build_button.setEnabled(True)
-            return
 
         export_root = Path(self.project.settings.export_root)
         if not export_root.is_absolute():
             export_root = Path.cwd() / export_root
-
-        plan: ExportPlan | None = None
-        try:
-            plan = self.exporter.plan_export(self.project, export_root, build_request)
-            plan_summary, plan_detail = self._format_build_plan_summary(plan)
-            self.window.set_build_plan_summary(plan_summary, plan_detail)
-            result = self.exporter.export(self.project, export_root, issues, copy_assets=True, request=build_request, plan=plan)
-            build_report = self._format_build_report(result.report_file, result.manifest_file)
-        except Exception as exc:
-            failure_message = f"构建失败：{exc}"
-            self.window.append_log(failure_message)
-            self.window.set_build_status(
-                "构建失败。",
-                f"模式：{requested_scope_label} | 导出目录：{export_root} | 原因：{exc}",
-                activate_results=True,
-            )
-            if plan is not None:
-                plan_summary, plan_detail = self._format_build_plan_summary(plan)
-                self.window.set_build_plan_summary(plan_summary, plan_detail)
-            self.window.set_build_report(
-                "\n".join(
-                    [
-                        "构建失败",
-                        "",
-                        f"工程：{self.project.name}",
-                        f"请求范围：{requested_scope_label}",
-                        f"导出目录：{export_root}",
-                        f"原因：{exc}",
-                    ]
-                )
-            )
-            self.window.show_report_tab(2)
-            QMessageBox.critical(self.window, "构建失败", str(exc))
-            self.window.build_execute_button.setEnabled(True)
-            self.window.build_button.setEnabled(True)
-            return
-
-        self.window.append_log(f"构建完成：{result.data_file}")
-        self.window.append_log(f"已生成清单：{result.manifest_file}")
-        effective_scope_label = self._build_scope_label(result.plan.effective_scope)
-        scope_display = requested_scope_label if effective_scope_label == requested_scope_label else f"{requested_scope_label} -> {effective_scope_label}"
-        plan_summary, plan_detail = self._format_build_plan_summary(result.plan)
-        self.window.set_build_plan_summary(plan_summary, plan_detail)
-        self.window.set_build_status(
-            "构建完成。",
-            f"模式：{scope_display} | 已导出到：{result.data_file} | 清单：{result.manifest_file}",
-            activate_results=True,
-        )
-        self.window.set_build_report(build_report)
-        self.window.show_report_tab(2)
-        self.window.build_execute_button.setEnabled(True)
-        self.window.build_button.setEnabled(True)
+        self._active_build_scope_label = requested_scope_label
+        self._active_build_export_root = export_root
+        self._start_build_worker(project_snapshot, export_root, build_request)
 
     def preview_export_diff(self) -> None:
         self.window.clear_build_status()
@@ -1920,6 +1977,125 @@ class MainController:
         self.window.set_build_report(report)
         self.window.show_report_tab(2)
         self.window.append_log("已生成导出差异预览。")
+
+    def _create_build_validator(self) -> ProjectValidator:
+        return ProjectValidator()
+
+    def _create_build_exporter(self) -> RuntimeExporter:
+        return RuntimeExporter()
+
+    def _is_build_running(self) -> bool:
+        return self._build_thread is not None and self._build_thread.isRunning()
+
+    def _start_build_worker(self, project: AudioProject, export_root: Path, build_request: ExportRequest) -> None:
+        validator = self._create_build_validator()
+        exporter = self._create_build_exporter()
+        thread = QThread(self.window)
+        worker = _BuildWorker(project, export_root, build_request, validator, exporter)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._handle_build_success)
+        worker.validation_blocked.connect(self._handle_build_validation_blocked)
+        worker.failed.connect(self._handle_build_failure)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._finalize_build_worker)
+        self._build_thread = thread
+        self._build_worker = worker
+        thread.start()
+
+    @Slot(object, int)
+    def _handle_build_validation_blocked(self, issues: list[ValidationIssue], error_count: int) -> None:
+        requested_scope_label = self._active_build_scope_label or "当前构建"
+        logger.info(
+            "Build blocked by validation scope=%s errors=%d",
+            requested_scope_label,
+            error_count,
+        )
+        self.window.set_validation_report(self._format_validation_report(issues), issues)
+        self.window.append_log(f"构建已中止，存在 {error_count} 个错误。")
+        self.window.set_build_plan_summary(
+            "构建已中止。",
+            f"{requested_scope_label} 在校验阶段被拦截：存在 {error_count} 个错误。",
+        )
+        self.window.set_build_status(
+            "构建已中止。",
+            f"校验阶段发现 {error_count} 个错误，请先在校验修复页处理后再重新构建。",
+        )
+        self.window.show_report_tab(1)
+        self.window.show_validation_summary(issues)
+
+    @Slot(str, object)
+    def _handle_build_failure(self, error_message: str, plan: ExportPlan | None) -> None:
+        requested_scope_label = self._active_build_scope_label or "当前构建"
+        export_root = self._active_build_export_root or Path(self.project.settings.export_root)
+        logger.error(
+            "Build failed scope=%s export_root=%s error=%s",
+            requested_scope_label,
+            export_root,
+            error_message,
+        )
+        failure_message = f"构建失败：{error_message}"
+        self.window.append_log(failure_message)
+        self.window.set_build_status(
+            "构建失败。",
+            f"模式：{requested_scope_label} | 导出目录：{export_root} | 原因：{error_message}",
+            activate_results=True,
+        )
+        if plan is not None:
+            plan_summary, plan_detail = self._format_build_plan_summary(plan)
+            self.window.set_build_plan_summary(plan_summary, plan_detail)
+        self.window.set_build_report(
+            "\n".join(
+                [
+                    "构建失败",
+                    "",
+                    f"工程：{self.project.name}",
+                    f"请求范围：{requested_scope_label}",
+                    f"导出目录：{export_root}",
+                    f"原因：{error_message}",
+                ]
+            )
+        )
+        self.window.show_report_tab(2)
+        QMessageBox.critical(self.window, "构建失败", error_message)
+
+    @Slot(object, object)
+    def _handle_build_success(self, result, issues: list[ValidationIssue]) -> None:
+        logger.info(
+            "Build succeeded export_root=%s report_file=%s rebuilt_assets=%d reused_assets=%d",
+            result.export_root,
+            result.report_file,
+            len(result.plan.rebuilt_asset_keys),
+            len(result.plan.reused_asset_keys),
+        )
+        requested_scope_label = self._active_build_scope_label or self._build_scope_label(result.plan.requested_scope)
+        build_report = self._format_build_report(result.report_file, result.manifest_file)
+        self.window.set_validation_report(self._format_validation_report(issues), issues)
+        self.window.append_log(f"构建完成：{result.data_file}")
+        self.window.append_log(f"已生成清单：{result.manifest_file}")
+        effective_scope_label = self._build_scope_label(result.plan.effective_scope)
+        scope_display = requested_scope_label if effective_scope_label == requested_scope_label else f"{requested_scope_label} -> {effective_scope_label}"
+        plan_summary, plan_detail = self._format_build_plan_summary(result.plan)
+        self.window.set_build_plan_summary(plan_summary, plan_detail)
+        self.window.set_build_status(
+            "构建完成。",
+            f"模式：{scope_display} | 已导出到：{result.data_file} | 清单：{result.manifest_file}",
+            activate_results=True,
+        )
+        self.window.set_build_report(build_report)
+        self.window.show_report_tab(2)
+
+    @Slot()
+    def _finalize_build_worker(self) -> None:
+        logger.info("Build worker cleanup finished.")
+        self.window.build_execute_button.setEnabled(True)
+        self.window.build_button.setEnabled(True)
+        self._build_thread = None
+        self._build_worker = None
+        self._active_build_scope_label = None
+        self._active_build_export_root = None
 
     def navigate_to_report_target(self, target_type: str, target_id: str) -> None:
         if not target_id:

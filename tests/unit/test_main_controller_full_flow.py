@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -10,6 +11,17 @@ from audioforge.app.services.recovery_service import RecoveryService
 from audioforge.app.utils.constants import MAX_COMBO_MAX_STEP, MAX_MAX_INSTANCES
 from tests.helpers import write_wav_fixture
 from tools.run_full_chain_check import check_export_bundle, check_runtime_contract
+
+
+def _wait_for_build_completion(controller: MainController, timeout_seconds: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        thread = getattr(controller, "_build_thread", None)
+        if thread is None or not thread.isRunning():
+            QApplication.processEvents()
+            return
+    raise AssertionError("Timed out waiting for background build to finish.")
 
 
 def _apply_event_form(
@@ -100,6 +112,57 @@ def test_selected_build_preview_updates_scope_and_plan_labels(monkeypatch, tmp_p
     assert "请求范围：选中构建" in preview_text
     assert "实际执行：全量构建" in preview_text
     assert "构建目标：事件 UI_Click_A" in preview_text
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_build_project_returns_before_background_export_finishes(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.show()
+    QApplication.processEvents()
+    controller.new_project()
+    QApplication.processEvents()
+
+    export_root = tmp_path / "Export"
+    controller.project.settings.export_root = str(export_root)
+    controller.project.settings.source_audio_format = "wav"
+    controller.project.settings.runtime_audio_format = "wav"
+
+    wav_path = write_wav_fixture(tmp_path / "wav" / "UI_Click_A.wav", frequency_hz=440.0, duration_seconds=0.2)
+    controller.import_audio_files_as_events(
+        [str(wav_path)],
+        template={
+            "bus_name": "UI",
+            "asset_prefix": "ui/background",
+            "tags": ["ui"],
+        },
+    )
+    QApplication.processEvents()
+
+    real_exporter = controller.exporter
+
+    class SlowExporter:
+        def plan_export(self, project, export_root, request=None):
+            return real_exporter.plan_export(project, export_root, request)
+
+        def export(self, *args, **kwargs):
+            time.sleep(0.1)
+            return real_exporter.export(*args, **kwargs)
+
+    monkeypatch.setattr(controller, "_create_build_exporter", lambda: SlowExporter())
+
+    controller.build_project()
+
+    assert controller.window.build_execute_button.isEnabled() is False
+    assert getattr(controller, "_build_thread", None) is not None
+
+    _wait_for_build_completion(controller)
+
+    assert controller.window.build_execute_button.isEnabled() is True
+    assert (export_root / "AudioData.json").exists()
 
     controller.is_dirty = False
     controller.window.close()
@@ -242,7 +305,7 @@ def test_full_authoring_flow_from_wav_import_to_export(monkeypatch, tmp_path: Pa
     assert controller.window.validation_issue_list.count() == len(issues)
 
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
     assert controller.window.report_tabs.currentIndex() == 2
 
     audio_data_path = export_root / "AudioData.json"
@@ -441,7 +504,7 @@ def test_sequence_and_combo_multi_clip_boundary_flow_exports_cleanly(monkeypatch
     assert controller.window.validation_issue_list.count() == 0
 
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
     assert controller.window.report_tabs.currentIndex() == 2
 
     audio_data = json.loads((export_root / "AudioData.json").read_text(encoding="utf-8"))
@@ -559,7 +622,7 @@ def test_invalid_combo_and_instance_limits_block_build_consistently(monkeypatch,
     assert any(code in validation_detail for code in ["MAX_INSTANCES_OUT_OF_RANGE", "COMBO_PITCH_STEP_NOT_SEMITONE", "COMBO_RESET_INVALID"])
 
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
     assert controller.window.report_tabs.currentIndex() == 1
     assert controller.window.validation_issue_list.count() == len(expected_pairs)
     assert "构建已中止，存在 3 个错误。" in controller.window.log_output.toPlainText()
@@ -655,7 +718,7 @@ def test_mixed_valid_invalid_import_flow_preserves_progress_and_logs_skips(monke
     assert controller.window.validation_issue_list.count() == 0
 
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
     assert controller.window.report_tabs.currentIndex() == 2
 
     build_report = json.loads((export_root / "BuildReport.json").read_text(encoding="utf-8"))
@@ -718,7 +781,7 @@ def test_build_fails_when_export_parent_path_is_occupied_by_file(monkeypatch, tm
     assert issues == []
 
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
 
     assert criticals
     assert criticals[0][0] == "构建失败"
@@ -795,7 +858,7 @@ def test_rebuild_updates_export_bundle_and_diff_preview_consistently(monkeypatch
     initial_issues = controller.validator.validate(controller.project)
     assert initial_issues == []
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
 
     primary_asset_path = export_root / "Assets" / "ui" / "rebuild_primary.wav"
     removed_asset_path = export_root / "Assets" / "ui" / "rebuild_removed.wav"
@@ -831,7 +894,7 @@ def test_rebuild_updates_export_bundle_and_diff_preview_consistently(monkeypatch
     assert "- ui/rebuild_primary" in diff_preview
 
     controller.build_project()
-    QApplication.processEvents()
+    _wait_for_build_completion(controller)
 
     build_report = json.loads((export_root / "BuildReport.json").read_text(encoding="utf-8"))
     manifest = json.loads((export_root / "AudioManifest.json").read_text(encoding="utf-8"))
