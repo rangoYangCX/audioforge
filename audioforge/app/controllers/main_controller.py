@@ -879,6 +879,14 @@ class MainController(QObject):
 
         if self._apply_mutation("Bulk Set Clip Weight", mutate):
             self.window.append_log(f"已将 {len(clip_ids)} 个片段的权重设置为 {normalized_weight}。")
+            self.window.set_resources_batch_feedback(
+                event_id=event.id,
+                title="批量权重已应用",
+                summary=f"已将 {len(clip_ids)} 个片段的权重统一为 {normalized_weight}。",
+                detail="返回片段编排即可核对表格中的权重列和单片段详情。",
+                field_summary="权重",
+                affected_count=len(clip_ids),
+            )
             self.window.set_active_contents_category("片段")
             navigation_state = self.window.navigation_state()
             self.window.set_event_details(self.project.events[event.id])
@@ -918,7 +926,21 @@ class MainController(QObject):
             return changed
 
         if self._apply_mutation("Bulk Edit Clips", mutate):
+            field_labels = ["权重", "标签"]
+            if asset_prefix:
+                field_labels.append("资源前缀")
             self.window.append_log(f"已批量更新 {len(clip_ids)} 个片段的属性。")
+            self.window.set_resources_batch_feedback(
+                event_id=event.id,
+                title="批量属性已同步",
+                summary=f"已批量更新 {len(clip_ids)} 个片段的 {'、'.join(field_labels)}。",
+                detail=(
+                    f"权重 -> {weight} | 标签 -> {', '.join(tags) if tags else '清空'}"
+                    + (f" | 资源键前缀 -> {asset_prefix}/<clip_id>" if asset_prefix else "")
+                ),
+                field_summary="/".join(field_labels),
+                affected_count=len(clip_ids),
+            )
             self.window.set_active_contents_category("片段")
             navigation_state = self.window.navigation_state()
             self.window.set_event_details(self.project.events[event.id])
@@ -953,6 +975,14 @@ class MainController(QObject):
 
         if self._apply_mutation("Batch Rename Clips", mutate):
             self.window.append_log(f"已按基础名“{base_name}”重命名 {len(clip_ids)} 个片段。")
+            self.window.set_resources_batch_feedback(
+                event_id=event.id,
+                title="批量重命名已完成",
+                summary=f"已按基础名 {base_name} 重命名 {len(clip_ids)} 个片段。",
+                detail=f"起始序号 {start_index:02d}；资源键与导出路径已同步为新的片段 ID。",
+                field_summary="ID/资源键/导出路径",
+                affected_count=len(clip_ids),
+            )
             self.window.set_active_contents_category("片段")
             navigation_state = self.window.navigation_state()
             self.window.set_event_details(self.project.events[event.id])
@@ -1012,7 +1042,21 @@ class MainController(QObject):
 
         if self._apply_mutation("Sort Clips", mutate):
             order_label = "升序" if ascending else "降序"
+            field_label = {
+                "id": "片段 ID",
+                "asset_key": "资源键",
+                "weight": "权重",
+                "source_path": "源路径",
+            }.get(field_name, field_name)
             self.window.append_log(f"已按 {field_name} {order_label} 排序片段。")
+            self.window.set_resources_batch_feedback(
+                event_id=event.id,
+                title="片段排序已更新",
+                summary=f"已按 {field_label} {order_label} 重排 {len(event.clips)} 个片段。",
+                detail="片段表、生成预览和后续批量操作都会沿用当前排序结果。",
+                field_summary=f"排序/{field_label}",
+                affected_count=len(event.clips),
+            )
             self.window.set_active_contents_category("片段")
             navigation_state = self.window.navigation_state()
             self.window.set_event_details(self.project.events[event.id])
@@ -1035,6 +1079,14 @@ class MainController(QObject):
 
         if self._apply_mutation("Reorder Clips", mutate):
             self.window.append_log("已按拖拽结果重排片段顺序。")
+            self.window.set_resources_batch_feedback(
+                event_id=event.id,
+                title="拖拽顺序已保存",
+                summary=f"已按拖拽结果重排 {len(clip_ids)} 个片段。",
+                detail="当前列表顺序会直接影响片段编排视图和后续导出顺序。",
+                field_summary="拖拽顺序",
+                affected_count=len(clip_ids),
+            )
             self.window.set_active_contents_category("片段")
             navigation_state = self.window.navigation_state()
             self.window.set_event_details(self.project.events[event.id])

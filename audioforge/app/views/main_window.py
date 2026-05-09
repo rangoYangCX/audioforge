@@ -590,6 +590,14 @@ class MainWindow(QMainWindow):
         self.event_overview_hint_label = QLabel("从左侧概览快速切到参数、资源或结果页。")
         self.resources_workspace_status_label = QLabel("等待导入或选择片段。")
         self.resources_overview_hint_label = QLabel("先完成片段编排，再进入批处理或生成预览。")
+        self._resources_batch_feedback_event_id = ""
+        self._has_resources_batch_feedback = False
+        self.resources_batch_feedback_title_label = QLabel("等待批量操作")
+        self.resources_batch_feedback_scope_label = QLabel("事件 -")
+        self.resources_batch_feedback_count_label = QLabel("片段 0")
+        self.resources_batch_feedback_field_label = QLabel("字段 -")
+        self.resources_batch_feedback_summary_label = QLabel("进入“批处理”或使用资源页工具后，这里会显示最近一次成组修改。")
+        self.resources_batch_feedback_detail_label = QLabel("支持批量权重、批量属性、批量重命名和排序反馈。")
         self.buses_workspace_status_label = QLabel("等待选择事件总线。")
         self.buses_overview_hint_label = QLabel("从左侧概览选择当前要处理的总线工作流。")
         self.build_workspace_status_label = QLabel("等待准备导出配置。")
@@ -733,7 +741,7 @@ class MainWindow(QMainWindow):
         inline_bus_actions.addWidget(self.inline_bus_to_master_button)
         inline_bus_actions.addWidget(self.inline_bus_open_parent_button)
         inline_bus_layout.addLayout(inline_bus_actions)
-        route_bar_layout = QHBoxLayout(self.project_bus_route_bar)
+        route_bar_layout = QVBoxLayout(self.project_bus_route_bar)
         route_bar_layout.setContentsMargins(0, 0, 0, 0)
         route_bar_layout.setSpacing(6)
         self.bus_routing_group = QGroupBox("Routing")
@@ -1461,6 +1469,75 @@ class MainWindow(QMainWindow):
             layout.addWidget(label)
         return card
 
+    def _build_resources_batch_feedback_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("WorkspaceOverviewCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+        self.resources_batch_feedback_title_label.setProperty("role", "modeCardTitle")
+        self.resources_batch_feedback_title_label.setWordWrap(True)
+        self.resources_batch_feedback_summary_label.setProperty("role", "workspaceSectionSummary")
+        self.resources_batch_feedback_detail_label.setProperty("role", "workspaceChecklistLine")
+        self.resources_batch_feedback_summary_label.setWordWrap(True)
+        self.resources_batch_feedback_detail_label.setWordWrap(True)
+        layout.addWidget(self._build_card_title_row("批量编辑反馈"))
+        layout.addWidget(self.resources_batch_feedback_title_label)
+        chip_row = QHBoxLayout()
+        chip_row.setContentsMargins(0, 0, 0, 0)
+        chip_row.setSpacing(6)
+        for chip in [
+            self.resources_batch_feedback_scope_label,
+            self.resources_batch_feedback_count_label,
+            self.resources_batch_feedback_field_label,
+        ]:
+            chip.setProperty("role", "busHeaderChip")
+            chip_row.addWidget(chip)
+        chip_row.addStretch(1)
+        layout.addLayout(chip_row)
+        layout.addWidget(self.resources_batch_feedback_summary_label)
+        layout.addWidget(self.resources_batch_feedback_detail_label)
+        return card
+
+    def clear_resources_batch_feedback(self, event_id: str = "", clip_count: int = 0) -> None:
+        self._resources_batch_feedback_event_id = event_id
+        self._has_resources_batch_feedback = False
+        self.resources_batch_feedback_title_label.setText("等待批量操作" if not event_id else "等待当前事件的批量修改")
+        self.resources_batch_feedback_scope_label.setText(f"事件 {event_id or '-'}")
+        self.resources_batch_feedback_count_label.setText(f"片段 {clip_count}")
+        self.resources_batch_feedback_field_label.setText("字段 等待操作")
+        if event_id:
+            summary = f"当前事件 {event_id} 共有 {clip_count} 个片段，可继续批量设置权重、前缀、标签或顺序。"
+        else:
+            summary = "进入“批处理”或使用资源页工具后，这里会显示最近一次成组修改。"
+        detail = "支持批量权重、批量属性、批量重命名和排序反馈。"
+        self.resources_batch_feedback_summary_label.setText(summary)
+        self.resources_batch_feedback_detail_label.setText(detail)
+        self.resources_batch_feedback_summary_label.setToolTip(summary)
+        self.resources_batch_feedback_detail_label.setToolTip(detail)
+
+    def set_resources_batch_feedback(
+        self,
+        *,
+        event_id: str,
+        title: str,
+        summary: str,
+        detail: str,
+        field_summary: str,
+        affected_count: int,
+    ) -> None:
+        self._resources_batch_feedback_event_id = event_id
+        self._has_resources_batch_feedback = True
+        self.resources_batch_feedback_title_label.setText(title)
+        self.resources_batch_feedback_scope_label.setText(f"事件 {event_id or '-'}")
+        self.resources_batch_feedback_count_label.setText(f"片段 {affected_count}")
+        self.resources_batch_feedback_field_label.setText(f"字段 {field_summary}")
+        self.resources_batch_feedback_summary_label.setText(summary)
+        self.resources_batch_feedback_detail_label.setText(detail)
+        self.resources_batch_feedback_title_label.setToolTip(summary)
+        self.resources_batch_feedback_summary_label.setToolTip(summary)
+        self.resources_batch_feedback_detail_label.setToolTip(detail)
+
     def _build_empty_state_card(self, title: str, description: str) -> QFrame:
         card = QFrame()
         card.setObjectName("EmptyStateCard")
@@ -1577,6 +1654,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
+        layout.addWidget(self._build_resources_batch_feedback_card())
         layout.addStretch(1)
         return panel
 
@@ -2998,6 +3076,7 @@ class MainWindow(QMainWindow):
         self._active_event_id = current_event_id
         self._loading_event = True
         if event is None:
+            self.clear_resources_batch_feedback()
             self.status_label.setText("未选择事件")
             self.event_id_edit.clear()
             self.display_name_edit.clear()
@@ -3059,6 +3138,8 @@ class MainWindow(QMainWindow):
             return
 
         self.status_label.setText(f"当前事件：{event.id}")
+        if self._resources_batch_feedback_event_id != event.id:
+            self.clear_resources_batch_feedback(event.id, len(event.clips))
         event_tags = sorted({tag for clip in event.clips for tag in getattr(clip, "tags", [])})
         self.set_object_context(
             object_type="Event",
@@ -3431,9 +3512,14 @@ class MainWindow(QMainWindow):
         self.resources_workspace_status_label.setText(
             f"已选片段 {selected_clip_count} | 当前页 {resources_workspace_title} | 资源整理后可直接切到生成预览。"
         )
-        self.resources_overview_hint_label.setText(
-            f"当前浏览 {resources_workspace_title}，已选片段 {selected_clip_count}。先做片段编排，再进批处理或预览镜像。"
-        )
+        if self._has_resources_batch_feedback:
+            self.resources_overview_hint_label.setText(
+                f"当前浏览 {resources_workspace_title}，已选片段 {selected_clip_count}。最近操作：{self.resources_batch_feedback_title_label.text()}。"
+            )
+        else:
+            self.resources_overview_hint_label.setText(
+                f"当前浏览 {resources_workspace_title}，已选片段 {selected_clip_count}。先做片段编排，再进批处理或预览镜像。"
+            )
         self.buses_workspace_status_label.setText(
             f"浏览总线 {current_project_bus} | 事件总线 {current_event_bus} | 默认总线 {self.default_bus_combo.currentText() or '-'}。"
         )
@@ -4320,32 +4406,92 @@ class MainWindow(QMainWindow):
     def _display_project_bus_label(self, bus_name: str) -> str:
         return self._bus_visual_label(bus_name, include_depth=False)
 
-    def _rebuild_project_bus_route_bar(self, route_names: list[str]) -> None:
+    def _rebuild_project_bus_route_bar(
+        self,
+        route_names: list[str],
+        *,
+        child_names: list[str] | None = None,
+        effective_linear: float | None = None,
+    ) -> None:
         layout = self.project_bus_route_bar.layout()
         if layout is None:
             return
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self._clear_layout_items(layout)
         if not route_names:
             placeholder = QLabel("未选择总线")
             placeholder.setProperty("role", "meterContext")
             layout.addWidget(placeholder)
-            layout.addStretch(1)
             return
+        route_row = QHBoxLayout()
+        route_row.setContentsMargins(0, 0, 0, 0)
+        route_row.setSpacing(6)
+        current_bus = route_names[0]
         for index, route_name in enumerate(route_names):
-            button = QToolButton()
-            button.setText(route_name)
-            button.setProperty("role", "routeChip")
-            button.clicked.connect(lambda _checked=False, name=route_name: self._select_project_bus_by_name(name))
-            layout.addWidget(button)
+            if route_name == current_bus:
+                tone = "current"
+                subtitle = "当前"
+            elif route_name == "Master":
+                tone = "master"
+                subtitle = "输出"
+            else:
+                tone = "parent"
+                subtitle = "上游"
+            route_row.addWidget(self._build_project_bus_route_node(route_name, tone=tone, subtitle=subtitle))
             if index < len(route_names) - 1:
-                separator = QLabel("/")
-                separator.setProperty("role", "meterContext")
-                layout.addWidget(separator)
-        layout.addStretch(1)
+                separator = QLabel("->")
+                separator.setProperty("role", "routeConnector")
+                route_row.addWidget(separator)
+        if effective_linear is not None:
+            output_chip = QLabel(f"作者态 {effective_linear * 100:.0f}%")
+            output_chip.setProperty("role", "busHeaderChip")
+            route_row.addWidget(output_chip)
+        route_row.addStretch(1)
+        layout.addLayout(route_row)
+
+        branch_row = QHBoxLayout()
+        branch_row.setContentsMargins(0, 0, 0, 0)
+        branch_row.setSpacing(6)
+        branch_label = QLabel("下游")
+        branch_label.setProperty("role", "meterTitle")
+        branch_row.addWidget(branch_label)
+        if child_names:
+            for child_name in child_names:
+                button = QToolButton()
+                button.setText(child_name)
+                button.setProperty("role", "routeChip")
+                button.clicked.connect(lambda _checked=False, name=child_name: self._select_project_bus_by_name(name))
+                branch_row.addWidget(button)
+        else:
+            placeholder = QLabel("无下游总线")
+            placeholder.setProperty("role", "meterContext")
+            branch_row.addWidget(placeholder)
+        branch_row.addStretch(1)
+        layout.addLayout(branch_row)
+
+    def _clear_layout_items(self, layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            child_layout = item.layout()
+            if child_layout is not None:
+                self._clear_layout_items(child_layout)
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _build_project_bus_route_node(self, bus_name: str, *, tone: str, subtitle: str) -> QToolButton:
+        button = QToolButton()
+        button.setText(f"{bus_name}\n{subtitle}")
+        button.setProperty("role", "routeNode")
+        button.setProperty("routeTone", tone)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        button.setAutoRaise(False)
+        button.setToolTip(f"切到总线：{bus_name}")
+        if bus_name == "Master":
+            button.clicked.connect(lambda _checked=False: self.project_master_volume_spin.setFocus(Qt.FocusReason.OtherFocusReason))
+        else:
+            button.clicked.connect(lambda _checked=False, name=bus_name: self._select_project_bus_by_name(name))
+        return button
 
     def _refresh_project_bus_parent_options(self, selected_bus_name: str, current_parent_name: str) -> None:
         self.project_bus_parent_combo.blockSignals(True)
@@ -4595,7 +4741,11 @@ class MainWindow(QMainWindow):
         child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == bus_name]
         effective_linear = self._project_bus_effective_linear(bus_name)
         self.project_bus_route_label.setText(route_text)
-        self._rebuild_project_bus_route_bar(self._project_bus_route_names(bus_name))
+        self._rebuild_project_bus_route_bar(
+            self._project_bus_route_names(bus_name),
+            child_names=child_names,
+            effective_linear=effective_linear,
+        )
         self.project_bus_children_label.setText("下游总线：" + (", ".join(child_names) if child_names else "-"))
         self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
         self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
@@ -6354,6 +6504,35 @@ class MainWindow(QMainWindow):
             QToolButton[role="routeChip"]:hover {{
                 background-color: #2b3947;
                 border-color: #79a8d8;
+            }}
+            QToolButton[role="routeNode"] {{
+                background-color: #222a33;
+                border: 1px solid #4b5d70;
+                border-radius: {group_radius}px;
+                color: #d8e7f6;
+                padding: {button_padding_v + 1}px {button_padding_h + 2}px;
+                min-height: 38px;
+                font-weight: 700;
+                text-align: left;
+            }}
+            QToolButton[role="routeNode"]:hover {{
+                background-color: #2c3947;
+                border-color: #79a8d8;
+            }}
+            QToolButton[role="routeNode"][routeTone="current"] {{
+                background-color: #233729;
+                border-color: #7fcf95;
+                color: #eefaf1;
+            }}
+            QToolButton[role="routeNode"][routeTone="master"] {{
+                background-color: #3a2f22;
+                border-color: #d0a26f;
+                color: #fff4e8;
+            }}
+            QLabel[role="routeConnector"] {{
+                color: #7f8a97;
+                font-weight: 700;
+                padding: 0px 2px;
             }}
             QLineEdit[role="topSearchField"] {{
                 background-color: #12171c;
