@@ -2586,7 +2586,293 @@ class MainWindow(QMainWindow):
     def _request_global_search(self) -> None:
         query = self.global_search_edit.text().strip()
         self.tree_filter_edit.setText(query)
-        self._search_next_tree_event()
+        if not query:
+            self.report_detail_label.setText("先输入关键字，再执行全局搜索。")
+            return
+        candidates = self._global_search_candidates()
+        matches = self._filter_global_search_candidates(query, candidates)
+        if not matches:
+            self.report_detail_label.setText(f"没有找到匹配“{query}”的对象、总线或结果。")
+            self.report_detail_label.setToolTip(query)
+            return
+        if len(matches) == 1:
+            self._run_global_search_match(matches[0])
+            return
+        self._show_global_search_results(query, candidates)
+
+    def _global_search_candidates(self) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        candidates.extend(self._collect_tree_search_candidates())
+        candidates.extend(self._collect_project_bus_search_candidates())
+        candidates.extend(
+            [
+                {
+                    "title": "结果页 | 日志",
+                    "description": "结果中心 / 日志页。",
+                    "keywords": "结果 日志 logs report",
+                    "priority": 30,
+                    "action": lambda: self.show_report_tab(0),
+                },
+                {
+                    "title": "结果页 | 校验",
+                    "description": "结果中心 / 校验页。",
+                    "keywords": "结果 校验 validation report",
+                    "priority": 30,
+                    "action": lambda: self.show_report_tab(1),
+                },
+                {
+                    "title": "结果页 | 构建",
+                    "description": "结果中心 / 构建页。",
+                    "keywords": "结果 构建 build report",
+                    "priority": 30,
+                    "action": lambda: self.show_report_tab(2),
+                },
+                {
+                    "title": "结果页 | 响度",
+                    "description": "结果中心 / 响度页。",
+                    "keywords": "结果 响度 loudness report",
+                    "priority": 30,
+                    "action": lambda: self.show_report_tab(3),
+                },
+            ]
+        )
+        candidates.extend(self._collect_report_list_search_candidates(self.validation_issue_list, 1, "校验问题", 10))
+        candidates.extend(self._collect_report_list_search_candidates(self.build_issue_list, 2, "构建结果", 20))
+        candidates.extend(self._collect_report_list_search_candidates(self.loudness_issue_list, 3, "响度结果", 20))
+        return candidates
+
+    def _collect_tree_search_candidates(self) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        pending = [self.tree.topLevelItem(index) for index in range(self.tree.topLevelItemCount())]
+        while pending:
+            item = pending.pop(0)
+            if item is None:
+                continue
+            payload = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(payload, (tuple, list)) and len(payload) >= 2:
+                target_type = str(payload[0])
+                target_id = str(payload[1])
+                label = item.text(0).strip() or target_id
+                kind_label = "事件" if target_type == "event" else "文件夹" if target_type == "folder" else "对象"
+                breadcrumb = self._tree_item_search_breadcrumb(item)
+                description = f"工程对象 / {kind_label} / 标识 {target_id}"
+                if breadcrumb:
+                    description = f"{description} / 路径 {breadcrumb}"
+                candidates.append(
+                    {
+                        "title": f"{kind_label} | {label}",
+                        "description": description,
+                        "keywords": f"工程对象 {kind_label} {label} {target_id} {breadcrumb}",
+                        "priority": 0,
+                        "action": lambda node_type=target_type, node_id=target_id: self.reportTargetRequested.emit(node_type, node_id),
+                    }
+                )
+            for child_index in range(item.childCount()):
+                pending.append(item.child(child_index))
+        return candidates
+
+    def _tree_item_search_breadcrumb(self, item: QTreeWidgetItem) -> str:
+        segments: list[str] = []
+        current: QTreeWidgetItem | None = item.parent()
+        while current is not None:
+            label = current.text(0).strip()
+            if label:
+                segments.append(label)
+            current = current.parent()
+        segments.reverse()
+        return " / ".join(segments)
+
+    def _collect_project_bus_search_candidates(self) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        for config in self._project_bus_configs:
+            bus_name = str(config.get("name", "")).strip()
+            if not bus_name:
+                continue
+            parent_bus = str(config.get("parent_bus", "Master") or "Master")
+            volume_db = float(config.get("volume_db", 0.0))
+            muted_text = "静音" if bool(config.get("is_muted", False)) else "可用"
+            candidates.append(
+                {
+                    "title": f"总线 | {bus_name}",
+                    "description": f"总线与混音 / 父级 {parent_bus} / {volume_db:.1f} dB / {muted_text}",
+                    "keywords": f"总线 bus mixer {bus_name} {parent_bus} {muted_text}",
+                    "priority": 5,
+                    "action": lambda name=bus_name: self._focus_project_bus_search_result(name),
+                }
+            )
+        return candidates
+
+    def _collect_report_list_search_candidates(
+        self,
+        list_widget: QListWidget,
+        report_index: int,
+        category_label: str,
+        priority: int,
+    ) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        for row in range(list_widget.count()):
+            item = list_widget.item(row)
+            if item is None:
+                continue
+            payload = item.data(Qt.ItemDataRole.UserRole) or {}
+            detail = str(payload.get("detail", item.text())).strip()
+            summary_line = detail.splitlines()[0] if detail else item.text().strip()
+            target_type = str(payload.get("target_type", "")).strip()
+            target_id = str(payload.get("target_id", "")).strip()
+            title = item.text().strip()
+            candidates.append(
+                {
+                    "title": f"{category_label} | {title}",
+                    "description": summary_line,
+                    "keywords": f"{category_label} {title} {summary_line} {target_type} {target_id}",
+                    "priority": priority,
+                    "action": lambda page_index=report_index, widget=list_widget, target_row=row: self._focus_report_search_result(page_index, widget, target_row),
+                }
+            )
+        return candidates
+
+    def _filter_global_search_candidates(
+        self,
+        query: str,
+        candidates: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        normalized_query = query.strip().casefold()
+        if not normalized_query:
+            return []
+        matches = [
+            candidate
+            for candidate in candidates
+            if normalized_query in str(candidate.get("keywords", "")).casefold()
+            or normalized_query in str(candidate.get("title", "")).casefold()
+            or normalized_query in str(candidate.get("description", "")).casefold()
+        ]
+        return sorted(matches, key=lambda candidate: self._global_search_sort_key(normalized_query, candidate))
+
+    def _global_search_sort_key(self, normalized_query: str, candidate: dict[str, object]) -> tuple[int, int, str]:
+        title = str(candidate.get("title", "")).casefold()
+        description = str(candidate.get("description", "")).casefold()
+        keywords = str(candidate.get("keywords", "")).casefold()
+        if title == normalized_query:
+            score = 0
+        elif title.startswith(normalized_query):
+            score = 1
+        elif any(token.startswith(normalized_query) for token in keywords.split()):
+            score = 2
+        elif normalized_query in title:
+            score = 3
+        elif normalized_query in description:
+            score = 4
+        else:
+            score = 5
+        return int(candidate.get("priority", 99)) + score, len(title), title
+
+    def _run_global_search_match(self, candidate: dict[str, object]) -> None:
+        action = candidate.get("action")
+        if callable(action):
+            action()
+        title = str(candidate.get("title", "")).strip()
+        description = str(candidate.get("description", "")).strip()
+        if title:
+            self.report_detail_label.setText(f"已跳转：{title}")
+            self.report_detail_label.setToolTip(description or title)
+
+    def _focus_project_bus_search_result(self, bus_name: str) -> None:
+        self.set_active_property_category("音频属性")
+        if self._select_project_bus_by_name(bus_name):
+            self.project_bus_list.scrollToItem(self.project_bus_list.currentItem(), QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def _focus_report_search_result(self, report_index: int, list_widget: QListWidget, row: int) -> None:
+        self.show_report_tab(report_index)
+        if not 0 <= row < list_widget.count():
+            return
+        list_widget.setCurrentRow(row)
+        item = list_widget.item(row)
+        if item is not None:
+            list_widget.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def _show_global_search_results(self, initial_query: str, candidates: list[dict[str, object]]) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{APP_NAME} 全局搜索")
+        dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        dialog.setModal(True)
+        dialog.resize(720, 480)
+        dialog.setMinimumSize(560, 360)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        intro_label = QLabel("搜索对象、总线、问题和结果。按 Enter 跳转当前高亮项，Esc 关闭。")
+        intro_label.setWordWrap(True)
+
+        query_edit = QLineEdit()
+        query_edit.setClearButtonEnabled(True)
+        query_edit.setPlaceholderText("例如：UI_Click、Master、校验、构建、响度")
+        query_edit.setProperty("role", "topSearchField")
+        query_edit.setText(initial_query)
+
+        result_list = QListWidget()
+        result_list.setProperty("role", "resultList")
+        result_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        result_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        result_list.setAlternatingRowColors(True)
+
+        detail_label = QLabel()
+        detail_label.setWordWrap(True)
+        status_label = QLabel()
+
+        filtered_matches: list[dict[str, object]] = []
+
+        def update_selected_detail() -> None:
+            current_item = result_list.currentItem()
+            if current_item is None:
+                detail_label.setText("没有匹配结果。可以尝试对象名、总线名、问题代码或结果关键字。")
+                return
+            match_index = int(current_item.data(Qt.ItemDataRole.UserRole))
+            candidate = filtered_matches[match_index]
+            detail_label.setText(f"{candidate['title']}\n{candidate['description']}")
+
+        def refresh_results() -> None:
+            nonlocal filtered_matches
+            filtered_matches = self._filter_global_search_candidates(query_edit.text(), candidates)
+            result_list.clear()
+            for index, candidate in enumerate(filtered_matches):
+                item = QListWidgetItem(f"{candidate['title']}\n{candidate['description']}")
+                item.setData(Qt.ItemDataRole.UserRole, index)
+                item.setToolTip(str(candidate.get("description", candidate.get("title", ""))))
+                item.setSizeHint(QSize(0, 48))
+                result_list.addItem(item)
+            if filtered_matches:
+                result_list.setCurrentRow(0)
+                status_label.setText(f"找到 {len(filtered_matches)} 个结果，Enter 跳转。")
+            else:
+                status_label.setText("没有匹配结果。")
+            update_selected_detail()
+
+        def activate_selected_result() -> None:
+            current_item = result_list.currentItem()
+            if current_item is None:
+                return
+            match_index = int(current_item.data(Qt.ItemDataRole.UserRole))
+            candidate = filtered_matches[match_index]
+            dialog.accept()
+            QTimer.singleShot(0, lambda selected=candidate: self._run_global_search_match(selected))
+
+        query_edit.textChanged.connect(refresh_results)
+        query_edit.returnPressed.connect(activate_selected_result)
+        result_list.itemDoubleClicked.connect(lambda _item: activate_selected_result())
+        result_list.itemSelectionChanged.connect(update_selected_detail)
+
+        layout.addWidget(intro_label)
+        layout.addWidget(query_edit)
+        layout.addWidget(result_list, 1)
+        layout.addWidget(detail_label)
+        layout.addWidget(status_label)
+
+        refresh_results()
+        query_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        query_edit.selectAll()
+        dialog.exec()
 
     def current_event_import_template_defaults(self) -> dict[str, object]:
         selected_bus = self.import_template_bus_combo.currentData()

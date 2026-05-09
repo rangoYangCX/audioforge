@@ -19,6 +19,7 @@
 - 对“源格式与目标格式相同且无 Trim / Fade 处理”的音频资源改为直接复制，不再执行无意义重编码；Unity 运行时契约不变。
 - 本地工作台布局进一步收敛为“左侧工程树 + 中央工作台 + 底部结果坞”，固定右侧检视器移除后，相关分栏都可手动拖拽缩放。
 - 顶部“命令面板”升级为可筛选、可执行的命令对话框，并新增 `Ctrl+Shift+P` 快捷入口，可直接触发工程、导航、校验、构建与结果跳转动作。
+- 顶部全局搜索保留工程树过滤同步，但执行搜索时已升级为跨对象跳转，可直接命中工程对象、总线、校验问题、构建结果和响度结果。
 
 ### Fixed
 
@@ -31,6 +32,7 @@
 - `pytest tests/unit/test_exporter.py::test_audio_processor_copies_same_format_without_reencoding tests/unit/test_exporter.py::test_runtime_exporter_writes_bundle_and_assets tests/unit/test_exporter.py::test_runtime_exporter_is_stable_across_repeated_exports tests/unit/test_exporter.py::test_runtime_exporter_incremental_rebuilds_only_changed_assets`：4/4 通过。
 - 问题文件 `game_bgm.ogg` 的同格式导出隔离探针已通过，不再卡在 OGG 写出阶段。
 - PySide 离屏烟雾验证已通过：命令面板可弹出，且输入“构建”时能筛出对应命令。
+- PySide 离屏烟雾验证已通过：全局搜索候选可命中事件、总线和构建结果，且能触发对应跳转动作。
 
 ## [0.05] - 2026-04-30
 
