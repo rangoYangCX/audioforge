@@ -99,6 +99,26 @@ class ProjectBusTreeWidget(QTreeWidget):
         self.hierarchyChanged.emit()
 
 
+class CurrentPageStack(QStackedWidget):
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is not None:
+            hint = current.sizeHint()
+            if hint.isValid():
+                return QSize(hint.width(), 0)
+        hint = super().sizeHint()
+        return QSize(hint.width(), 0)
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is not None:
+            hint = current.minimumSizeHint()
+            if hint.isValid():
+                return QSize(hint.width(), 0)
+        hint = super().minimumSizeHint()
+        return QSize(hint.width(), 0)
+
+
 class MainWindow(QMainWindow):
     eventPropertiesChanged = Signal()
     projectSettingsChanged = Signal()
@@ -143,11 +163,11 @@ class MainWindow(QMainWindow):
         self._loading_event = False
         self._close_handler = None
         self._ui_scale = 1.0
-        self._default_workspace_splitter_sizes = [1090, 0]
-        self._default_main_splitter_sizes = [300, 1120]
+        self._default_workspace_splitter_sizes = [980, 220]
+        self._default_main_splitter_sizes = [286, 1414]
         self._default_content_top_splitter_sizes = [700, 360]
         self._default_focus_content_splitter_sizes = [760, 320]
-        self._minimum_report_panel_height = 0
+        self._minimum_report_panel_height = 96
         self._last_docked_main_splitter_sizes = list(self._default_main_splitter_sizes)
         self._pending_workspace_splitter_sizes: list[int] | None = None
         self._pending_main_splitter_sizes: list[int] | None = None
@@ -533,7 +553,7 @@ class MainWindow(QMainWindow):
         self.zoom_in_button = QToolButton()
         self.reset_layout_button = QToolButton()
         self.settings_button = QPushButton("设置")
-        self.command_button = QPushButton("命令")
+        self.command_button = QPushButton("命令面板")
         self.scale_status_label = QLabel("100%")
         self.new_folder_button = QPushButton("新建文件夹")
         self.new_event_button = QPushButton("新建事件")
@@ -555,10 +575,10 @@ class MainWindow(QMainWindow):
         self.apply_default_bus_button = QPushButton("默认总线应用到全部事件")
         self.tree_search_button = QToolButton()
         self.global_search_edit = QLineEdit()
-        self.global_search_edit.setPlaceholderText("搜索事件并定位")
+        self.global_search_edit.setPlaceholderText("搜索对象、总线、问题或结果")
         self.global_search_button = QToolButton()
         self.task_sidebar = TaskSidebar()
-        self.workspace_mode_stack = QStackedWidget()
+        self.workspace_mode_stack = CurrentPageStack()
         self.activity_summary_label = QLabel("欢迎使用新的 AppShell。先从欢迎页进入具体工作模式。")
         self.activity_hint_label = QLabel("这里会持续显示最近的结果入口与当前工作状态。")
         self.events_workspace_status_label = QLabel("等待选择事件。")
@@ -1094,9 +1114,13 @@ class MainWindow(QMainWindow):
         explorer_window_layout.setSpacing(8)
         self.explorer_window_layout = explorer_window_layout
         self.explorer_window.closeRequested.connect(self.attach_explorer_panel)
+        self.explorer_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.workspace_mode_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self.main_splitter.addWidget(self.explorer_panel)
         self.main_splitter.addWidget(self.workspace_mode_stack)
-        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setStretchFactor(0, 2)
+        self.main_splitter.setStretchFactor(1, 8)
         self._set_main_splitter_sizes(self._default_main_splitter_sizes)
 
         self.workspace_splitter = QSplitter()
@@ -1118,9 +1142,17 @@ class MainWindow(QMainWindow):
 
         shell = AppShell(self.top_app_bar, self.task_sidebar, workspace_container)
         self.setCentralWidget(shell)
+        self._apply_splitter_resize_defaults()
         self._activate_workspace_mode(self._active_workspace_mode)
         self.task_sidebar.set_active_mode(self._active_workspace_mode)
         self._build_settings_dialog()
+
+    def _apply_splitter_resize_defaults(self) -> None:
+        for splitter in self.findChildren(QSplitter):
+            splitter.setChildrenCollapsible(False)
+            splitter.setOpaqueResize(True)
+            if splitter.handleWidth() < 10:
+                splitter.setHandleWidth(10)
 
     def _build_top_app_bar(self) -> QFrame:
         bar = QFrame()
@@ -1504,6 +1536,7 @@ class MainWindow(QMainWindow):
                 [
                     "先确定对象命名、总线和播放机制，再处理随机范围与连击逻辑。",
                     "响度监视器保持事件内联，便于边试听边校准。",
+                    "当前对象摘要与引用关系收回到左侧上下文区，主画布只保留编辑控件。",
                 ],
             )
         )
@@ -1577,7 +1610,16 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        layout.addWidget(self.hero_panel)
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "混音工作台",
+                [
+                    "工程摘要保留在左侧上下文区，主画布聚焦总线树、路由和输出结果。",
+                    "需要手动比较路由和结果时，直接拖拽中间分割条扩展工作区。",
+                ],
+            )
+        )
+        layout.addWidget(self._wrap_emphasis_card("工程摘要", self.hero_panel, icon_name="app"))
         layout.addWidget(
             self._build_workspace_overview_card(
                 "混音导航",
@@ -2024,20 +2066,33 @@ class MainWindow(QMainWindow):
     def _build_activity_panel(self) -> QWidget:
         panel = QWidget()
         panel.setMinimumHeight(self._minimum_report_panel_height)
-        panel.setMaximumHeight(0)
+        panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         body = QFrame()
         body.setObjectName("ActivityPanel")
-        body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(12, 6, 12, 6)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(12, 8, 12, 8)
         body_layout.setSpacing(8)
 
-        activity_entry_label = QLabel("结果入口")
+        activity_entry_label = QLabel("结果坞")
         activity_entry_label.setProperty("role", "busHeaderChip")
-        self.activity_hint_label.setText("点击进入独立结果页")
+        self.activity_hint_label.setText("底部常驻结果坞用于快速回看日志、校验、构建和响度结果。")
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+        header_row.addWidget(activity_entry_label)
+        header_text = QVBoxLayout()
+        header_text.setContentsMargins(0, 0, 0, 0)
+        header_text.setSpacing(2)
+        header_text.addWidget(self.activity_summary_label)
+        header_text.addWidget(self.activity_hint_label)
+        header_row.addLayout(header_text, 1)
+        header_row.addWidget(self.activity_report_focus_label)
+        header_row.addWidget(self.activity_dirty_label)
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
@@ -2058,10 +2113,13 @@ class MainWindow(QMainWindow):
         action_row.addWidget(loudness_button)
         action_row.addStretch(1)
 
-        body_layout.addWidget(activity_entry_label)
-        body_layout.addLayout(action_row, 1)
-        body_layout.addWidget(self.activity_report_focus_label)
-        body_layout.addWidget(self.activity_dirty_label)
+        dock_note = QLabel("结果坞保持常驻，不改变导出契约；需要完整回看时仍可切到结果中心。")
+        dock_note.setWordWrap(True)
+        dock_note.setProperty("role", "modeCardDescription")
+
+        body_layout.addLayout(header_row)
+        body_layout.addLayout(action_row)
+        body_layout.addWidget(dock_note)
         layout.addWidget(body)
         self.log_panel = panel
         return panel
@@ -2175,19 +2233,279 @@ class MainWindow(QMainWindow):
         self.settings_dialog.raise_()
         self.settings_dialog.activateWindow()
 
-    def _show_command_quick_reference(self) -> None:
-        QMessageBox.information(
-            self,
-            f"{APP_NAME} 命令",
-            "当前入口已经收口到 AppShell。\n\n"
-            "推荐命令：\n"
-            "- 顶部搜索：定位事件\n"
-            "- 左侧任务导航：切换工作模式\n"
-            "- Delete：删除选中对象或片段\n"
-            "- F2：重命名\n"
-            "- Enter：打开当前编辑焦点\n"
-            "- Ctrl+C：复制对象标识或资源键",
-        )
+    def _focus_global_search(self) -> None:
+        self.global_search_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.global_search_edit.selectAll()
+
+    def _command_palette_items(self) -> list[dict[str, object]]:
+        return [
+            {
+                "title": "新建工程",
+                "description": "创建一个新的 AudioForge 工程。",
+                "keywords": "new project 工程 新建 创建",
+                "action": self.new_project_button.click,
+            },
+            {
+                "title": "打开工程",
+                "description": "打开现有的工程文件。",
+                "keywords": "open project 工程 打开",
+                "action": self.open_project_button.click,
+            },
+            {
+                "title": "保存工程",
+                "description": "保存当前工程到现有路径。",
+                "keywords": "save project 工程 保存",
+                "action": self.save_project_button.click,
+            },
+            {
+                "title": "另存工程",
+                "description": "把当前工程保存到新路径。",
+                "keywords": "save as project 工程 另存为",
+                "action": self.save_as_project_button.click,
+            },
+            {
+                "title": "打开设置",
+                "description": "查看最近工程、试听总线和导入模板设置。",
+                "keywords": "settings recent import 设置 最近工程",
+                "action": self.open_settings_dialog,
+            },
+            {
+                "title": "恢复默认布局",
+                "description": "恢复主分栏、工作区和结果坞的默认尺寸。",
+                "keywords": "layout splitter dock 布局 分栏 结果坞",
+                "action": self.restore_default_layout,
+            },
+            {
+                "title": "聚焦全局搜索",
+                "description": "把焦点移动到顶部搜索框，方便立即输入关键字。",
+                "keywords": "search focus 搜索 聚焦 顶部",
+                "action": self._focus_global_search,
+            },
+            {
+                "title": "执行全局搜索",
+                "description": "用顶部关键字执行一次对象定位。",
+                "keywords": "search find locate 搜索 定位 事件",
+                "action": self._request_global_search,
+            },
+            {
+                "title": "切到欢迎页",
+                "description": "返回工作台首页和快速入口。",
+                "keywords": "home welcome 欢迎页 首页",
+                "action": lambda: self._activate_workspace_mode("home"),
+            },
+            {
+                "title": "切到资源整理",
+                "description": "进入片段导入、批量编辑和内容整理工作区。",
+                "keywords": "resources clips content 资源 片段",
+                "action": lambda: self._activate_workspace_mode("resources"),
+            },
+            {
+                "title": "切到事件设计",
+                "description": "进入事件属性、播放模式和引用关系工作区。",
+                "keywords": "events design 事件 设计 属性",
+                "action": lambda: self._activate_workspace_mode("events"),
+            },
+            {
+                "title": "切到总线与混音",
+                "description": "集中查看工程总线、父子路由和 Master 输出。",
+                "keywords": "buses mixer master 总线 混音 路由",
+                "action": lambda: self._activate_workspace_mode("buses"),
+            },
+            {
+                "title": "切到校验修复",
+                "description": "进入问题筛选、定位和重新校验工作区。",
+                "keywords": "validation validate 校验 修复 问题",
+                "action": lambda: self._activate_workspace_mode("validation"),
+            },
+            {
+                "title": "切到构建交付",
+                "description": "进入构建范围、导出和交付工作区。",
+                "keywords": "build export delivery 构建 导出 交付",
+                "action": lambda: self._activate_workspace_mode("build"),
+            },
+            {
+                "title": "切到结果中心",
+                "description": "打开统一的日志、校验、构建和响度结果面板。",
+                "keywords": "results logs report 结果 日志 报告",
+                "action": lambda: self._activate_workspace_mode("results"),
+            },
+            {
+                "title": "校验工程",
+                "description": "立即执行工程校验并刷新结果坞。",
+                "keywords": "validate check 校验 检查",
+                "action": self.validate_button.click,
+            },
+            {
+                "title": "开始构建导出",
+                "description": "按当前构建配置执行一次导出。",
+                "keywords": "build export 构建 导出 生成",
+                "action": self.buildRequested.emit,
+            },
+            {
+                "title": "预览导出差异",
+                "description": "查看重建、复用和移除计划，不直接写出文件。",
+                "keywords": "preview diff export 差异 预览 导出",
+                "action": self.previewExportDiffRequested.emit,
+            },
+            {
+                "title": "新建文件夹",
+                "description": "在工程树中创建新的逻辑文件夹。",
+                "keywords": "folder tree 文件夹 工程树",
+                "action": self.new_folder_button.click,
+            },
+            {
+                "title": "新建事件",
+                "description": "创建新的事件对象并进入编辑。",
+                "keywords": "event create 事件 新建",
+                "action": self.new_event_button.click,
+            },
+            {
+                "title": "重命名当前选中",
+                "description": "对当前树节点或片段执行重命名。",
+                "keywords": "rename selected 重命名 选中",
+                "action": self.renameSelectedRequested.emit,
+            },
+            {
+                "title": "删除当前选中",
+                "description": "删除当前选中的对象或片段。",
+                "keywords": "delete remove selected 删除 选中",
+                "action": self.deleteSelectedRequested.emit,
+            },
+            {
+                "title": "批量改总线",
+                "description": "为当前选中的事件批量调整输出总线。",
+                "keywords": "bus batch 总线 批量",
+                "action": self.bulk_event_bus_button.click,
+            },
+            {
+                "title": "试听当前对象",
+                "description": "按当前选区发起一次试听。",
+                "keywords": "preview play listen 试听 播放",
+                "action": self.previewRequested.emit,
+            },
+            {
+                "title": "停止事件试听",
+                "description": "停止当前事件试听播放。",
+                "keywords": "stop preview event 停止 事件 试听",
+                "action": self.stopPreviewEventRequested.emit,
+            },
+            {
+                "title": "停止总线试听",
+                "description": "停止当前总线试听输出。",
+                "keywords": "stop preview bus 停止 总线 试听",
+                "action": self.stopPreviewBusRequested.emit,
+            },
+            {
+                "title": "打开日志结果",
+                "description": "切到结果坞中的日志页。",
+                "keywords": "results logs 日志 结果",
+                "action": lambda: self.show_report_tab(0),
+            },
+            {
+                "title": "打开校验结果",
+                "description": "切到结果坞中的校验页。",
+                "keywords": "results validation 校验 结果",
+                "action": lambda: self.show_report_tab(1),
+            },
+            {
+                "title": "打开构建结果",
+                "description": "切到结果坞中的构建页。",
+                "keywords": "results build 构建 结果",
+                "action": lambda: self.show_report_tab(2),
+            },
+            {
+                "title": "打开响度结果",
+                "description": "切到结果坞中的响度页。",
+                "keywords": "results loudness 响度 结果",
+                "action": lambda: self.show_report_tab(3),
+            },
+        ]
+
+    def _show_command_palette(self) -> None:
+        commands = self._command_palette_items()
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{APP_NAME} 命令面板")
+        dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        dialog.setModal(True)
+        dialog.resize(640, 460)
+        dialog.setMinimumSize(520, 360)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        intro_label = QLabel("输入关键字筛选命令，按 Enter 执行当前高亮项，Esc 关闭。")
+        intro_label.setWordWrap(True)
+        filter_edit = QLineEdit()
+        filter_edit.setClearButtonEnabled(True)
+        filter_edit.setPlaceholderText("搜索命令、工作区或动作，例如：构建、事件、保存")
+        filter_edit.setProperty("role", "topSearchField")
+
+        command_list = QListWidget()
+        command_list.setProperty("role", "resultList")
+        command_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        command_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        command_list.setAlternatingRowColors(True)
+
+        detail_label = QLabel()
+        detail_label.setWordWrap(True)
+        status_label = QLabel("Ctrl+Shift+P 可随时再次打开命令面板。")
+
+        def update_selected_command_detail() -> None:
+            current_item = command_list.currentItem()
+            if current_item is None:
+                detail_label.setText("没有匹配命令。可以尝试输入“事件”“构建”“保存”等关键字。")
+                return
+            command_index = current_item.data(Qt.ItemDataRole.UserRole)
+            command = commands[int(command_index)]
+            detail_label.setText(f"{command['title']}\n{command['description']}")
+
+        def refresh_command_list() -> None:
+            query = filter_edit.text().strip().casefold()
+            command_list.clear()
+            visible_count = 0
+            for index, command in enumerate(commands):
+                haystack = f"{command['title']} {command['description']} {command['keywords']}".casefold()
+                if query and query not in haystack:
+                    continue
+                item = QListWidgetItem(f"{command['title']}\n{command['description']}")
+                item.setData(Qt.ItemDataRole.UserRole, index)
+                item.setToolTip(str(command["description"]))
+                item.setSizeHint(QSize(0, 48))
+                command_list.addItem(item)
+                visible_count += 1
+            if visible_count > 0:
+                command_list.setCurrentRow(0)
+                status_label.setText(f"{visible_count} 个命令可执行，Enter 运行，Esc 关闭。")
+            else:
+                status_label.setText("没有匹配命令")
+            update_selected_command_detail()
+
+        def run_selected_command() -> None:
+            current_item = command_list.currentItem()
+            if current_item is None:
+                return
+            command_index = current_item.data(Qt.ItemDataRole.UserRole)
+            action = commands[int(command_index)].get("action")
+            if not callable(action):
+                return
+            dialog.accept()
+            QTimer.singleShot(0, action)
+
+        filter_edit.textChanged.connect(refresh_command_list)
+        filter_edit.returnPressed.connect(run_selected_command)
+        command_list.itemDoubleClicked.connect(lambda _item: run_selected_command())
+        command_list.itemSelectionChanged.connect(update_selected_command_detail)
+
+        layout.addWidget(intro_label)
+        layout.addWidget(filter_edit)
+        layout.addWidget(command_list, 1)
+        layout.addWidget(detail_label)
+        layout.addWidget(status_label)
+
+        refresh_command_list()
+        filter_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        dialog.exec()
 
     def _set_workspace_mode(self, mode: str) -> None:
         mode_titles = {
@@ -2253,6 +2571,12 @@ class MainWindow(QMainWindow):
         elif mode == "results":
             self._mount_workspace_surface("results")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["results"])
+        current_page = self.workspace_mode_stack.currentWidget()
+        if current_page is not None:
+            current_page.updateGeometry()
+        self.workspace_mode_stack.updateGeometry()
+        self.main_splitter.updateGeometry()
+        self.workspace_splitter.updateGeometry()
         self._set_workspace_mode(mode)
         self._update_object_bus_status()
 
@@ -2297,6 +2621,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._apply_splitter_resize_defaults()
         self._schedule_layout_flush()
 
     def _schedule_layout_flush(self) -> None:
@@ -2309,7 +2634,9 @@ class MainWindow(QMainWindow):
         self._pending_layout_flush = False
         if self._pending_workspace_splitter_sizes is not None:
             sizes = [int(value) for value in self._pending_workspace_splitter_sizes]
-            self.workspace_splitter.setSizes([max(0, sizes[0]), 0])
+            if len(sizes) < 2:
+                sizes = [sizes[0] if sizes else self._default_workspace_splitter_sizes[0], self._minimum_report_panel_height]
+            self.workspace_splitter.setSizes([max(0, sizes[0]), max(self._minimum_report_panel_height, sizes[1])])
             self._pending_workspace_splitter_sizes = None
         if self._pending_main_splitter_sizes is not None and not self._explorer_detached:
             sizes = [int(value) for value in self._pending_main_splitter_sizes]
@@ -2323,8 +2650,11 @@ class MainWindow(QMainWindow):
     def _set_workspace_splitter_sizes(self, sizes: list[int]) -> None:
         normalized = [int(value) for value in sizes]
         if len(normalized) < 2:
-            normalized = [normalized[0] if normalized else sum(self._default_workspace_splitter_sizes), 0]
-        normalized[1] = 0
+            total = normalized[0] if normalized else sum(self._default_workspace_splitter_sizes)
+            normalized = [max(0, total - self._minimum_report_panel_height), self._minimum_report_panel_height]
+        if normalized[1] <= 0:
+            total = max(sum(normalized), sum(self._default_workspace_splitter_sizes))
+            normalized = [max(0, total - self._minimum_report_panel_height), self._minimum_report_panel_height]
         self._pending_workspace_splitter_sizes = normalized
         if self.isVisible():
             self._schedule_layout_flush()
@@ -3233,9 +3563,6 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
         layout.addWidget(self._build_empty_state_card(title, description))
-        spacer = QWidget()
-        spacer.setMinimumHeight(1200)
-        layout.addWidget(spacer)
         layout.addStretch(1)
         return self._wrap_scrollable_page(content)
 
@@ -3316,10 +3643,11 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(panel)
-        scroll.setMinimumWidth(318)
+        scroll.setMinimumWidth(220)
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         return scroll
 
     def _build_meter_stat_card(self, title: str, value_label: QLabel, unit_text: str) -> QWidget:
@@ -4652,12 +4980,14 @@ class MainWindow(QMainWindow):
             QShortcut(QKeySequence("Return"), self),
             QShortcut(QKeySequence("Enter"), self),
             QShortcut(QKeySequence.StandardKey.Copy, self),
+            QShortcut(QKeySequence("Ctrl+Shift+P"), self),
         ]
         self._shortcuts[0].activated.connect(self._handle_delete_shortcut)
         self._shortcuts[1].activated.connect(self._handle_rename_shortcut)
         self._shortcuts[2].activated.connect(self._handle_open_shortcut)
         self._shortcuts[3].activated.connect(self._handle_open_shortcut)
         self._shortcuts[4].activated.connect(self._handle_copy_shortcut)
+        self._shortcuts[5].activated.connect(self._show_command_palette)
 
     def _handle_delete_shortcut(self) -> None:
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
@@ -4831,7 +5161,7 @@ class MainWindow(QMainWindow):
         self.zoom_reset_button.clicked.connect(self.reset_ui_scale)
         self.reset_layout_button.clicked.connect(self.restore_default_layout)
         self.settings_button.clicked.connect(self.open_settings_dialog)
-        self.command_button.clicked.connect(self._show_command_quick_reference)
+        self.command_button.clicked.connect(self._show_command_palette)
         self.global_search_edit.returnPressed.connect(self._request_global_search)
         self.global_search_edit.textChanged.connect(self._sync_global_search_fields)
         self.global_search_button.clicked.connect(self._request_global_search)
@@ -5308,7 +5638,8 @@ class MainWindow(QMainWindow):
         self.tree_search_button.setIcon(load_app_icon("open_project"))
         self.tree_search_button.setToolTip("定位下一个匹配的事件")
         self.global_search_button.setIcon(load_app_icon("open_project"))
-        self.global_search_button.setToolTip("搜索并定位事件")
+        self.global_search_button.setToolTip("搜索并定位当前工程中的对象")
+        self.command_button.setToolTip("打开命令面板（Ctrl+Shift+P）")
         self.object_parent_button.setIcon(load_app_icon("navigate_parent"))
         self.object_parent_button.setToolTip("跳转到父级")
         self.object_parent_button.setAutoRaise(True)
