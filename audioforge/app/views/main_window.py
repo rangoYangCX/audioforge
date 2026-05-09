@@ -475,6 +475,7 @@ class MainWindow(QMainWindow):
         self.loudness_report_output = QPlainTextEdit()
         self.loudness_report_output.setReadOnly(True)
         self.loudness_report_output.setPlaceholderText("响度扫描完成后，这里会显示条目细节、阈值与超标说明。")
+        self._latest_log_message = ""
         self.clip_filter_edit = QLineEdit()
         self.clip_filter_edit.setPlaceholderText("按片段 ID、源路径、资源键或标签过滤")
         self.bulk_clip_weight_spin = QSpinBox()
@@ -581,6 +582,10 @@ class MainWindow(QMainWindow):
         self.workspace_mode_stack = CurrentPageStack()
         self.activity_summary_label = QLabel("欢迎使用新的 AppShell。先从欢迎页进入具体工作模式。")
         self.activity_hint_label = QLabel("这里会持续显示最近的结果入口与当前工作状态。")
+        self.activity_log_summary_label = QLabel("最近日志：等待运行输出。")
+        self.activity_validation_summary_label = QLabel(self.validation_summary_label.text())
+        self.activity_build_summary_label = QLabel(self.build_summary_label.text())
+        self.activity_loudness_summary_label = QLabel(self.loudness_summary_label.text())
         self.events_workspace_status_label = QLabel("等待选择事件。")
         self.event_overview_hint_label = QLabel("从左侧概览快速切到参数、资源或结果页。")
         self.resources_workspace_status_label = QLabel("等待导入或选择片段。")
@@ -2063,6 +2068,54 @@ class MainWindow(QMainWindow):
         layout.addWidget(workspace_splitter, 1)
         return panel
 
+    def _build_activity_summary_card(self, title: str, summary_label: QLabel) -> QFrame:
+        card = QFrame()
+        card.setObjectName("WorkspaceOverviewCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+        summary_label.setProperty("role", "workspaceSectionSummary")
+        summary_label.setWordWrap(True)
+        layout.addWidget(self._build_card_title_row(title))
+        layout.addWidget(summary_label)
+        return card
+
+    def _set_activity_summary_text(self, label: QLabel, text: str, *, fallback: str) -> None:
+        normalized = " ".join(text.split()) if text else ""
+        normalized = normalized or fallback
+        display = normalized if len(normalized) <= 72 else f"{normalized[:69]}..."
+        label.setText(display)
+        label.setToolTip(normalized)
+
+    def _first_report_item_detail(self, list_widget: QListWidget) -> str:
+        item = list_widget.item(0)
+        if item is None:
+            return ""
+        payload = item.data(Qt.ItemDataRole.UserRole) or {}
+        return str(payload.get("detail", item.toolTip() or item.text())).strip()
+
+    def _update_activity_report_snapshot_labels(self) -> None:
+        self._set_activity_summary_text(
+            self.activity_log_summary_label,
+            f"最近日志：{self._latest_log_message}" if self._latest_log_message else "",
+            fallback="最近日志：等待运行输出。",
+        )
+        self._set_activity_summary_text(
+            self.activity_validation_summary_label,
+            self.validation_summary_label.text(),
+            fallback="等待校验。",
+        )
+        self._set_activity_summary_text(
+            self.activity_build_summary_label,
+            self._first_report_item_detail(self.build_issue_list) or self.build_summary_label.text(),
+            fallback="等待构建或差异预览。",
+        )
+        self._set_activity_summary_text(
+            self.activity_loudness_summary_label,
+            self.loudness_summary_label.text(),
+            fallback="等待响度扫描。",
+        )
+
     def _build_activity_panel(self) -> QWidget:
         panel = QWidget()
         panel.setMinimumHeight(self._minimum_report_panel_height)
@@ -2117,8 +2170,20 @@ class MainWindow(QMainWindow):
         dock_note.setWordWrap(True)
         dock_note.setProperty("role", "modeCardDescription")
 
+        summary_grid = QGridLayout()
+        summary_grid.setContentsMargins(0, 0, 0, 0)
+        summary_grid.setHorizontalSpacing(8)
+        summary_grid.setVerticalSpacing(8)
+        summary_grid.setColumnStretch(0, 1)
+        summary_grid.setColumnStretch(1, 1)
+        summary_grid.addWidget(self._build_activity_summary_card("日志", self.activity_log_summary_label), 0, 0)
+        summary_grid.addWidget(self._build_activity_summary_card("校验", self.activity_validation_summary_label), 0, 1)
+        summary_grid.addWidget(self._build_activity_summary_card("构建", self.activity_build_summary_label), 1, 0)
+        summary_grid.addWidget(self._build_activity_summary_card("响度", self.activity_loudness_summary_label), 1, 1)
+
         body_layout.addLayout(header_row)
         body_layout.addLayout(action_row)
+        body_layout.addLayout(summary_grid)
         body_layout.addWidget(dock_note)
         layout.addWidget(body)
         self.log_panel = panel
@@ -3489,6 +3554,7 @@ class MainWindow(QMainWindow):
         self.results_overview_hint_label.setText(
             f"当前结果页 {current_results_title}。可在这里统一回看日志、校验、构建和响度输出。"
         )
+        self._update_activity_report_snapshot_labels()
 
     def _build_report_center_page(self, summary_label: QLabel, issue_list: QListWidget, detail_output: QPlainTextEdit) -> QWidget:
         page = QWidget()
@@ -4125,6 +4191,7 @@ class MainWindow(QMainWindow):
 
     def append_log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
+        self._latest_log_message = message.strip()
         self.report_detail_label.setText(f"最近日志：{message[:80]}")
         self.report_detail_label.setToolTip(message)
         self._update_workspace_summary_labels()
