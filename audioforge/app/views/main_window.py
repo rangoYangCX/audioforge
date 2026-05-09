@@ -1631,8 +1631,8 @@ class MainWindow(QMainWindow):
                 self.buses_overview_hint_label,
                 [
                     ("当前事件总线", self._follow_current_event_bus, "bus", 0, 0),
-                    ("新建总线", self._request_add_project_bus, "bus", 0, 1),
-                    ("设为默认", self._set_current_bus_as_default, "generate", 1, 0),
+                    ("切到父总线", self._select_parent_bus_for_current, "route", 0, 1),
+                    ("Master 输出", lambda: self._select_project_bus_by_name("Master"), "generate", 1, 0),
                     ("回到事件", lambda: self._activate_workspace_mode("events"), "event", 1, 1),
                 ],
             )
@@ -1689,10 +1689,10 @@ class MainWindow(QMainWindow):
                 "交付流程",
                 self.build_overview_hint_label,
                 [
-                    ("导出设置", lambda: self._activate_workspace_mode("build"), "generate", 0, 0),
-                    ("导出差异", self.previewExportDiffRequested.emit, "report", 0, 1),
-                    ("开始构建", self.buildRequested.emit, "generate", 1, 0),
-                    ("校验修复", lambda: self._activate_workspace_mode("validation"), "validate", 1, 1),
+                    ("校验修复", lambda: self._activate_workspace_mode("validation"), "validate", 0, 0),
+                    ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 0, 1),
+                    ("日志结果", lambda: self.show_report_tab(0), "report", 1, 0),
+                    ("响度结果", lambda: self.show_report_tab(3), "audio", 1, 1),
                 ],
             )
         )
@@ -1762,8 +1762,8 @@ class MainWindow(QMainWindow):
                 "校验工作流",
                 self.validation_overview_hint_label,
                 [
-                    ("重新校验", self.validate_button.click, "validate", 0, 0),
-                    ("定位问题", self._locate_selected_validation_issue, "report", 0, 1),
+                    ("校验结果页", lambda: self.show_report_tab(1), "validate", 0, 0),
+                    ("构建交付", lambda: self._activate_workspace_mode("build"), "generate", 0, 1),
                     ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 1, 0),
                     ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 1, 1),
                 ],
@@ -2305,39 +2305,15 @@ class MainWindow(QMainWindow):
     def _command_palette_items(self) -> list[dict[str, object]]:
         return [
             {
-                "title": "新建工程",
-                "description": "创建一个新的 AudioForge 工程。",
-                "keywords": "new project 工程 新建 创建",
-                "action": self.new_project_button.click,
-            },
-            {
-                "title": "打开工程",
-                "description": "打开现有的工程文件。",
-                "keywords": "open project 工程 打开",
-                "action": self.open_project_button.click,
-            },
-            {
-                "title": "保存工程",
-                "description": "保存当前工程到现有路径。",
-                "keywords": "save project 工程 保存",
-                "action": self.save_project_button.click,
-            },
-            {
                 "title": "另存工程",
-                "description": "把当前工程保存到新路径。",
-                "keywords": "save as project 工程 另存为",
+                "description": "把当前工程保存到新路径；顶栏只保留常用保存入口。",
+                "keywords": "save as project 工程 另存为 隐藏动作",
                 "action": self.save_as_project_button.click,
-            },
-            {
-                "title": "打开设置",
-                "description": "查看最近工程、试听总线和导入模板设置。",
-                "keywords": "settings recent import 设置 最近工程",
-                "action": self.open_settings_dialog,
             },
             {
                 "title": "恢复默认布局",
                 "description": "恢复主分栏、工作区和结果坞的默认尺寸。",
-                "keywords": "layout splitter dock 布局 分栏 结果坞",
+                "keywords": "layout splitter dock 布局 分栏 结果坞 隐藏动作",
                 "action": self.restore_default_layout,
             },
             {
@@ -2345,12 +2321,6 @@ class MainWindow(QMainWindow):
                 "description": "把焦点移动到顶部搜索框，方便立即输入关键字。",
                 "keywords": "search focus 搜索 聚焦 顶部",
                 "action": self._focus_global_search,
-            },
-            {
-                "title": "执行全局搜索",
-                "description": "用顶部关键字执行一次对象定位。",
-                "keywords": "search find locate 搜索 定位 事件",
-                "action": self._request_global_search,
             },
             {
                 "title": "切到欢迎页",
@@ -2395,72 +2365,6 @@ class MainWindow(QMainWindow):
                 "action": lambda: self._activate_workspace_mode("results"),
             },
             {
-                "title": "校验工程",
-                "description": "立即执行工程校验并刷新结果坞。",
-                "keywords": "validate check 校验 检查",
-                "action": self.validate_button.click,
-            },
-            {
-                "title": "开始构建导出",
-                "description": "按当前构建配置执行一次导出。",
-                "keywords": "build export 构建 导出 生成",
-                "action": self.buildRequested.emit,
-            },
-            {
-                "title": "预览导出差异",
-                "description": "查看重建、复用和移除计划，不直接写出文件。",
-                "keywords": "preview diff export 差异 预览 导出",
-                "action": self.previewExportDiffRequested.emit,
-            },
-            {
-                "title": "新建文件夹",
-                "description": "在工程树中创建新的逻辑文件夹。",
-                "keywords": "folder tree 文件夹 工程树",
-                "action": self.new_folder_button.click,
-            },
-            {
-                "title": "新建事件",
-                "description": "创建新的事件对象并进入编辑。",
-                "keywords": "event create 事件 新建",
-                "action": self.new_event_button.click,
-            },
-            {
-                "title": "重命名当前选中",
-                "description": "对当前树节点或片段执行重命名。",
-                "keywords": "rename selected 重命名 选中",
-                "action": self.renameSelectedRequested.emit,
-            },
-            {
-                "title": "删除当前选中",
-                "description": "删除当前选中的对象或片段。",
-                "keywords": "delete remove selected 删除 选中",
-                "action": self.deleteSelectedRequested.emit,
-            },
-            {
-                "title": "批量改总线",
-                "description": "为当前选中的事件批量调整输出总线。",
-                "keywords": "bus batch 总线 批量",
-                "action": self.bulk_event_bus_button.click,
-            },
-            {
-                "title": "试听当前对象",
-                "description": "按当前选区发起一次试听。",
-                "keywords": "preview play listen 试听 播放",
-                "action": self.previewRequested.emit,
-            },
-            {
-                "title": "停止事件试听",
-                "description": "停止当前事件试听播放。",
-                "keywords": "stop preview event 停止 事件 试听",
-                "action": self.stopPreviewEventRequested.emit,
-            },
-            {
-                "title": "停止总线试听",
-                "description": "停止当前总线试听输出。",
-                "keywords": "stop preview bus 停止 总线 试听",
-                "action": self.stopPreviewBusRequested.emit,
-            },
-            {
                 "title": "打开日志结果",
                 "description": "切到结果坞中的日志页。",
                 "keywords": "results logs 日志 结果",
@@ -2499,11 +2403,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        intro_label = QLabel("输入关键字筛选命令，按 Enter 执行当前高亮项，Esc 关闭。")
+        intro_label = QLabel("输入关键字筛选工作区、结果页或隐藏动作，按 Enter 执行当前高亮项，Esc 关闭。")
         intro_label.setWordWrap(True)
         filter_edit = QLineEdit()
         filter_edit.setClearButtonEnabled(True)
-        filter_edit.setPlaceholderText("搜索命令、工作区或动作，例如：构建、事件、保存")
+        filter_edit.setPlaceholderText("搜索工作区、结果或隐藏动作，例如：总线、日志、另存")
         filter_edit.setProperty("role", "topSearchField")
 
         command_list = QListWidget()
@@ -2519,7 +2423,7 @@ class MainWindow(QMainWindow):
         def update_selected_command_detail() -> None:
             current_item = command_list.currentItem()
             if current_item is None:
-                detail_label.setText("没有匹配命令。可以尝试输入“事件”“构建”“保存”等关键字。")
+                detail_label.setText("没有匹配项。可以尝试输入“总线”“日志”“另存”等关键字。")
                 return
             command_index = current_item.data(Qt.ItemDataRole.UserRole)
             command = commands[int(command_index)]
@@ -5992,7 +5896,7 @@ class MainWindow(QMainWindow):
         self.tree_search_button.setToolTip("定位下一个匹配的事件")
         self.global_search_button.setIcon(load_app_icon("open_project"))
         self.global_search_button.setToolTip("搜索并定位当前工程中的对象")
-        self.command_button.setToolTip("打开命令面板（Ctrl+Shift+P）")
+        self.command_button.setToolTip("打开导航与隐藏动作面板（Ctrl+Shift+P）")
         self.object_parent_button.setIcon(load_app_icon("navigate_parent"))
         self.object_parent_button.setToolTip("跳转到父级")
         self.object_parent_button.setAutoRaise(True)
