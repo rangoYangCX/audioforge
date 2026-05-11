@@ -7,7 +7,7 @@
 
 ## 当前验证状态
 
-- 当前仓库内最近一次基线验证结果：`pytest` 76 项通过。
+- 当前仓库内最近一次基线验证结果：`pytest` 87 项通过。
 - 真实 WAV 烟雾工程验证结果：PASS。
 - 最近一次全链路检查结果：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 集成包完整性。
 - 最新机器报告位于 `reports/internal_release_smoke/checks/full_chain_report.md`，最新签收摘要位于 `reports/internal_release_smoke/release_signoff.md`。

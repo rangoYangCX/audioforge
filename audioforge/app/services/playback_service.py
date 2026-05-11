@@ -25,6 +25,7 @@ class ActivePreviewVoice:
     bus_name: str
     base_volume_db: float
     channel: object
+    is_paused: bool = False
 
 
 class PlaybackService:
@@ -100,6 +101,49 @@ class PlaybackService:
                 except Exception:
                     continue
 
+    def pause_event(self, event_id: str) -> bool:
+        self._cleanup_finished_voices()
+        voices = self._active_voices.get(event_id)
+        if not voices:
+            return False
+        paused_any = False
+        for voice in voices:
+            if voice.is_paused:
+                continue
+            try:
+                voice.channel.pause()
+                voice.is_paused = True
+                paused_any = True
+            except Exception:
+                continue
+        return paused_any
+
+    def resume_event(self, event_id: str) -> bool:
+        self._cleanup_finished_voices()
+        voices = self._active_voices.get(event_id)
+        if not voices:
+            return False
+        resumed_any = False
+        for voice in voices:
+            if not voice.is_paused:
+                continue
+            try:
+                voice.channel.unpause()
+                voice.is_paused = False
+                resumed_any = True
+            except Exception:
+                continue
+        return resumed_any
+
+    def has_active_event(self, event_id: str) -> bool:
+        self._cleanup_finished_voices()
+        return bool(self._active_voices.get(event_id))
+
+    def is_event_paused(self, event_id: str) -> bool:
+        self._cleanup_finished_voices()
+        voices = self._active_voices.get(event_id)
+        return bool(voices) and any(voice.is_paused for voice in voices)
+
 
     def stop_oldest(self, event_id: str) -> None:
         self._cleanup_finished_voices()
@@ -157,6 +201,9 @@ class PlaybackService:
         for event_id, voices in list(self._active_voices.items()):
             alive: list[ActivePreviewVoice] = []
             for voice in voices:
+                if voice.is_paused:
+                    alive.append(voice)
+                    continue
                 try:
                     busy = bool(voice.channel.get_busy())
                 except Exception:

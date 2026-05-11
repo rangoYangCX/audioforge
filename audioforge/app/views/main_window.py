@@ -7,7 +7,7 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QCloseEvent, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -154,6 +154,10 @@ class MainWindow(QMainWindow):
     undoRequested = Signal()
     redoRequested = Signal()
     previewRequested = Signal()
+    previewTransportPlayRequested = Signal()
+    pausePreviewRequested = Signal()
+    resumePreviewRequested = Signal()
+    restartPreviewRequested = Signal()
     stopPreviewEventRequested = Signal()
     stopPreviewBusRequested = Signal()
     importClipsRequested = Signal(list)
@@ -199,11 +203,15 @@ class MainWindow(QMainWindow):
         self._pending_workspace_splitter_sizes: list[int] | None = None
         self._pending_main_splitter_sizes: list[int] | None = None
         self._pending_content_top_splitter_sizes: list[int] | None = None
+        self._pending_named_splitter_sizes: dict[str, list[int]] = {}
         self._pending_layout_flush = False
         self._build_status_summary_override: str | None = None
         self._build_status_detail_override: str | None = None
         self._closing_main_window = False
         self._loading_clip_details = False
+        self._preview_transport_state = "idle"
+        self._preview_transport_has_target = False
+        self._preview_transport_can_replay = False
         self._clip_lookup: dict[str, object] = {}
         self._project_bus_configs: list[dict[str, object]] = []
         self._active_project_bus_name = ""
@@ -467,7 +475,23 @@ class MainWindow(QMainWindow):
         self.audio_meter_summary_true_peak_value = QLabel("-Inf")
         self.audio_meter_summary_source_integrated_value = QLabel("-Inf")
         self.audio_meter_summary_source_true_peak_value = QLabel("-Inf")
-        self.open_loudness_view_button = QPushButton("打开响度监视器")
+        self.preview_transport_header = QFrame()
+        self.preview_transport_title_label = QLabel("最近试听")
+        self.preview_transport_status_chip = QLabel("待命")
+        self.preview_transport_detail_label = QLabel("切换事件、资源或流程时，会保留最近一次试听会话。")
+        self.preview_transport_frame = QFrame()
+        self.preview_transport_metrics_frame = QFrame()
+        self.preview_metric_source_context_label = QLabel("未执行试听")
+        self.preview_metric_source_integrated_value = QLabel("-Inf")
+        self.preview_metric_source_true_peak_value = QLabel("-Inf")
+        self.preview_metric_context_label = QLabel("未执行试听")
+        self.preview_metric_integrated_value = QLabel("-Inf")
+        self.preview_metric_true_peak_value = QLabel("-Inf")
+        self.preview_transport_play_button = QToolButton()
+        self.preview_transport_pause_button = QToolButton()
+        self.preview_transport_restart_button = QToolButton()
+        self.preview_transport_stop_button = QToolButton()
+        self.open_loudness_view_button = QToolButton()
         self.hold_peaks_check = QCheckBox("保持峰值")
         self.clear_meter_button = QPushButton("清零")
         self._held_true_peak_db: float | None = None
@@ -765,14 +789,71 @@ class MainWindow(QMainWindow):
         combo_layout.addRow("最大步数", self.combo_max_step_spin)
 
         self.loudness_group = QGroupBox("最近试听")
-        loudness_layout = QFormLayout(self.loudness_group)
-        loudness_layout.addRow("监视器", self.open_loudness_view_button)
-        loudness_layout.addRow("源文件", self.audio_meter_summary_source_context_label)
-        loudness_layout.addRow("源 Integrated", self.audio_meter_summary_source_integrated_value)
-        loudness_layout.addRow("源 True Peak", self.audio_meter_summary_source_true_peak_value)
-        loudness_layout.addRow("事件后", self.audio_meter_summary_context_label)
-        loudness_layout.addRow("后 Integrated", self.audio_meter_summary_integrated_value)
-        loudness_layout.addRow("后 True Peak", self.audio_meter_summary_true_peak_value)
+        self.loudness_group.setMinimumWidth(380)
+        self.loudness_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        loudness_group_layout = QVBoxLayout(self.loudness_group)
+        loudness_group_layout.setContentsMargins(10, 8, 10, 8)
+        loudness_group_layout.setSpacing(10)
+        self.preview_transport_header.setObjectName("PreviewTransportHeader")
+        preview_transport_header_layout = QHBoxLayout(self.preview_transport_header)
+        preview_transport_header_layout.setContentsMargins(0, 0, 0, 0)
+        preview_transport_header_layout.setSpacing(8)
+        self.preview_transport_title_label.setProperty("role", "previewTransportTitle")
+        self.preview_transport_status_chip.setProperty("role", "previewTransportStatusChip")
+        self.preview_transport_status_chip.setProperty("transportState", "idle")
+        preview_transport_header_layout.addWidget(self.preview_transport_title_label)
+        preview_transport_header_layout.addStretch(1)
+        preview_transport_header_layout.addWidget(self.preview_transport_status_chip, 0, Qt.AlignmentFlag.AlignTop)
+        self.preview_transport_detail_label.setProperty("role", "previewTransportDetail")
+        self.preview_transport_title_label.setWordWrap(True)
+        self.preview_transport_title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.preview_transport_detail_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.preview_transport_detail_label.setWordWrap(True)
+        self.preview_transport_frame.setObjectName("PreviewTransportFrame")
+        self.preview_transport_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        preview_transport_layout = QHBoxLayout(self.preview_transport_frame)
+        preview_transport_layout.setContentsMargins(6, 6, 6, 6)
+        preview_transport_layout.setSpacing(6)
+        preview_transport_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for button, kind in [
+            (self.preview_transport_play_button, "primary"),
+            (self.preview_transport_pause_button, "secondary"),
+            (self.preview_transport_restart_button, "secondary"),
+            (self.preview_transport_stop_button, "danger"),
+            (self.open_loudness_view_button, "monitor"),
+        ]:
+            button.setProperty("role", "previewTransportButton")
+            button.setProperty("transportKind", kind)
+            button.setProperty("transportState", "idle")
+            preview_transport_layout.addWidget(button)
+        self.preview_transport_metrics_frame.setObjectName("PreviewMetricsFrame")
+        self.preview_transport_metrics_frame.setMinimumWidth(360)
+        preview_metrics_layout = QHBoxLayout(self.preview_transport_metrics_frame)
+        preview_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        preview_metrics_layout.setSpacing(8)
+        preview_metrics_layout.setStretch(0, 1)
+        preview_metrics_layout.setStretch(1, 1)
+        preview_metrics_layout.addWidget(
+            self._build_preview_metric_column(
+                "源文件",
+                self.preview_metric_source_context_label,
+                self.preview_metric_source_integrated_value,
+                self.preview_metric_source_true_peak_value,
+            )
+        )
+        preview_metrics_layout.addWidget(
+            self._build_preview_metric_column(
+                "事件后",
+                self.preview_metric_context_label,
+                self.preview_metric_integrated_value,
+                self.preview_metric_true_peak_value,
+            )
+        )
+        loudness_group_layout.addWidget(self.preview_transport_header)
+        loudness_group_layout.addWidget(self.preview_transport_detail_label)
+        loudness_group_layout.addWidget(self.preview_transport_frame)
+        loudness_group_layout.addWidget(self.preview_transport_metrics_frame)
+        self.set_preview_transport_state("idle", has_target=False, can_replay=False)
 
         self.notes_group = QGroupBox("备注")
         notes_layout = QVBoxLayout(self.notes_group)
@@ -825,6 +906,7 @@ class MainWindow(QMainWindow):
         bus_validation_layout.setContentsMargins(12, 10, 12, 10)
         bus_validation_layout.addWidget(self.project_bus_export_label)
         self.inline_bus_content = QSplitter()
+        self.inline_bus_content.setObjectName("InlineBusContentSplitter")
         self.inline_bus_content.setOrientation(Qt.Orientation.Horizontal)
         self.inline_bus_content.setChildrenCollapsible(False)
         self.inline_bus_content.addWidget(self.bus_routing_group)
@@ -840,12 +922,13 @@ class MainWindow(QMainWindow):
         inline_bus_layout.addWidget(self.inline_bus_content)
 
         self.audio_top_splitter = QSplitter()
+        self.audio_top_splitter.setObjectName("AudioTopSplitter")
         self.audio_top_splitter.setOrientation(Qt.Orientation.Horizontal)
         self.audio_top_splitter.setChildrenCollapsible(False)
         self.audio_top_splitter.addWidget(self.modulation_group)
         self.audio_top_splitter.addWidget(self.loudness_group)
-        self.audio_top_splitter.setStretchFactor(0, 3)
-        self.audio_top_splitter.setStretchFactor(1, 2)
+        self.audio_top_splitter.setStretchFactor(0, 2)
+        self.audio_top_splitter.setStretchFactor(1, 3)
 
         self.generation_settings_group = QGroupBox("生成设置")
         generation_settings_layout = QFormLayout(self.generation_settings_group)
@@ -921,6 +1004,7 @@ class MainWindow(QMainWindow):
         project_right_layout.addStretch(1)
 
         self.project_splitter = QSplitter()
+        self.project_splitter.setObjectName("ProjectSplitter")
         self.project_splitter.setOrientation(Qt.Orientation.Horizontal)
         self.project_splitter.setChildrenCollapsible(False)
         self.project_splitter.addWidget(self.bus_browser_group)
@@ -1039,13 +1123,18 @@ class MainWindow(QMainWindow):
         build_preview_layout.addWidget(self.build_preview_output)
 
         self.content_top_splitter = QSplitter()
+        self.content_top_splitter.setObjectName("ContentTopSplitter")
         self.content_top_splitter.setOrientation(Qt.Orientation.Horizontal)
         self.content_top_splitter.setChildrenCollapsible(False)
         self.content_top_splitter.addWidget(clip_list_group)
         self.content_top_splitter.addWidget(clip_detail_group)
         self._set_content_top_splitter_sizes(self._default_content_top_splitter_sizes)
 
-        batch_page = self._build_two_column_page([clip_tools_group], [batch_guide_group])
+        batch_page = self._build_two_column_page(
+            [clip_tools_group],
+            [batch_guide_group],
+            splitter_name="ResourceBatchPageSplitter",
+        )
 
         preview_page = QWidget()
         preview_layout = QVBoxLayout(preview_page)
@@ -1137,7 +1226,9 @@ class MainWindow(QMainWindow):
 
         self._workspace_mode_pages: dict[str, QWidget] = {}
         self._workspace_mode_hosts: dict[str, QVBoxLayout] = {}
+        self._workspace_preview_hosts: dict[str, QVBoxLayout] = {}
         self._workspace_shared_surfaces: dict[str, QWidget] = {
+            "recent_preview": self.loudness_group,
             "results": self.results_center_panel,
             "validation": self.validation_workspace,
         }
@@ -1151,9 +1242,10 @@ class MainWindow(QMainWindow):
             ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
             ("results", "结果中心", "统一回看日志、构建输出和响度扫描；校验修复仍在专门工作区完成。"),
         ]:
-            page, host_layout = self._build_workspace_mode_page(title, description)
+            page, host_layout, preview_host_layout = self._build_workspace_mode_page(mode, title, description)
             self._workspace_mode_pages[mode] = page
             self._workspace_mode_hosts[mode] = host_layout
+            self._workspace_preview_hosts[mode] = preview_host_layout
             self.workspace_mode_stack.addWidget(page)
         self._workspace_mode_hosts["events"].addWidget(self.events_workspace)
         self._workspace_mode_hosts["resources"].addWidget(self.resources_workspace)
@@ -1170,6 +1262,7 @@ class MainWindow(QMainWindow):
         workspace_status_layout.addStretch(1)
 
         self.main_splitter = QSplitter()
+        self.main_splitter.setObjectName("MainSplitter")
         self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.setHandleWidth(10)
@@ -1203,6 +1296,7 @@ class MainWindow(QMainWindow):
         self._set_main_splitter_sizes(self._default_main_splitter_sizes)
 
         self.workspace_splitter = QSplitter()
+        self.workspace_splitter.setObjectName("WorkspaceSplitter")
         self.workspace_splitter.setOrientation(Qt.Orientation.Vertical)
         self.workspace_splitter.setChildrenCollapsible(False)
         self.workspace_splitter.setHandleWidth(10)
@@ -1232,6 +1326,37 @@ class MainWindow(QMainWindow):
             splitter.setOpaqueResize(True)
             if splitter.handleWidth() < 10:
                 splitter.setHandleWidth(10)
+
+    def _named_splitter_sizes(self) -> dict[str, list[int]]:
+        splitter_sizes: dict[str, list[int]] = {}
+        for splitter in self.findChildren(QSplitter):
+            name = splitter.objectName().strip()
+            if not name:
+                continue
+            if name == "MainSplitter":
+                splitter_sizes[name] = self._effective_main_splitter_sizes()
+            else:
+                splitter_sizes[name] = [int(value) for value in splitter.sizes()]
+        return splitter_sizes
+
+    def _set_named_splitter_sizes(self, splitter_sizes: object) -> None:
+        pending: dict[str, list[int]] = {}
+        if isinstance(splitter_sizes, dict):
+            for name, values in splitter_sizes.items():
+                if not isinstance(name, str) or not isinstance(values, list) or len(values) < 2:
+                    continue
+                pending[name] = [int(value) for value in values]
+        self._pending_named_splitter_sizes = pending
+        if pending and self.isVisible():
+            self._schedule_layout_flush()
+
+    def _encode_window_geometry(self, widget: QWidget) -> str:
+        return bytes(widget.saveGeometry().toBase64()).decode("ascii")
+
+    def _restore_window_geometry(self, widget: QWidget, encoded_geometry: object) -> None:
+        if not isinstance(encoded_geometry, str) or not encoded_geometry:
+            return
+        widget.restoreGeometry(QByteArray.fromBase64(encoded_geometry.encode("ascii")))
 
     def _build_top_app_bar(self) -> QFrame:
         bar = QFrame()
@@ -1302,7 +1427,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(primary_actions)
         return bar
 
-    def _build_workspace_mode_page(self, title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
+    def _build_workspace_mode_page(self, mode: str, title: str, description: str) -> tuple[QWidget, QVBoxLayout, QVBoxLayout]:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1312,8 +1437,27 @@ class MainWindow(QMainWindow):
         host_layout = QVBoxLayout(host)
         host_layout.setContentsMargins(0, 0, 0, 0)
         host_layout.setSpacing(0)
-        layout.addWidget(host, 1)
-        return page, host_layout
+
+        preview_host = QWidget()
+        preview_host.setObjectName("WorkspacePreviewHost")
+        preview_host.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        preview_host_layout = QVBoxLayout(preview_host)
+        preview_host_layout.setContentsMargins(0, 0, 0, 0)
+        preview_host_layout.setSpacing(0)
+        preview_host_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        workspace_splitter = QSplitter()
+        workspace_splitter.setObjectName(f"WorkspaceModeSurfaceSplitter_{mode}")
+        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
+        workspace_splitter.setChildrenCollapsible(False)
+        workspace_splitter.setHandleWidth(12)
+        workspace_splitter.addWidget(host)
+        workspace_splitter.addWidget(preview_host)
+        workspace_splitter.setStretchFactor(0, 6)
+        workspace_splitter.setStretchFactor(1, 2)
+
+        layout.addWidget(workspace_splitter, 1)
+        return page, host_layout, preview_host_layout
 
     def _build_mode_surface_card(self, title: str, description: str, *, role: str = "modeCardDescription") -> QFrame:
         card = QFrame()
@@ -1622,7 +1766,8 @@ class MainWindow(QMainWindow):
         self.events_workspace_tabs = QTabWidget()
         design_page = self._build_two_column_page(
             [self.event_general_group, self.event_behavior_group, self.notes_group],
-            [self.modulation_group, self.combo_group, self.loudness_group],
+            [self.modulation_group, self.combo_group],
+            splitter_name="EventDesignPageSplitter",
         )
         self.event_design_scroll = self._wrap_scrollable_page(design_page)
         self.events_workspace_tabs.addTab(self.event_design_scroll, load_app_icon("event"), "事件参数")
@@ -1630,6 +1775,7 @@ class MainWindow(QMainWindow):
 
         overview_panel = self._build_event_overview_panel()
         event_splitter = QSplitter()
+        event_splitter.setObjectName("EventsWorkspaceSplitter")
         event_splitter.setOrientation(Qt.Orientation.Horizontal)
         event_splitter.setChildrenCollapsible(False)
         event_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
@@ -1703,6 +1849,7 @@ class MainWindow(QMainWindow):
     def _build_resources_workspace(self) -> QWidget:
         overview_panel = self._build_resources_overview_panel()
         workspace_splitter = QSplitter()
+        workspace_splitter.setObjectName("ResourcesWorkspaceSplitter")
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
         workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
@@ -1753,6 +1900,7 @@ class MainWindow(QMainWindow):
     def _build_buses_workspace(self) -> QWidget:
         overview_panel = self._build_buses_overview_panel()
         bus_surface = QSplitter()
+        bus_surface.setObjectName("BusesSurfaceSplitter")
         bus_surface.setOrientation(Qt.Orientation.Vertical)
         bus_surface.setChildrenCollapsible(False)
         bus_surface.addWidget(self.inline_bus_group)
@@ -1761,6 +1909,7 @@ class MainWindow(QMainWindow):
         bus_surface.setStretchFactor(1, 3)
 
         workspace_splitter = QSplitter()
+        workspace_splitter.setObjectName("BusesWorkspaceSplitter")
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
         workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
@@ -1825,6 +1974,7 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(build_execute_row)
 
         workspace_splitter = QSplitter()
+        workspace_splitter.setObjectName("BuildWorkspaceSplitter")
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
         workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
@@ -1888,10 +2038,18 @@ class MainWindow(QMainWindow):
         filter_layout.addWidget(self.validation_locate_button)
 
         workspace_splitter = QSplitter()
+        workspace_splitter.setObjectName("ValidationWorkspaceSplitter")
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
         workspace_splitter.addWidget(self._wrap_overview_scroll(self._build_validation_overview_panel(filter_card)))
-        workspace_splitter.addWidget(self._build_report_center_page(self.validation_summary_label, self.validation_issue_list, self.validation_report_output))
+        workspace_splitter.addWidget(
+            self._build_report_center_page(
+                self.validation_summary_label,
+                self.validation_issue_list,
+                self.validation_report_output,
+                splitter_name="ValidationReportCenterSplitter",
+            )
+        )
         workspace_splitter.setStretchFactor(0, 2)
         workspace_splitter.setStretchFactor(1, 5)
 
@@ -1988,6 +2146,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.addWidget(self._build_mode_surface_card("日志中心", "集中查看运行日志、导入反馈和交付链路输出；当没有问题时，这里主要承担追踪和回溯职责。"))
         results_splitter = QSplitter()
+        results_splitter.setObjectName("LogResultsSplitter")
         results_splitter.setOrientation(Qt.Orientation.Horizontal)
         results_splitter.setChildrenCollapsible(False)
         results_splitter.addWidget(
@@ -2047,6 +2206,7 @@ class MainWindow(QMainWindow):
         section_hint.setWordWrap(True)
         sections_layout.addWidget(section_hint)
         section_splitter = QSplitter()
+        section_splitter.setObjectName("DiagnosticSectionsSplitter")
         section_splitter.setOrientation(Qt.Orientation.Horizontal)
         section_splitter.setChildrenCollapsible(False)
         section_splitter.addWidget(self.diagnostic_section_list)
@@ -2087,9 +2247,17 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.addWidget(self._build_mode_surface_card("构建结果", "将构建摘要、问题定位和完整输出固定为交付专页，不再和其他结果共享同一组 tab。"))
         top_splitter = QSplitter()
+        top_splitter.setObjectName("BuildResultsSplitter")
         top_splitter.setOrientation(Qt.Orientation.Horizontal)
         top_splitter.setChildrenCollapsible(False)
-        top_splitter.addWidget(self._build_report_center_page(self.build_summary_label, self.build_issue_list, self.build_report_output))
+        top_splitter.addWidget(
+            self._build_report_center_page(
+                self.build_summary_label,
+                self.build_issue_list,
+                self.build_report_output,
+                splitter_name="BuildReportCenterSplitter",
+            )
+        )
         preview_group = QGroupBox("交付预览")
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.addWidget(self.build_preview_output)
@@ -2107,6 +2275,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.addWidget(self._build_mode_surface_card("响度结果", "把超标项、条目细节和扫描输出固定成独立结果页，便于与事件修订来回切换。"))
         loudness_splitter = QSplitter()
+        loudness_splitter.setObjectName("LoudnessResultsSplitter")
         loudness_splitter.setOrientation(Qt.Orientation.Horizontal)
         loudness_splitter.setChildrenCollapsible(False)
         loudness_splitter.addWidget(
@@ -2118,7 +2287,14 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        loudness_splitter.addWidget(self._build_report_center_page(self.loudness_summary_label, self.loudness_issue_list, self.loudness_report_output))
+        loudness_splitter.addWidget(
+            self._build_report_center_page(
+                self.loudness_summary_label,
+                self.loudness_issue_list,
+                self.loudness_report_output,
+                splitter_name="LoudnessReportCenterSplitter",
+            )
+        )
         loudness_splitter.setStretchFactor(0, 2)
         loudness_splitter.setStretchFactor(1, 5)
         layout.addWidget(loudness_splitter, 1)
@@ -2154,6 +2330,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
         layout.addWidget(self._build_panel_header("结果中心", "log"))
         workspace_splitter = QSplitter()
+        workspace_splitter.setObjectName("ResultsCenterSplitter")
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
         workspace_splitter.setChildrenCollapsible(False)
         right_panel = QWidget()
@@ -2413,20 +2590,28 @@ class MainWindow(QMainWindow):
         return panel
 
     def _mount_workspace_surface(self, mode: str) -> None:
+        surface_mounts: list[tuple[str, dict[str, QVBoxLayout]]] = []
+        preview_host_layout = self._workspace_preview_hosts.get(mode)
+        if preview_host_layout is not None:
+            surface_mounts.append(("recent_preview", self._workspace_preview_hosts))
         surface_key = {
             "validation": "validation",
             "results": "results",
         }.get(mode)
-        if surface_key is None:
-            return
-        surface = self._workspace_shared_surfaces[surface_key]
-        host_layout = self._workspace_mode_hosts.get(mode)
-        if host_layout is None:
-            return
-        if host_layout.indexOf(surface) >= 0:
-            return
-        surface.setParent(None)
-        host_layout.addWidget(surface)
+        if surface_key is not None:
+            surface_mounts.append((surface_key, self._workspace_mode_hosts))
+        for mounted_surface_key, host_map in surface_mounts:
+            surface = self._workspace_shared_surfaces[mounted_surface_key]
+            host_layout = host_map.get(mode)
+            if host_layout is None:
+                continue
+            if host_layout.indexOf(surface) >= 0:
+                continue
+            surface.setParent(None)
+            if mounted_surface_key == "recent_preview":
+                host_layout.addWidget(surface, 0, Qt.AlignmentFlag.AlignTop)
+                continue
+            host_layout.addWidget(surface)
 
     def _reset_validation_filters(self) -> None:
         self.validation_filter_severity_combo.setCurrentIndex(0)
@@ -3129,6 +3314,8 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         self._apply_splitter_resize_defaults()
         self._schedule_layout_flush()
+        if self._explorer_detached and not self.explorer_window.isVisible():
+            QTimer.singleShot(0, self.show_detached_explorer)
 
     def _schedule_layout_flush(self) -> None:
         if self._pending_layout_flush:
@@ -3151,6 +3338,25 @@ class MainWindow(QMainWindow):
             sizes = [int(value) for value in self._pending_content_top_splitter_sizes]
             self.content_top_splitter.setSizes(sizes)
             self._pending_content_top_splitter_sizes = None
+        if self._pending_named_splitter_sizes:
+            pending = dict(self._pending_named_splitter_sizes)
+            self._pending_named_splitter_sizes = {}
+            for name, sizes in pending.items():
+                if name == "WorkspaceSplitter":
+                    self.workspace_splitter.setSizes(self._normalize_workspace_splitter_sizes(sizes))
+                    continue
+                if name == "MainSplitter":
+                    if self._explorer_detached:
+                        self._last_docked_main_splitter_sizes = [int(value) for value in sizes]
+                    else:
+                        self.main_splitter.setSizes([int(value) for value in sizes])
+                    continue
+                if name == "ContentTopSplitter":
+                    self.content_top_splitter.setSizes([int(value) for value in sizes])
+                    continue
+                splitter = self.findChild(QSplitter, name)
+                if splitter is not None:
+                    splitter.setSizes([int(value) for value in sizes])
 
     def _normalize_workspace_splitter_sizes(self, sizes: list[int]) -> list[int]:
         normalized = [int(value) for value in sizes]
@@ -3376,7 +3582,6 @@ class MainWindow(QMainWindow):
         if event.clips and not self.clip_table.selected_clip_ids():
             self.clip_table.selectRow(0)
         self._sync_clip_detail_from_table()
-        self.clear_preview_audio_metrics("切换对象后等待新的试听结果。")
         self._loading_event = False
 
     def _sync_event_mode_ui(self) -> None:
@@ -3734,7 +3939,14 @@ class MainWindow(QMainWindow):
         self._update_diagnostic_snapshot_labels()
         self._update_activity_report_snapshot_labels()
 
-    def _build_report_center_page(self, summary_label: QLabel, issue_list: QListWidget, detail_output: QPlainTextEdit) -> QWidget:
+    def _build_report_center_page(
+        self,
+        summary_label: QLabel,
+        issue_list: QListWidget,
+        detail_output: QPlainTextEdit,
+        *,
+        splitter_name: str,
+    ) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -3742,6 +3954,7 @@ class MainWindow(QMainWindow):
         summary_label.setWordWrap(True)
         issue_list.setAlternatingRowColors(True)
         splitter = QSplitter()
+        splitter.setObjectName(splitter_name)
         splitter.setOrientation(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(issue_list)
@@ -3839,6 +4052,78 @@ class MainWindow(QMainWindow):
         self.editor_tabs.setCurrentIndex(2)
         self.events_workspace_tabs.setCurrentIndex(1)
         self._update_object_bus_status()
+
+    def _toggle_preview_transport_pause(self) -> None:
+        if self._preview_transport_state == "paused":
+            self.resumePreviewRequested.emit()
+            return
+        self.pausePreviewRequested.emit()
+
+    def set_recent_preview_session_summary(self, title: str, detail: str) -> None:
+        normalized_title = title.strip() or "最近试听"
+        normalized_detail = detail.strip() or "切换事件、资源或流程时，会保留最近一次试听会话。"
+        self.preview_transport_title_label.setText(normalized_title)
+        self.preview_transport_title_label.setToolTip(normalized_title)
+        self.preview_transport_detail_label.setText(normalized_detail)
+        self.preview_transport_detail_label.setToolTip(normalized_detail)
+
+    def _refresh_preview_transport_style(self) -> None:
+        for widget in [
+            self.preview_transport_header,
+            self.preview_transport_frame,
+            self.preview_transport_metrics_frame,
+            self.preview_transport_title_label,
+            self.preview_transport_status_chip,
+            self.preview_transport_detail_label,
+            self.preview_transport_play_button,
+            self.preview_transport_pause_button,
+            self.preview_transport_restart_button,
+            self.preview_transport_stop_button,
+            self.open_loudness_view_button,
+        ]:
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+            widget.update()
+
+    def set_preview_transport_state(self, state: str, *, has_target: bool, can_replay: bool) -> None:
+        normalized_state = state if state in {"idle", "playing", "paused"} else "idle"
+        self._preview_transport_state = normalized_state
+        self._preview_transport_has_target = has_target
+        self._preview_transport_can_replay = can_replay
+        has_playback = normalized_state in {"playing", "paused"}
+        status_text = {
+            "playing": "播放中",
+            "paused": "已暂停",
+            "idle": "可重播" if can_replay else ("可试听" if has_target else "待命"),
+        }[normalized_state]
+        self.preview_transport_play_button.setEnabled(has_target or can_replay)
+        self.preview_transport_pause_button.setEnabled(has_playback)
+        self.preview_transport_restart_button.setEnabled(can_replay)
+        self.preview_transport_stop_button.setEnabled(has_playback)
+        self.preview_transport_pause_button.setIcon(load_app_icon("play" if normalized_state == "paused" else "pause"))
+        self.preview_transport_status_chip.setText(status_text)
+        self.preview_transport_status_chip.setToolTip(status_text)
+        self.preview_transport_status_chip.setProperty("transportState", normalized_state)
+        if can_replay:
+            self.preview_transport_play_button.setToolTip("播放最近试听")
+        elif has_target:
+            self.preview_transport_play_button.setToolTip("试听当前对象")
+        else:
+            self.preview_transport_play_button.setToolTip("当前没有可播放的试听")
+        self.preview_transport_pause_button.setToolTip("继续试听" if normalized_state == "paused" else "暂停试听")
+        self.preview_transport_restart_button.setToolTip("从头播放最近一次试听")
+        self.preview_transport_stop_button.setToolTip("停止当前试听")
+        self.open_loudness_view_button.setToolTip("打开响度监视器")
+        self.preview_transport_frame.setProperty("transportState", normalized_state)
+        self.preview_transport_play_button.setProperty("transportState", "active" if normalized_state == "playing" else "idle")
+        self.preview_transport_pause_button.setProperty("transportState", "active" if normalized_state == "paused" else "idle")
+        self.preview_transport_restart_button.setProperty(
+            "transportState",
+            "available" if can_replay else "idle",
+        )
+        self.preview_transport_stop_button.setProperty("transportState", "available" if has_playback else "idle")
+        self.open_loudness_view_button.setProperty("transportState", "idle")
+        self._refresh_preview_transport_style()
 
     def set_active_contents_category(self, category: str) -> None:
         if category == "生成":
@@ -4139,7 +4424,13 @@ class MainWindow(QMainWindow):
             return
         self.clipEdited.emit(clip_id, field_name, raw_value)
 
-    def _build_two_column_page(self, left_widgets: list[QWidget], right_widgets: list[QWidget]) -> QWidget:
+    def _build_two_column_page(
+        self,
+        left_widgets: list[QWidget],
+        right_widgets: list[QWidget],
+        *,
+        splitter_name: str | None = None,
+    ) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -4156,6 +4447,8 @@ class MainWindow(QMainWindow):
         right_container = QWidget()
         right_container.setLayout(right_column)
         splitter = QSplitter()
+        if splitter_name:
+            splitter.setObjectName(splitter_name)
         splitter.setOrientation(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(left_container)
@@ -4219,6 +4512,55 @@ class MainWindow(QMainWindow):
         layout.addWidget(unit_label)
         layout.addStretch(1)
         return row
+
+    def _build_preview_metric_column(
+        self,
+        heading: str,
+        context_label: QLabel,
+        integrated_label: QLabel,
+        true_peak_label: QLabel,
+    ) -> QWidget:
+        column = QFrame()
+        column.setObjectName("PreviewMetricColumn")
+        column.setMinimumWidth(172)
+        column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
+
+        heading_label = QLabel(heading)
+        heading_label.setProperty("role", "previewMetricHeading")
+        context_label.setProperty("role", "previewMetricContext")
+        context_label.setWordWrap(True)
+        context_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        integrated_caption = QLabel("Integrated")
+        integrated_caption.setProperty("role", "previewMetricCaption")
+        integrated_label.setProperty("role", "previewMetricValue")
+        integrated_label.setMinimumWidth(56)
+        integrated_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        true_peak_caption = QLabel("True Peak")
+        true_peak_caption.setProperty("role", "previewMetricCaption")
+        true_peak_label.setProperty("role", "previewMetricValue")
+        true_peak_label.setMinimumWidth(56)
+        true_peak_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(heading_label)
+        layout.addWidget(context_label)
+
+        integrated_row = QHBoxLayout()
+        integrated_row.setContentsMargins(0, 0, 0, 0)
+        integrated_row.addWidget(integrated_caption)
+        integrated_row.addStretch(1)
+        integrated_row.addWidget(integrated_label)
+        layout.addLayout(integrated_row)
+
+        true_peak_row = QHBoxLayout()
+        true_peak_row.setContentsMargins(0, 0, 0, 0)
+        true_peak_row.addWidget(true_peak_caption)
+        true_peak_row.addStretch(1)
+        true_peak_row.addWidget(true_peak_label)
+        layout.addLayout(true_peak_row)
+        return column
 
     def _build_channel_meter(self, channel_name: str, meter_bar: QProgressBar, peak_label: QLabel, rms_label: QLabel) -> QWidget:
         container = QFrame()
@@ -4430,34 +4772,64 @@ class MainWindow(QMainWindow):
             "inspector_splitter_sizes": None,
             "content_top_splitter_sizes": self.content_top_splitter.sizes(),
             "active_contents_tab": self.contents_tabs.currentIndex(),
+            "workspace_mode": self._active_workspace_mode,
+            "property_tab": self.property_tabs.currentIndex(),
+            "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
+            "contents_tab": self.contents_tabs.currentIndex(),
+            "report_tab": self._active_report_index,
+            "explorer_detached": self._explorer_detached,
+            "window_geometry": self._encode_window_geometry(self),
+            "explorer_window_geometry": self._encode_window_geometry(self.explorer_window),
+            "settings_dialog_geometry": self._encode_window_geometry(self.settings_dialog),
+            "named_splitter_sizes": self._named_splitter_sizes(),
             "event_import_template": self.current_event_import_template_defaults(),
         }
 
     def apply_ui_preferences(self, preferences: dict[str, object]) -> None:
         ui_scale = float(preferences.get("ui_scale", 1.0) or 1.0)
         self.set_ui_scale(ui_scale)
-        workspace_sizes = preferences.get("workspace_splitter_sizes")
-        main_sizes = preferences.get("main_splitter_sizes")
-        active_editor_tab = preferences.get("active_editor_tab")
-        content_top_sizes = preferences.get("content_top_splitter_sizes")
-        active_contents_tab = preferences.get("active_contents_tab")
+
+        explorer_detached = bool(preferences.get("explorer_detached", False))
+        if explorer_detached and not self._explorer_detached:
+            self.detach_explorer_panel()
+        elif not explorer_detached and self._explorer_detached:
+            self.attach_explorer_panel()
+
+        self._restore_window_geometry(self, preferences.get("window_geometry"))
+        self._restore_window_geometry(self.explorer_window, preferences.get("explorer_window_geometry"))
+        self._restore_window_geometry(self.settings_dialog, preferences.get("settings_dialog_geometry"))
+
         event_import_template = preferences.get("event_import_template")
-        if isinstance(workspace_sizes, list) and len(workspace_sizes) == 2:
-            self._set_workspace_splitter_sizes([int(value) for value in workspace_sizes])
-        if isinstance(main_sizes, list) and len(main_sizes) == 2:
-            self._set_main_splitter_sizes([int(value) for value in main_sizes])
-        if isinstance(active_editor_tab, int) and 0 <= active_editor_tab < self.editor_tabs.count():
-            self.editor_tabs.setCurrentIndex(active_editor_tab)
-        if isinstance(content_top_sizes, list) and len(content_top_sizes) == 2:
-            self._set_content_top_splitter_sizes([int(value) for value in content_top_sizes])
-        if isinstance(active_contents_tab, int) and 0 <= active_contents_tab < self.contents_tabs.count():
-            self.contents_tabs.setCurrentIndex(active_contents_tab)
         if isinstance(event_import_template, dict):
             self._event_import_template_defaults = {
                 "bus_name": str(event_import_template.get("bus_name", "")),
                 "asset_prefix": str(event_import_template.get("asset_prefix", "")),
                 "tags": [str(tag) for tag in event_import_template.get("tags", [])],
             }
+
+        navigation_state = {
+            "workspace_mode": preferences.get("workspace_mode", self._active_workspace_mode),
+            "editor_tab": preferences.get("active_editor_tab", self.editor_tabs.currentIndex()),
+            "property_tab": preferences.get("property_tab", self.property_tabs.currentIndex()),
+            "events_workspace_tab": preferences.get("events_workspace_tab", self.events_workspace_tabs.currentIndex()),
+            "contents_tab": preferences.get("contents_tab", preferences.get("active_contents_tab", self.contents_tabs.currentIndex())),
+            "report_tab": preferences.get("report_tab", self._active_report_index),
+            "workspace_splitter_sizes": preferences.get("workspace_splitter_sizes"),
+            "main_splitter_sizes": preferences.get("main_splitter_sizes"),
+            "content_top_splitter_sizes": preferences.get("content_top_splitter_sizes"),
+        }
+        self.apply_navigation_state(navigation_state)
+
+        named_splitter_sizes = preferences.get("named_splitter_sizes")
+        if not isinstance(named_splitter_sizes, dict):
+            named_splitter_sizes = {}
+        if "WorkspaceSplitter" not in named_splitter_sizes and isinstance(preferences.get("workspace_splitter_sizes"), list):
+            named_splitter_sizes["WorkspaceSplitter"] = [int(value) for value in preferences["workspace_splitter_sizes"]]
+        if "MainSplitter" not in named_splitter_sizes and isinstance(preferences.get("main_splitter_sizes"), list):
+            named_splitter_sizes["MainSplitter"] = [int(value) for value in preferences["main_splitter_sizes"]]
+        if "ContentTopSplitter" not in named_splitter_sizes and isinstance(preferences.get("content_top_splitter_sizes"), list):
+            named_splitter_sizes["ContentTopSplitter"] = [int(value) for value in preferences["content_top_splitter_sizes"]]
+        self._set_named_splitter_sizes(named_splitter_sizes)
         self._sync_event_import_template_controls()
 
     def set_dirty_state(self, is_dirty: bool) -> None:
@@ -5701,6 +6073,8 @@ class MainWindow(QMainWindow):
         self.audio_meter_context_label.setText(f"片段 {clip_id} | 资源 {asset_key}")
         self.audio_meter_summary_source_context_label.setText(f"片段 {clip_id}")
         self.audio_meter_summary_context_label.setText(f"片段 {clip_id}")
+        self.preview_metric_source_context_label.setText(f"片段 {clip_id}")
+        self.preview_metric_context_label.setText(f"片段 {clip_id}")
         self.audio_meter_short_term_value.setText(self._format_meter_value(processed.short_term_lufs))
         self.audio_meter_short_term_max_value.setText(self._format_meter_value(processed.short_term_max_lufs))
         self.audio_meter_integrated_value.setText(self._format_meter_value(processed.integrated_lufs))
@@ -5712,6 +6086,10 @@ class MainWindow(QMainWindow):
         self.audio_meter_summary_source_true_peak_value.setText(self._format_meter_value(source.true_peak_db))
         self.audio_meter_summary_integrated_value.setText(self._format_meter_value(processed.integrated_lufs))
         self.audio_meter_summary_true_peak_value.setText(self._format_meter_value(true_peak_db))
+        self.preview_metric_source_integrated_value.setText(self._format_meter_value(source.integrated_lufs))
+        self.preview_metric_source_true_peak_value.setText(self._format_meter_value(source.true_peak_db))
+        self.preview_metric_integrated_value.setText(self._format_meter_value(processed.integrated_lufs))
+        self.preview_metric_true_peak_value.setText(self._format_meter_value(true_peak_db))
         self.audio_meter_left_peak_value.setText(self._format_meter_value(left_peak_db))
         self.audio_meter_left_rms_value.setText(self._format_meter_value(processed.left_rms_db))
         self.audio_meter_right_peak_value.setText(self._format_meter_value(right_peak_db))
@@ -5728,6 +6106,8 @@ class MainWindow(QMainWindow):
         self.audio_meter_context_label.setText(reason)
         self.audio_meter_summary_source_context_label.setText(reason)
         self.audio_meter_summary_context_label.setText(reason)
+        self.preview_metric_source_context_label.setText(reason)
+        self.preview_metric_context_label.setText(reason)
         for label in [
             self.audio_meter_short_term_value,
             self.audio_meter_short_term_max_value,
@@ -5745,6 +6125,10 @@ class MainWindow(QMainWindow):
         self.audio_meter_summary_source_true_peak_value.setText("-Inf")
         self.audio_meter_summary_integrated_value.setText("-Inf")
         self.audio_meter_summary_true_peak_value.setText("-Inf")
+        self.preview_metric_source_integrated_value.setText("-Inf")
+        self.preview_metric_source_true_peak_value.setText("-Inf")
+        self.preview_metric_integrated_value.setText("-Inf")
+        self.preview_metric_true_peak_value.setText("-Inf")
         self.audio_meter_lra_value.setText("0.0")
         self.audio_meter_left_bar.setValue(0)
         self.audio_meter_right_bar.setValue(0)
@@ -5757,6 +6141,7 @@ class MainWindow(QMainWindow):
         self._held_right_peak_db = None
         self.audio_meter_true_peak_value.setText("-Inf")
         self.audio_meter_summary_true_peak_value.setText("-Inf")
+        self.preview_metric_true_peak_value.setText("-Inf")
         self.audio_meter_left_peak_value.setText("-Inf")
         self.audio_meter_right_peak_value.setText("-Inf")
         self.audio_meter_left_bar.setValue(0)
@@ -5837,6 +6222,10 @@ class MainWindow(QMainWindow):
         self.validation_revalidate_button.clicked.connect(self.validate_button.click)
         self.validation_locate_button.clicked.connect(self._locate_selected_validation_issue)
         self.open_loudness_view_button.clicked.connect(self.show_loudness_view)
+        self.preview_transport_play_button.clicked.connect(self.previewTransportPlayRequested.emit)
+        self.preview_transport_pause_button.clicked.connect(self._toggle_preview_transport_pause)
+        self.preview_transport_restart_button.clicked.connect(self.restartPreviewRequested.emit)
+        self.preview_transport_stop_button.clicked.connect(self.stopPreviewEventRequested.emit)
         self.events_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.contents_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.clear_meter_button.clicked.connect(self.clear_peak_hold)
@@ -6278,7 +6667,6 @@ class MainWindow(QMainWindow):
             (self.import_clips_button, load_app_icon("content")),
             (self.open_recent_project_button, load_app_icon("open_project")),
             (self.apply_default_bus_button, load_app_icon("bus")),
-            (self.open_loudness_view_button, load_app_icon("audio")),
             (self.project_bus_add_button, load_app_icon("bus")),
             (self.project_bus_remove_button, load_app_icon("delete")),
             (self.object_preview_button, load_app_icon("play")),
@@ -6298,6 +6686,22 @@ class MainWindow(QMainWindow):
         for button, icon in icon_pairs:
             if not icon.isNull():
                 button.setIcon(icon)
+        transport_icon_pairs = [
+            (self.preview_transport_play_button, load_app_icon("play")),
+            (self.preview_transport_restart_button, load_app_icon("restart")),
+            (self.preview_transport_stop_button, load_app_icon("stop")),
+            (self.open_loudness_view_button, load_app_icon("audio")),
+        ]
+        for button, icon in transport_icon_pairs:
+            if not icon.isNull():
+                button.setIcon(icon)
+            button.setIconSize(QSize(22, 22))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.set_preview_transport_state(
+            self._preview_transport_state,
+            has_target=self._preview_transport_has_target,
+            can_replay=self._preview_transport_can_replay,
+        )
         self.tree_search_button.setIcon(load_app_icon("open_project"))
         self.tree_search_button.setToolTip("定位下一个匹配的事件")
         self.global_search_button.setIcon(load_app_icon("open_project"))
@@ -6367,6 +6771,16 @@ class MainWindow(QMainWindow):
         tab_padding_h = int(14 * scale)
         object_type_size = int(11 * scale)
         object_title_size = int(16 * scale)
+        preview_host_min_width = max(360, int(380 * scale))
+        transport_button_size = max(34, int(38 * scale))
+        transport_button_radius = transport_button_size // 2
+        transport_strip_radius = max(10, int(12 * scale))
+        for preview_host_layout in self._workspace_preview_hosts.values():
+            preview_host = preview_host_layout.parentWidget()
+            if preview_host is None:
+                continue
+            preview_host.setMinimumWidth(preview_host_min_width)
+            preview_host.setMaximumWidth(16777215)
         self.setStyleSheet(
             f"""
             QMainWindow, QWidget {{
@@ -6400,6 +6814,77 @@ class MainWindow(QMainWindow):
             QPushButton[role="activityCompactButton"] {{
                 padding: 3px 8px;
                 min-height: 18px;
+            }}
+            #PreviewTransportFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #20262d, stop:1 #29313a);
+                border: 1px solid #445160;
+                border-radius: {transport_strip_radius}px;
+            }}
+            #PreviewTransportFrame[transportState="playing"] {{
+                border-color: #5f8db7;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #223648, stop:1 #2a4257);
+            }}
+            #PreviewTransportFrame[transportState="paused"] {{
+                border-color: #a8844d;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #352c1f, stop:1 #403325);
+            }}
+            #PreviewMetricsFrame {{
+                background: transparent;
+                border: none;
+            }}
+            #PreviewMetricColumn {{
+                background-color: #1e242b;
+                border: 1px solid #3f4d5c;
+                border-radius: {group_radius}px;
+            }}
+            QToolButton[role="previewTransportButton"] {{
+                padding: 0px;
+                min-width: {transport_button_size}px;
+                max-width: {transport_button_size}px;
+                min-height: {transport_button_size}px;
+                max-height: {transport_button_size}px;
+                border-radius: {transport_button_radius}px;
+                border: 1px solid transparent;
+                background-color: transparent;
+            }}
+            QToolButton[role="previewTransportButton"]:hover {{
+                background-color: #465361;
+                border-color: #738599;
+            }}
+            QToolButton[role="previewTransportButton"]:pressed {{
+                background-color: #25303a;
+                border-color: #5e6d7f;
+            }}
+            QToolButton[role="previewTransportButton"][transportKind="primary"] {{
+                background-color: #2b4154;
+                border-color: #5d85ab;
+            }}
+            QToolButton[role="previewTransportButton"][transportKind="primary"][transportState="active"] {{
+                background-color: #3c6387;
+                border-color: #98cdfd;
+            }}
+            QToolButton[role="previewTransportButton"][transportKind="secondary"][transportState="active"] {{
+                background-color: #5a482d;
+                border-color: #d0a15d;
+                color: #f3ddbf;
+            }}
+            QToolButton[role="previewTransportButton"][transportKind="danger"] {{
+                color: #efc5c0;
+            }}
+            QToolButton[role="previewTransportButton"][transportKind="danger"]:hover {{
+                background-color: #573538;
+                border-color: #a46e74;
+            }}
+            QToolButton[role="previewTransportButton"][transportKind="monitor"] {{
+                color: #c8d6e6;
+            }}
+            QToolButton[role="previewTransportButton"]:disabled {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                color: #708094;
             }}
             QSpinBox[role="clipCompactSpin"], QLineEdit[role="clipCompactField"] {{
                 min-height: 22px;
@@ -6654,6 +7139,54 @@ class MainWindow(QMainWindow):
             }}
             QLabel[role="meterContext"] {{
                 color: #b5c4d4;
+            }}
+            QLabel[role="previewTransportTitle"] {{
+                color: #eef6fd;
+                font-size: {object_title_size - 1}px;
+                font-weight: 700;
+            }}
+            QLabel[role="previewTransportDetail"] {{
+                color: #9fb5ca;
+            }}
+            QLabel[role="previewTransportStatusChip"] {{
+                background-color: #283442;
+                border: 1px solid #5a6c80;
+                border-radius: {radius}px;
+                color: #dbe8f5;
+                padding: 3px 8px;
+                font-size: {object_type_size}px;
+                font-weight: 700;
+            }}
+            QLabel[role="previewTransportStatusChip"][transportState="playing"] {{
+                background-color: #21415d;
+                border-color: #84c3ff;
+                color: #eef7ff;
+            }}
+            QLabel[role="previewTransportStatusChip"][transportState="paused"] {{
+                background-color: #493721;
+                border-color: #d9aa69;
+                color: #fff0d9;
+            }}
+            QLabel[role="previewMetricHeading"] {{
+                color: #8aa4bf;
+                font-size: {object_type_size}px;
+                font-weight: 700;
+            }}
+            QLabel[role="previewMetricContext"] {{
+                color: #edf3f9;
+                font-weight: 600;
+            }}
+            QLabel[role="previewMetricCaption"] {{
+                color: #7f8a97;
+                font-size: {object_type_size}px;
+            }}
+            QLabel[role="previewMetricValue"] {{
+                color: #d9e6f3;
+                font-weight: 700;
+            }}
+            #PreviewTransportHeader {{
+                background: transparent;
+                border: none;
             }}
             QLabel[role="busHeaderChip"] {{
                 background-color: #2b3440;

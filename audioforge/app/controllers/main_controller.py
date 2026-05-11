@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSettings, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, ValidationIssue, new_id
@@ -134,6 +134,30 @@ class DiagnosticSnapshot:
         }
 
 
+@dataclass(slots=True)
+class AuditionSession:
+    playback_owner_id: str
+    event_id: str | None
+    event_name: str
+    clip_id: str
+    asset_key: str
+    file_path: str
+    target_kind: str
+    title: str
+    detail: str
+    bus_name: str
+    effective_volume_db: float
+    tracked_base_volume_db: float
+    pitch_cents: int
+    preserve_timing_pitch_cents: int
+    trim_start_ms: int
+    trim_end_ms: int
+    fade_in_ms: int
+    fade_out_ms: int
+    event_volume_db_at_capture: float | None = None
+    event_pitch_cents_at_capture: int | None = None
+
+
 class _BuildWorker(QObject):
     succeeded = Signal(object, object)
     validation_blocked = Signal(object, int)
@@ -247,6 +271,10 @@ class MainController(QObject):
         self._build_worker: _BuildWorker | None = None
         self._active_build_scope_label: str | None = None
         self._active_build_export_root: Path | None = None
+        self._audition_session: AuditionSession | None = None
+        self._preview_transport_timer = QTimer(self)
+        self._preview_transport_timer.setInterval(200)
+        self._preview_transport_timer.timeout.connect(self._poll_preview_transport_state)
         self._bind_events()
         self._restore_window_preferences()
         self.application.aboutToQuit.connect(self._save_window_preferences)
@@ -331,6 +359,10 @@ class MainController(QObject):
         self.window.projectSettingsChanged.connect(self.update_project_settings_from_form)
         self.window.previewBusSelectionChanged.connect(self.sync_preview_bus_editor)
         self.window.previewBusStateChanged.connect(self.update_preview_bus_state_from_form)
+        self.window.previewTransportPlayRequested.connect(self.play_recent_preview_transport)
+        self.window.pausePreviewRequested.connect(self.pause_current_event_preview)
+        self.window.resumePreviewRequested.connect(self.resume_current_event_preview)
+        self.window.restartPreviewRequested.connect(self.restart_current_event_preview)
         self.window.stopPreviewEventRequested.connect(self.stop_current_event_preview)
         self.window.stopPreviewBusRequested.connect(self.stop_current_bus_preview)
         self.window.createFolderRequested.connect(self.create_folder)
@@ -366,6 +398,8 @@ class MainController(QObject):
 
     def _refresh_ui(self) -> None:
         navigation_state = self.window.navigation_state()
+        if self._audition_session is not None and self._audition_session.event_id not in {None, *self.project.events.keys()}:
+            self._audition_session = None
         self.selected_event_ids = [event_id for event_id in self.selected_event_ids if event_id in self.project.events]
         if self.selected_event_id not in self.project.events:
             self.selected_event_id = self.selected_event_ids[0] if self.selected_event_ids else next(iter(self.project.events), None)
@@ -388,6 +422,7 @@ class MainController(QObject):
         self._sync_preview_bus_mixer()
         self.sync_preview_bus_editor()
         self.window.set_event_details(self.current_event)
+        self._sync_preview_transport_state()
         self.window.set_project_title(self.project.name, self.project.file_path)
         self.window.set_history_actions_enabled(self.history.can_undo(), self.history.can_redo())
         self.window.set_dirty_state(self.is_dirty)
@@ -982,6 +1017,8 @@ class MainController(QObject):
         )
         self.playback_service.refresh_bus_volumes(self._resolve_effective_preview_volume_db)
         self.sync_preview_bus_editor()
+        self._refresh_recent_preview_session()
+        self._sync_preview_transport_state()
         self.window.append_log(
             f"{WWISE_TRANSPORT_TITLE} 已更新：{state.name} 音量={state.volume_linear * 100:.0f}% 静音={'是' if state.is_muted else '否'}"
         )
@@ -1167,26 +1204,38 @@ class MainController(QObject):
             self.window.apply_navigation_state(navigation_state)
 
     def import_audio_files_as_events(self, file_paths: list[str], target_folder_id=None, template: dict[str, object] | None = None) -> None:
-        supported_paths, skipped_unsupported, skipped_missing = self._classify_import_file_paths(file_paths)
-        imported_events: list[EventModel] = []
+        import_entries, skipped_unsupported, skipped_missing, skipped_empty_directories = self._classify_event_import_paths(file_paths)
+        imported_events: list[tuple[tuple[str, ...], EventModel]] = []
         reserved_event_ids = set(self.project.events.keys())
-        for source_path in supported_paths:
+        for folder_parts, source_path in import_entries:
             event = self._build_event_from_audio_path(source_path, reserved_event_ids)
             self._apply_event_import_template(event, template)
             reserved_event_ids.add(event.id)
-            imported_events.append(event)
+            imported_events.append((folder_parts, event))
 
         if not imported_events:
-            self._notify_import_skip("导入音频为事件", skipped_unsupported, skipped_missing)
+            self._notify_import_skip(
+                "导入音频为事件",
+                skipped_unsupported,
+                skipped_missing,
+                skipped_empty_directories,
+            )
             return
 
         folder_id = target_folder_id if target_folder_id in self.project.folders else self._resolve_target_folder_for_creation()
-        last_event_id = imported_events[-1].id
+        last_event_id = imported_events[-1][1].id
+        created_folder_count = 0
+        last_event_folder_id = folder_id
 
         def mutate() -> bool:
-            for event in imported_events:
-                self.project.add_event(folder_id, event)
-            self.selected_folder_id = folder_id
+            nonlocal created_folder_count, last_event_folder_id
+            folder_cache: dict[tuple[str, ...], str] = {(): folder_id}
+            for folder_parts, event in imported_events:
+                event_folder_id, new_folder_count = self._ensure_import_folder_path(folder_id, folder_parts, folder_cache)
+                created_folder_count += new_folder_count
+                self.project.add_event(event_folder_id, event)
+                last_event_folder_id = event_folder_id
+            self.selected_folder_id = last_event_folder_id
             self.selected_event_id = last_event_id
             self.selected_event_ids = [last_event_id] if last_event_id is not None else []
             return True
@@ -1194,9 +1243,10 @@ class MainController(QObject):
         if self._apply_mutation("Import Audio As Events", mutate):
             template_suffix = self._describe_event_import_template(template)
             folder_name = self.project.folders[folder_id].name if folder_id in self.project.folders else self.project.name
-            skipped_suffix = self._format_import_skip_suffix(skipped_unsupported, skipped_missing)
+            folder_suffix = f"；新增文件夹：{created_folder_count} 个" if created_folder_count else ""
+            skipped_suffix = self._format_import_skip_suffix(skipped_unsupported, skipped_missing, skipped_empty_directories)
             self.window.append_log(
-                f"已导入 {len(imported_events)} 个音频并创建事件；目标目录：{folder_name}；当前事件：{last_event_id}.{template_suffix}{skipped_suffix}"
+                f"已导入 {len(imported_events)} 个音频并创建事件；目标目录：{folder_name}{folder_suffix}；当前事件：{last_event_id}.{template_suffix}{skipped_suffix}"
             )
             self.window.set_active_property_category("事件")
             self._refresh_ui()
@@ -1574,6 +1624,219 @@ class MainController(QObject):
         self.window.append_log("已执行重做。")
         self._refresh_ui()
 
+    def _clear_audition_session(self, event_id: str | None = None) -> None:
+        if self._audition_session is None:
+            return
+        if event_id is not None and self._audition_session.event_id != event_id:
+            return
+        self._audition_session = None
+        self._preview_transport_timer.stop()
+
+    def _current_audition_session(self) -> AuditionSession | None:
+        session = self._audition_session
+        if session is None:
+            return None
+        if session.event_id is not None and session.event_id not in self.project.events:
+            self._audition_session = None
+            return None
+        return session
+
+    def _remember_audition_session(self, session: AuditionSession) -> None:
+        self._audition_session = session
+
+    def _refresh_recent_preview_session(self) -> bool:
+        session = self._current_audition_session()
+        if session is None:
+            return False
+        refreshed_session = self._rebuild_recent_preview_session(session)
+        if refreshed_session is None or refreshed_session == session:
+            return False
+        self._audition_session = refreshed_session
+        self._publish_audition_session(refreshed_session)
+        return True
+
+    def _rebuild_recent_preview_session(self, session: AuditionSession) -> AuditionSession | None:
+        if session.event_id is None:
+            return None
+        event = self.project.events.get(session.event_id)
+        if event is None:
+            return None
+        clip = next((item for item in event.clips if item.id == session.clip_id), None)
+        if clip is None or not clip.source_path:
+            return None
+        captured_volume_db = session.event_volume_db_at_capture
+        if captured_volume_db is None:
+            captured_volume_db = session.tracked_base_volume_db
+        captured_pitch_cents = session.event_pitch_cents_at_capture
+        if captured_pitch_cents is None:
+            captured_pitch_cents = session.preserve_timing_pitch_cents
+        tracked_base_volume_db = event.volume_db + (session.tracked_base_volume_db - captured_volume_db)
+        preserve_timing_pitch_cents = event.pitch_cents + (session.preserve_timing_pitch_cents - captured_pitch_cents)
+        if session.target_kind == "segment":
+            trim_start_ms = session.trim_start_ms
+            trim_end_ms = session.trim_end_ms
+            fade_in_ms = session.fade_in_ms
+            fade_out_ms = session.fade_out_ms
+        else:
+            trim_start_ms = clip.trim_start_ms
+            trim_end_ms = clip.trim_end_ms
+            fade_in_ms = clip.fade_in_ms
+            fade_out_ms = clip.fade_out_ms
+        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, tracked_base_volume_db)
+        return self._create_audition_session(
+            event=event,
+            clip=clip,
+            target_kind=session.target_kind,
+            effective_volume_db=effective_volume_db,
+            tracked_base_volume_db=tracked_base_volume_db,
+            pitch_cents=session.pitch_cents,
+            preserve_timing_pitch_cents=preserve_timing_pitch_cents,
+            trim_start_ms=trim_start_ms,
+            trim_end_ms=trim_end_ms,
+            fade_in_ms=fade_in_ms,
+            fade_out_ms=fade_out_ms,
+        )
+
+    def _create_audition_session(
+        self,
+        *,
+        event: EventModel,
+        clip: ClipModel,
+        target_kind: str,
+        effective_volume_db: float,
+        tracked_base_volume_db: float,
+        pitch_cents: int,
+        preserve_timing_pitch_cents: int,
+        trim_start_ms: int,
+        trim_end_ms: int,
+        fade_in_ms: int,
+        fade_out_ms: int,
+    ) -> AuditionSession:
+        asset_key = clip.asset_key or Path(clip.source_path).stem
+        event_name = event.display_name or event.id
+        if target_kind == "segment":
+            title = f"局部片段 {clip.id}"
+            detail = f"{trim_start_ms}-{trim_end_ms} ms | 事件 {event_name} | 资源 {asset_key}"
+        elif target_kind == "clip":
+            title = f"片段 {clip.id}"
+            detail = f"事件 {event_name} | 资源 {asset_key} | Bus {event.bus}"
+        else:
+            title = f"事件 {event_name}"
+            detail = f"片段 {clip.id} | 资源 {asset_key} | Bus {event.bus}"
+        return AuditionSession(
+            playback_owner_id=f"event:{event.id}",
+            event_id=event.id,
+            event_name=event_name,
+            clip_id=clip.id,
+            asset_key=asset_key,
+            file_path=clip.source_path,
+            target_kind=target_kind,
+            title=title,
+            detail=detail,
+            bus_name=event.bus,
+            effective_volume_db=effective_volume_db,
+            tracked_base_volume_db=tracked_base_volume_db,
+            pitch_cents=pitch_cents,
+            preserve_timing_pitch_cents=preserve_timing_pitch_cents,
+            trim_start_ms=trim_start_ms,
+            trim_end_ms=trim_end_ms,
+            fade_in_ms=fade_in_ms,
+            fade_out_ms=fade_out_ms,
+            event_volume_db_at_capture=event.volume_db,
+            event_pitch_cents_at_capture=event.pitch_cents,
+        )
+
+    def _publish_audition_session(self, session: AuditionSession) -> None:
+        self.window.set_recent_preview_session_summary(session.title, session.detail)
+        self.window.set_preview_audio_metrics(
+            self.audio_meter_service.analyze_file(
+                session.file_path,
+                session.effective_volume_db,
+                pitch_cents=session.pitch_cents,
+                preserve_timing_pitch_cents=session.preserve_timing_pitch_cents,
+                trim_start_ms=session.trim_start_ms,
+                trim_end_ms=session.trim_end_ms,
+                fade_in_ms=session.fade_in_ms,
+                fade_out_ms=session.fade_out_ms,
+            ),
+            clip_id=session.clip_id,
+            asset_key=session.asset_key,
+        )
+
+    def _play_audition_session(self, session: AuditionSession) -> str:
+        return self.playback_service.play_file(
+            session.file_path,
+            session.effective_volume_db,
+            tracked_base_volume_db=session.tracked_base_volume_db,
+            bus_name=session.bus_name,
+            event_id=session.playback_owner_id,
+            pitch_cents=session.pitch_cents,
+            preserve_timing_pitch_cents=session.preserve_timing_pitch_cents,
+            trim_start_ms=session.trim_start_ms,
+            trim_end_ms=session.trim_end_ms,
+            fade_in_ms=session.fade_in_ms,
+            fade_out_ms=session.fade_out_ms,
+        )
+
+    def _handoff_audition_session(self, session: AuditionSession) -> None:
+        current_session = self._current_audition_session()
+        if current_session is None or current_session.playback_owner_id == session.playback_owner_id:
+            return
+        self.playback_service.stop_event(current_session.playback_owner_id)
+        if current_session.event_id is not None:
+            self.preview_service.stop_event(current_session.event_id)
+
+    def _start_audition_session(self, session: AuditionSession) -> str:
+        self._handoff_audition_session(session)
+        playback_message = self._play_audition_session(session)
+        self._remember_audition_session(session)
+        self._publish_audition_session(session)
+        return playback_message
+
+    def _sync_recent_preview_summary(self, state: str) -> None:
+        session = self._current_audition_session()
+        if session is not None:
+            state_suffix = {
+                "playing": "播放中",
+                "paused": "已暂停",
+                "idle": "可重播",
+            }[state]
+            self.window.set_recent_preview_session_summary(session.title, f"{session.detail} | {state_suffix}")
+            return
+        event = self.current_event
+        if event is not None:
+            event_name = event.display_name or event.id
+            self.window.set_recent_preview_session_summary(
+                "当前对象可试听",
+                f"事件 {event_name} | 开始试听后，可在不同流程继续控制这次试听。",
+            )
+            return
+        self.window.set_recent_preview_session_summary(
+            "最近试听",
+            "切换事件、资源或流程时，会保留最近一次试听会话。",
+        )
+
+    def _sync_preview_transport_state(self) -> None:
+        session = self._current_audition_session()
+        has_target = self.current_event is not None
+        can_replay = session is not None
+        state = "idle"
+        if session is not None and self.playback_service.has_active_event(session.playback_owner_id):
+            state = "paused" if self.playback_service.is_event_paused(session.playback_owner_id) else "playing"
+        self.window.set_preview_transport_state(state, has_target=has_target, can_replay=can_replay)
+        self._sync_recent_preview_summary(state)
+        if state == "playing":
+            if not self._preview_transport_timer.isActive():
+                self._preview_transport_timer.start()
+            return
+        self._preview_transport_timer.stop()
+
+    def _poll_preview_transport_state(self) -> None:
+        if self._current_audition_session() is None:
+            self._preview_transport_timer.stop()
+            return
+        self._sync_preview_transport_state()
+
     def preview_current_event(self) -> None:
         event = self.current_event
         if event is None:
@@ -1585,21 +1848,21 @@ class MainController(QObject):
         )
         if not result.accepted:
             self.window.clear_preview_audio_metrics(result.reason)
+            self._clear_audition_session(event.id)
             self.window.append_log(f"试听被拒绝：{event.id}，原因：{result.reason}")
+            self._sync_preview_transport_state()
             return
         clip = next((item for item in event.clips if item.id == result.clip_id), None)
         playback_message = "Simulated only"
         if clip is not None and clip.source_path:
-            if result.stolen_oldest:
-                self.playback_service.stop_oldest(event.id)
             effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, result.volume_db)
             preview_preserve_timing_pitch_cents = result.pitch_cents + result.combo_pitch_cents
-            playback_message = self.playback_service.play_file(
-                clip.source_path,
-                effective_volume_db,
+            session = self._create_audition_session(
+                event=event,
+                clip=clip,
+                target_kind="event",
+                effective_volume_db=effective_volume_db,
                 tracked_base_volume_db=result.volume_db,
-                bus_name=event.bus,
-                event_id=event.id,
                 pitch_cents=0,
                 preserve_timing_pitch_cents=preview_preserve_timing_pitch_cents,
                 trim_start_ms=clip.trim_start_ms,
@@ -1607,25 +1870,16 @@ class MainController(QObject):
                 fade_in_ms=clip.fade_in_ms,
                 fade_out_ms=clip.fade_out_ms,
             )
-            self.window.set_preview_audio_metrics(
-                self.audio_meter_service.analyze_file(
-                    clip.source_path,
-                    effective_volume_db,
-                    pitch_cents=0,
-                    preserve_timing_pitch_cents=preview_preserve_timing_pitch_cents,
-                    trim_start_ms=clip.trim_start_ms,
-                    trim_end_ms=clip.trim_end_ms,
-                    fade_in_ms=clip.fade_in_ms,
-                    fade_out_ms=clip.fade_out_ms,
-                ),
-                clip_id=result.clip_id or "-",
-                asset_key=result.asset_key or "-",
-            )
+            if result.stolen_oldest:
+                self.playback_service.stop_oldest(session.playback_owner_id)
+            playback_message = self._start_audition_session(session)
         else:
             self.window.clear_preview_audio_metrics("当前试听片段没有可分析的源文件。")
+            self._clear_audition_session(event.id)
         self.window.append_log(
             f"试听 {event.id}：片段={result.clip_id} 资源={result.asset_key} 事件音量={result.volume_db:.2f}dB 总线后={self._resolve_effective_preview_volume_db(event.bus, result.volume_db):.2f}dB 基础音高={result.pitch_cents} 连击加成={result.combo_pitch_cents} 连击={result.combo_step} 活动实例={result.active_instances} 时长={result.playback_duration_seconds:.2f}s 播放={playback_message}"
         )
+        self._sync_preview_transport_state()
 
     def preview_selected_clip(self, clip_id: str) -> None:
         event = self.current_event
@@ -1636,15 +1890,17 @@ class MainController(QObject):
             return
         if not clip.source_path:
             self.window.clear_preview_audio_metrics("当前片段没有可分析的源文件。")
+            self._clear_audition_session(event.id)
             self.window.append_log(f"试听片段被拒绝：{clip_id} 没有源文件。")
+            self._sync_preview_transport_state()
             return
         effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, event.volume_db)
-        playback_message = self.playback_service.play_file(
-            clip.source_path,
-            effective_volume_db,
+        session = self._create_audition_session(
+            event=event,
+            clip=clip,
+            target_kind="clip",
+            effective_volume_db=effective_volume_db,
             tracked_base_volume_db=event.volume_db,
-            bus_name=event.bus,
-            event_id=event.id,
             pitch_cents=0,
             preserve_timing_pitch_cents=event.pitch_cents,
             trim_start_ms=clip.trim_start_ms,
@@ -1652,23 +1908,11 @@ class MainController(QObject):
             fade_in_ms=clip.fade_in_ms,
             fade_out_ms=clip.fade_out_ms,
         )
-        self.window.set_preview_audio_metrics(
-            self.audio_meter_service.analyze_file(
-                clip.source_path,
-                effective_volume_db,
-                pitch_cents=0,
-                preserve_timing_pitch_cents=event.pitch_cents,
-                trim_start_ms=clip.trim_start_ms,
-                trim_end_ms=clip.trim_end_ms,
-                fade_in_ms=clip.fade_in_ms,
-                fade_out_ms=clip.fade_out_ms,
-            ),
-            clip_id=clip.id,
-            asset_key=clip.asset_key,
-        )
+        playback_message = self._start_audition_session(session)
         self.window.append_log(
             f"试听片段 {clip.id}：资源={clip.asset_key} 事件={event.id} 总线后={effective_volume_db:.2f}dB 播放={playback_message}"
         )
+        self._sync_preview_transport_state()
 
     def preview_selected_clip_segment(self, clip_id: str, start_ms: int, end_ms: int) -> None:
         event = self.current_event
@@ -1679,19 +1923,21 @@ class MainController(QObject):
             return
         if not clip.source_path:
             self.window.clear_preview_audio_metrics("当前片段没有可分析的源文件。")
+            self._clear_audition_session(event.id)
             self.window.append_log(f"局部试听被拒绝：{clip_id} 没有源文件。")
+            self._sync_preview_transport_state()
             return
         segment_start_ms = max(MIN_CLIP_TIME_MS, int(start_ms))
         segment_end_ms = max(segment_start_ms + 1, int(end_ms))
         segment_length_ms = max(1, segment_end_ms - segment_start_ms)
         segment_fade_ms = min(40, max(8, segment_length_ms // 12))
         effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, event.volume_db)
-        playback_message = self.playback_service.play_file(
-            clip.source_path,
-            effective_volume_db,
+        session = self._create_audition_session(
+            event=event,
+            clip=clip,
+            target_kind="segment",
+            effective_volume_db=effective_volume_db,
             tracked_base_volume_db=event.volume_db,
-            bus_name=event.bus,
-            event_id=event.id,
             pitch_cents=0,
             preserve_timing_pitch_cents=event.pitch_cents,
             trim_start_ms=segment_start_ms,
@@ -1699,35 +1945,82 @@ class MainController(QObject):
             fade_in_ms=segment_fade_ms,
             fade_out_ms=segment_fade_ms,
         )
-        self.window.set_preview_audio_metrics(
-            self.audio_meter_service.analyze_file(
-                clip.source_path,
-                effective_volume_db,
-                pitch_cents=0,
-                preserve_timing_pitch_cents=event.pitch_cents,
-                trim_start_ms=segment_start_ms,
-                trim_end_ms=segment_end_ms,
-                fade_in_ms=segment_fade_ms,
-                fade_out_ms=segment_fade_ms,
-            ),
-            clip_id=clip.id,
-            asset_key=clip.asset_key,
-        )
+        playback_message = self._start_audition_session(session)
         self.window.append_log(
             f"局部试听片段 {clip.id}：资源={clip.asset_key} 区间={segment_start_ms}-{segment_end_ms} ms 总线后={effective_volume_db:.2f}dB 播放={playback_message}"
         )
+        self._sync_preview_transport_state()
+
+    def play_recent_preview_transport(self) -> None:
+        self._refresh_recent_preview_session()
+        session = self._current_audition_session()
+        if session is None:
+            self.preview_current_event()
+            return
+        if self.playback_service.has_active_event(session.playback_owner_id):
+            self.window.append_log(f"最近试听已在播放：{session.title}")
+            self._sync_preview_transport_state()
+            return
+        playback_message = self._play_audition_session(session)
+        self._publish_audition_session(session)
+        self.window.append_log(f"已播放最近试听：{session.title} 播放={playback_message}")
+        self._sync_preview_transport_state()
+
+    def pause_current_event_preview(self) -> None:
+        session = self._current_audition_session()
+        if session is None:
+            QMessageBox.information(self.window, "暂停试听", "当前没有可暂停的试听会话。")
+            return
+        if not self.playback_service.pause_event(session.playback_owner_id):
+            self.window.append_log(f"暂停试听被忽略：{session.title} 当前没有可暂停的播放。")
+            self._sync_preview_transport_state()
+            return
+        self.window.append_log(f"已暂停试听：{session.title}")
+        self._sync_preview_transport_state()
+
+    def resume_current_event_preview(self) -> None:
+        session = self._current_audition_session()
+        if session is None:
+            QMessageBox.information(self.window, "继续试听", "当前没有暂停中的试听会话。")
+            return
+        if not self.playback_service.resume_event(session.playback_owner_id):
+            self.window.append_log(f"继续试听被忽略：{session.title} 当前没有暂停中的播放。")
+            self._sync_preview_transport_state()
+            return
+        self.window.append_log(f"已继续试听：{session.title}")
+        self._sync_preview_transport_state()
+
+    def restart_current_event_preview(self) -> None:
+        session = self._current_audition_session()
+        if session is None:
+            QMessageBox.information(self.window, "从头播放", "当前对象还没有可重播的试听内容。")
+            return
+        self.playback_service.stop_event(session.playback_owner_id)
+        if session.event_id is not None:
+            self.preview_service.stop_event(session.event_id)
+        playback_message = self._play_audition_session(session)
+        self._publish_audition_session(session)
+        self.window.append_log(
+            f"从头播放 {session.title}：片段={session.clip_id} 资源={session.asset_key} 播放={playback_message}"
+        )
+        self._sync_preview_transport_state()
 
     def stop_current_event_preview(self) -> None:
-        event = self.current_event
-        if event is None:
-            QMessageBox.information(self.window, "停止事件试听", "请先选择一个事件。")
+        session = self._current_audition_session()
+        if session is None:
+            QMessageBox.information(self.window, "停止试听", "当前没有可停止的试听会话。")
             return
-        self.playback_service.stop_event(event.id)
-        self.preview_service.stop_event(event.id)
-        self.window.append_log(f"已停止事件试听：{event.id}")
+        self.playback_service.stop_event(session.playback_owner_id)
+        if session.event_id is not None:
+            self.preview_service.stop_event(session.event_id)
+        self.window.append_log(f"已停止试听：{session.title}")
+        self._sync_preview_transport_state()
 
     def stop_current_bus_preview(self) -> None:
+        session = self._current_audition_session()
         event = self.current_event
+        if event is None and session is not None and session.event_id is not None:
+            event = self.project.events.get(session.event_id)
         if event is None:
             QMessageBox.information(self.window, "停止总线试听", "请先选择一个事件，以确定要停止的总线。")
             return
@@ -1743,6 +2036,7 @@ class MainController(QObject):
         self.window.append_log(
             f"已停止总线试听：{event.bus}（覆盖总线 {len(affected_bus_names)} 个，事件 {len(bus_event_ids)} 个）"
         )
+        self._sync_preview_transport_state()
 
     def _bus_routes_through(self, bus_name: str, target_bus_name: str) -> bool:
         config_map = self._project_bus_config_map()
@@ -1919,6 +2213,44 @@ class MainController(QObject):
             index += 1
             candidate = f"{base_id}_{index}"
         return candidate
+
+    def _find_child_folder_by_name(self, parent_folder_id: str, folder_name: str) -> str | None:
+        parent_folder = self.project.folders.get(parent_folder_id)
+        normalized_name = folder_name.strip()
+        if parent_folder is None or not normalized_name:
+            return None
+        for child_folder_id in parent_folder.child_folder_ids:
+            child_folder = self.project.folders.get(child_folder_id)
+            if child_folder is None:
+                continue
+            if child_folder.name.casefold() == normalized_name.casefold():
+                return child_folder_id
+        return None
+
+    def _ensure_import_folder_path(
+        self,
+        base_folder_id: str,
+        folder_parts: tuple[str, ...],
+        folder_cache: dict[tuple[str, ...], str],
+    ) -> tuple[str, int]:
+        current_folder_id = base_folder_id
+        current_parts: tuple[str, ...] = ()
+        created_folder_count = 0
+        for folder_name in folder_parts:
+            current_parts = (*current_parts, folder_name)
+            cached_folder_id = folder_cache.get(current_parts)
+            if cached_folder_id is not None:
+                current_folder_id = cached_folder_id
+                continue
+            child_folder_id = self._find_child_folder_by_name(current_folder_id, folder_name)
+            if child_folder_id is None:
+                folder = FolderModel(id=new_id("folder"), name=folder_name)
+                self.project.add_folder(current_folder_id, folder)
+                child_folder_id = folder.id
+                created_folder_count += 1
+            folder_cache[current_parts] = child_folder_id
+            current_folder_id = child_folder_id
+        return current_folder_id, created_folder_count
 
     def _build_clip_from_path(self, source_path: Path) -> ClipModel:
         existing_clip_ids = {clip.id for clip in self.current_event.clips} if self.current_event is not None else set()
@@ -2284,20 +2616,33 @@ class MainController(QObject):
 
     def _restore_window_preferences(self) -> None:
         default_preferences = self.window.ui_preferences()
-        preferences = {
-            "ui_scale": self.settings.value("uiScale", 1.0),
-            "workspace_splitter_sizes": self.settings.value("workspaceSplitterSizes", default_preferences["workspace_splitter_sizes"]),
-            "main_splitter_sizes": self.settings.value("mainSplitterSizes", default_preferences["main_splitter_sizes"]),
-            "active_editor_tab": self.settings.value("activeEditorTab", default_preferences["active_editor_tab"]),
-            "inspector_splitter_sizes": self.settings.value("inspectorSplitterSizes", default_preferences["inspector_splitter_sizes"]),
-            "content_top_splitter_sizes": self.settings.value("contentTopSplitterSizes", default_preferences["content_top_splitter_sizes"]),
-            "active_contents_tab": self.settings.value("activeContentsTab", default_preferences["active_contents_tab"]),
-            "event_import_template": self.settings.value("eventImportTemplate", default_preferences["event_import_template"]),
-        }
+        preferences = dict(default_preferences)
+        stored_preferences = self.settings.value("uiPreferencesJson", "")
+        if isinstance(stored_preferences, str) and stored_preferences.strip():
+            try:
+                parsed_preferences = json.loads(stored_preferences)
+            except json.JSONDecodeError:
+                parsed_preferences = None
+            if isinstance(parsed_preferences, dict):
+                preferences.update(parsed_preferences)
+        else:
+            preferences.update(
+                {
+                    "ui_scale": self.settings.value("uiScale", default_preferences["ui_scale"]),
+                    "workspace_splitter_sizes": self.settings.value("workspaceSplitterSizes", default_preferences["workspace_splitter_sizes"]),
+                    "main_splitter_sizes": self.settings.value("mainSplitterSizes", default_preferences["main_splitter_sizes"]),
+                    "active_editor_tab": self.settings.value("activeEditorTab", default_preferences["active_editor_tab"]),
+                    "inspector_splitter_sizes": self.settings.value("inspectorSplitterSizes", default_preferences["inspector_splitter_sizes"]),
+                    "content_top_splitter_sizes": self.settings.value("contentTopSplitterSizes", default_preferences["content_top_splitter_sizes"]),
+                    "active_contents_tab": self.settings.value("activeContentsTab", default_preferences["active_contents_tab"]),
+                    "event_import_template": self.settings.value("eventImportTemplate", default_preferences["event_import_template"]),
+                }
+            )
         self.window.apply_ui_preferences(preferences)
 
     def _save_window_preferences(self) -> None:
         preferences = self.window.ui_preferences()
+        self.settings.setValue("uiPreferencesJson", json.dumps(preferences, ensure_ascii=False))
         self.settings.setValue("uiScale", preferences["ui_scale"])
         self.settings.setValue("workspaceSplitterSizes", preferences["workspace_splitter_sizes"])
         self.settings.setValue("mainSplitterSizes", preferences["main_splitter_sizes"])
@@ -2628,18 +2973,78 @@ class MainController(QObject):
             supported_paths.append(source_path)
         return supported_paths, skipped_unsupported, skipped_missing
 
-    def _format_import_skip_suffix(self, skipped_unsupported: list[Path], skipped_missing: list[Path]) -> str:
+    def _classify_event_import_paths(
+        self,
+        file_paths: list[str],
+    ) -> tuple[list[tuple[tuple[str, ...], Path]], list[Path], list[Path], list[Path]]:
+        supported_paths: list[tuple[tuple[str, ...], Path]] = []
+        skipped_unsupported: list[Path] = []
+        skipped_missing: list[Path] = []
+        skipped_empty_directories: list[Path] = []
+        seen_supported_paths: set[str] = set()
+
+        def add_supported_path(folder_parts: tuple[str, ...], source_path: Path) -> None:
+            normalized_key = str(source_path.resolve()).casefold()
+            if normalized_key in seen_supported_paths:
+                return
+            seen_supported_paths.add(normalized_key)
+            supported_paths.append((folder_parts, source_path))
+
+        for file_path in file_paths:
+            source_path = Path(file_path)
+            if not source_path.exists():
+                skipped_missing.append(source_path)
+                continue
+            if source_path.is_dir():
+                has_supported_audio = False
+                for nested_path in sorted(source_path.rglob("*"), key=lambda candidate: str(candidate.relative_to(source_path)).lower()):
+                    if nested_path.is_dir():
+                        continue
+                    if nested_path.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+                        skipped_unsupported.append(nested_path)
+                        continue
+                    has_supported_audio = True
+                    relative_parent_parts = nested_path.relative_to(source_path).parent.parts
+                    folder_parts = (source_path.name, *relative_parent_parts) if relative_parent_parts else (source_path.name,)
+                    add_supported_path(folder_parts, nested_path)
+                if not has_supported_audio:
+                    skipped_empty_directories.append(source_path)
+                continue
+            if source_path.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+                skipped_unsupported.append(source_path)
+                continue
+            add_supported_path((), source_path)
+        return supported_paths, skipped_unsupported, skipped_missing, skipped_empty_directories
+
+    def _format_import_skip_suffix(
+        self,
+        skipped_unsupported: list[Path],
+        skipped_missing: list[Path],
+        skipped_empty_directories: list[Path] | None = None,
+    ) -> str:
         skipped_segments: list[str] = []
         if skipped_unsupported:
             skipped_segments.append(f"跳过 {len(skipped_unsupported)} 个不支持的文件")
         if skipped_missing:
             skipped_segments.append(f"跳过 {len(skipped_missing)} 个不存在的文件")
+        if skipped_empty_directories:
+            skipped_segments.append(f"跳过 {len(skipped_empty_directories)} 个不包含支持音频的文件夹")
         if not skipped_segments:
             return ""
         return " 已忽略：" + "，".join(skipped_segments) + "。"
 
-    def _notify_import_skip(self, title: str, skipped_unsupported: list[Path], skipped_missing: list[Path]) -> None:
-        reason = self._format_import_skip_suffix(skipped_unsupported, skipped_missing).strip()
+    def _notify_import_skip(
+        self,
+        title: str,
+        skipped_unsupported: list[Path],
+        skipped_missing: list[Path],
+        skipped_empty_directories: list[Path] | None = None,
+    ) -> None:
+        reason = self._format_import_skip_suffix(
+            skipped_unsupported,
+            skipped_missing,
+            skipped_empty_directories,
+        ).strip()
         if not reason:
             return
         message = f"没有可导入的音频文件。{reason}"

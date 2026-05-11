@@ -33,7 +33,7 @@
 
 ## 2026-05-11 版本说明
 
-- 0.06.1 这轮发布主要更新了桌面工具侧的工作台信息收口、结果坞表现和交付文档，没有修改 `unity_package/Assets/AudioForgeRuntime` 下的 Unity 运行时代码。
+- 0.06.2 这轮发布主要更新了桌面工具侧的最近试听卡片、transport 可视化和相关交付文档，没有修改 `unity_package/Assets/AudioForgeRuntime` 下的 Unity 运行时代码。
 - 因此已经生成好的 Unity SDK 包不会被动变化；只有重新执行 `python tools/package_unity_integration_package.py` 或完整发版流程时，包内文档副本、验证材料和示例导出物才会刷新。
 - 如果你只是把 SDK 代码交给 Unity 开发同学，这次版本不要求重新拷贝 `AudioForgeRuntime`；如果你还要同步新的文档、副本验证结果或新的导出样例，则需要重新打包。
 
@@ -41,8 +41,8 @@
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.06.1/`
-- `AudioForgeUnityPackage-0.06.1.zip`
+- `AudioForgeUnityPackage-0.06.2/`
+- `AudioForgeUnityPackage-0.06.2.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 

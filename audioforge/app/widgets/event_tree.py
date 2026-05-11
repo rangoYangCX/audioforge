@@ -31,13 +31,13 @@ class EventTreeWidget(QTreeWidget):
         self.itemSelectionChanged.connect(self._emit_selected_event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if self._extract_audio_file_paths(event):
+        if self._extract_import_paths(event):
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        if self._extract_audio_file_paths(event):
+        if self._extract_import_paths(event):
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
@@ -208,7 +208,7 @@ class EventTreeWidget(QTreeWidget):
             self.eventSelected.emit(node_id)
 
     def dropEvent(self, event: QDropEvent) -> None:
-        dropped_paths = self._extract_audio_file_paths(event)
+        dropped_paths = self._extract_import_paths(event)
         if dropped_paths:
             target_folder_id = self._resolve_drop_target_folder_id(event.position().toPoint())
             self.audioFilesDropped.emit(dropped_paths, target_folder_id)
@@ -233,19 +233,22 @@ class EventTreeWidget(QTreeWidget):
         index = self.indexOfTopLevelItem(moved_item) if parent_item is None else parent_item.indexOfChild(moved_item)
         self.nodeMoved.emit(node_type, node_id, parent_folder_id, index)
 
-    def _extract_audio_file_paths(self, event) -> list[str]:
+    def _extract_import_paths(self, event) -> list[str]:
         mime_data = event.mimeData()
         if not mime_data.hasUrls():
             return []
-        audio_paths: list[str] = []
+        import_paths: list[str] = []
         for url in mime_data.urls():
             if not url.isLocalFile():
                 continue
             local_path = Path(url.toLocalFile())
+            if local_path.is_dir():
+                import_paths.append(str(local_path))
+                continue
             if local_path.suffix.lower() not in {".wav", ".ogg"}:
                 continue
-            audio_paths.append(str(local_path))
-        return audio_paths
+            import_paths.append(str(local_path))
+        return import_paths
 
     def _resolve_drop_target_folder_id(self, position: QPoint):
         item = self.itemAt(position)

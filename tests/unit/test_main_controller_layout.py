@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from audioforge.app.controllers.main_controller import MainController
+from audioforge.app.controllers.main_controller import AuditionSession, MainController
 from audioforge.app.models.audio_project import ClipModel, ValidationIssue
 from audioforge.app.services.recovery_service import RecoveryService
 from audioforge.app.utils.constants import WWISE_BUS_VIEW_LABEL, WWISE_MASTER_MIXER_TITLE
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import QToolButton
 
 
@@ -1113,6 +1115,79 @@ def test_event_import_template_preferences_round_trip(monkeypatch) -> None:
     controller.window.close()
 
 
+def test_controller_window_preferences_round_trip_persists_layout_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+    stored_values: dict[str, object] = {}
+
+    class FakeSettings:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self._store = stored_values
+
+        def value(self, key: str, default: object = None) -> object:
+            return self._store.get(key, default)
+
+        def setValue(self, key: str, value: object) -> None:
+            self._store[key] = value
+
+    monkeypatch.setattr("audioforge.app.controllers.main_controller.QSettings", FakeSettings)
+
+    controller = MainController()
+    controller.window.resize(1520, 920)
+    controller.window.show()
+    QApplication.processEvents()
+
+    controller.window.show_report_tab(2)
+    controller.window._activate_workspace_mode("buses")
+    controller.window.property_tabs.setCurrentIndex(1)
+    controller.window.workspace_splitter.setSizes([770, 250])
+    controller.window.main_splitter.setSizes([310, 1180])
+    controller.window.project_splitter.setSizes([290, 640])
+    controller.window.inline_bus_content.setSizes([360, 560])
+    controller.window.settings_dialog.resize(840, 660)
+    controller.window.detach_explorer_panel()
+    QApplication.processEvents()
+
+    controller._save_window_preferences()
+
+    controller.is_dirty = False
+    controller.window.close()
+    QApplication.processEvents()
+
+    stored_preferences = json.loads(str(stored_values["uiPreferencesJson"]))
+
+    assert stored_preferences["workspace_mode"] == "buses"
+    assert stored_preferences["property_tab"] == 1
+    assert stored_preferences["report_tab"] == 2
+    assert stored_preferences["explorer_detached"] is True
+    assert stored_preferences["window_geometry"]
+    assert stored_preferences["explorer_window_geometry"]
+    assert stored_preferences["settings_dialog_geometry"]
+    assert len(stored_preferences["named_splitter_sizes"]["ProjectSplitter"]) == 2
+    assert len(stored_preferences["named_splitter_sizes"]["InlineBusContentSplitter"]) == 2
+
+    restored = MainController()
+    restored.window.show()
+    for _ in range(5):
+        QApplication.processEvents()
+
+    assert restored.window._active_workspace_mode == "buses"
+    assert restored.window.property_tabs.currentIndex() == 1
+    assert restored.window._active_report_index == 2
+    assert restored.window._explorer_detached is True
+    assert restored.window._last_docked_main_splitter_sizes == stored_preferences["main_splitter_sizes"]
+
+    restored.is_dirty = False
+    restored.window.close()
+    QApplication.processEvents()
+
+    round_trip_preferences = json.loads(str(stored_values["uiPreferencesJson"]))
+
+    assert round_trip_preferences["main_splitter_sizes"] == stored_preferences["main_splitter_sizes"]
+    assert round_trip_preferences["named_splitter_sizes"]["ProjectSplitter"] == stored_preferences["named_splitter_sizes"]["ProjectSplitter"]
+    assert round_trip_preferences["named_splitter_sizes"]["InlineBusContentSplitter"] == stored_preferences["named_splitter_sizes"]["InlineBusContentSplitter"]
+    assert round_trip_preferences["named_splitter_sizes"]["WorkspaceSplitter"] == stored_preferences["named_splitter_sizes"]["WorkspaceSplitter"]
+
+
 def test_import_audio_files_as_events_warns_when_no_supported_files(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
@@ -1133,6 +1208,85 @@ def test_import_audio_files_as_events_warns_when_no_supported_files(monkeypatch,
     assert len(controller.project.events) == event_count_before
     assert warnings
     assert "没有可导入的音频文件" in warnings[0][1]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_import_audio_files_as_events_from_folder_creates_nested_folders(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    root_folder_id = controller.project.root_folder_ids[0]
+    bundle_dir = tmp_path / "Ambience"
+    forest_dir = bundle_dir / "Forest"
+    cave_dir = bundle_dir / "Cave"
+    forest_dir.mkdir(parents=True)
+    cave_dir.mkdir(parents=True)
+    wind_path = bundle_dir / "Wind.wav"
+    bird_path = forest_dir / "Bird.wav"
+    drip_path = cave_dir / "Drip.ogg"
+    unsupported_path = cave_dir / "notes.txt"
+    wind_path.write_bytes(b"RIFF")
+    bird_path.write_bytes(b"RIFF")
+    drip_path.write_bytes(b"OggS")
+    unsupported_path.write_text("skip", encoding="utf-8")
+
+    controller.import_audio_files_as_events([str(bundle_dir)])
+
+    imported_root_id = next(
+        folder_id
+        for folder_id in controller.project.folders[root_folder_id].child_folder_ids
+        if controller.project.folders[folder_id].name == "Ambience"
+    )
+    imported_root = controller.project.folders[imported_root_id]
+    forest_folder_id = next(
+        folder_id
+        for folder_id in imported_root.child_folder_ids
+        if controller.project.folders[folder_id].name == "Forest"
+    )
+    cave_folder_id = next(
+        folder_id
+        for folder_id in imported_root.child_folder_ids
+        if controller.project.folders[folder_id].name == "Cave"
+    )
+
+    assert "Wind" in imported_root.child_event_ids
+    assert "Bird" in controller.project.folders[forest_folder_id].child_event_ids
+    assert "Drip" in controller.project.folders[cave_folder_id].child_event_ids
+    assert controller.project.events["Wind"].clips[0].source_path == str(wind_path)
+    assert controller.project.events["Bird"].clips[0].source_path == str(bird_path)
+    assert controller.project.events["Drip"].clips[0].source_path == str(drip_path)
+
+    import_log = controller.window.log_output.toPlainText()
+    assert "已导入 3 个音频并创建事件" in import_log
+    assert "新增文件夹：3 个" in import_log
+    assert "跳过 1 个不支持的文件" in import_log
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_import_audio_files_as_events_warns_when_folder_contains_no_supported_audio(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda parent, title, message: warnings.append((title, message)),
+    )
+
+    controller = MainController()
+    event_count_before = len(controller.project.events)
+    empty_bundle_dir = tmp_path / "EmptyBundle"
+    (empty_bundle_dir / "SubFolder").mkdir(parents=True)
+
+    controller.import_audio_files_as_events([str(empty_bundle_dir)])
+
+    assert len(controller.project.events) == event_count_before
+    assert warnings
+    assert "不包含支持音频的文件夹" in warnings[0][1]
 
     controller.is_dirty = False
     controller.window.close()
@@ -1190,6 +1344,498 @@ def test_build_project_handles_export_failure(monkeypatch) -> None:
     assert controller.window.report_tabs.currentIndex() == 2
     assert "构建失败" in controller.window.build_report_output.toPlainText()
     assert "export boom" in controller.window.log_output.toPlainText()
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_recent_preview_transport_buttons_are_compact_and_toggle_pause_resume(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    paused = {"value": False}
+    session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="event",
+        title=f"事件 {controller.current_event.display_name or controller.current_event.id}",
+        detail=f"片段 {clip.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+    controller._audition_session = session
+
+    def has_active_event(event_id: str) -> bool:
+        return event_id == session.playback_owner_id
+
+    def is_event_paused(_event_id: str) -> bool:
+        return paused["value"]
+
+    def pause_event(event_id: str) -> bool:
+        if event_id != session.playback_owner_id:
+            return False
+        paused["value"] = True
+        return True
+
+    def resume_event(event_id: str) -> bool:
+        if event_id != session.playback_owner_id:
+            return False
+        paused["value"] = False
+        return True
+
+    monkeypatch.setattr(controller.playback_service, "has_active_event", has_active_event)
+    monkeypatch.setattr(controller.playback_service, "is_event_paused", is_event_paused)
+    monkeypatch.setattr(controller.playback_service, "pause_event", pause_event)
+    monkeypatch.setattr(controller.playback_service, "resume_event", resume_event)
+
+    controller.window.resize(2048, 1118)
+    controller.window.show()
+    controller.window._activate_workspace_mode("resources")
+    QApplication.processEvents()
+
+    transport_buttons = [
+        controller.window.preview_transport_play_button,
+        controller.window.preview_transport_pause_button,
+        controller.window.preview_transport_restart_button,
+        controller.window.preview_transport_stop_button,
+        controller.window.open_loudness_view_button,
+    ]
+    preview_host = controller.window._workspace_preview_hosts["resources"].parentWidget()
+
+    assert all(isinstance(button, QToolButton) for button in transport_buttons)
+    assert all(controller.window.loudness_group.isAncestorOf(button) for button in transport_buttons)
+    assert preview_host is not None
+    assert preview_host.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Preferred
+    assert preview_host.maximumWidth() > 1000
+    assert preview_host.width() >= 360
+    assert controller.window.loudness_group.height() < preview_host.height() // 2
+    assert controller.window.loudness_group.minimumWidth() >= 380
+    assert controller.window.preview_transport_play_button.width() >= 32
+    assert controller.window.preview_transport_title_label.wordWrap() is True
+    assert controller.window.preview_transport_metrics_frame.minimumWidth() >= 360
+    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_metric_source_context_label)
+    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_metric_context_label)
+
+    controller.window.set_preview_transport_state("idle", has_target=True, can_replay=False)
+    assert controller.window.preview_transport_play_button.isEnabled()
+    assert not controller.window.preview_transport_pause_button.isEnabled()
+    assert not controller.window.preview_transport_restart_button.isEnabled()
+    assert not controller.window.preview_transport_stop_button.isEnabled()
+    assert controller.window.preview_transport_status_chip.text() == "可试听"
+
+    controller.window.set_preview_transport_state("idle", has_target=False, can_replay=True)
+    assert controller.window.preview_transport_play_button.isEnabled()
+    assert controller.window.preview_transport_restart_button.isEnabled()
+    assert controller.window.preview_transport_play_button.toolTip() == "播放最近试听"
+    assert controller.window.preview_transport_status_chip.text() == "可重播"
+
+    signals: list[str] = []
+    controller.window.pausePreviewRequested.connect(lambda: signals.append("pause"))
+    controller.window.resumePreviewRequested.connect(lambda: signals.append("resume"))
+
+    controller.window.set_preview_transport_state("playing", has_target=True, can_replay=True)
+    assert controller.window.preview_transport_status_chip.text() == "播放中"
+    controller.window.preview_transport_pause_button.click()
+    QApplication.processEvents()
+
+    assert paused["value"] is True
+    assert controller.window.preview_transport_pause_button.toolTip() == "继续试听"
+    assert controller.window.preview_transport_status_chip.text() == "已暂停"
+    controller.window.preview_transport_pause_button.click()
+    QApplication.processEvents()
+
+    assert paused["value"] is False
+    assert controller.window.preview_transport_pause_button.toolTip() == "暂停试听"
+    assert controller.window.preview_transport_status_chip.text() == "播放中"
+    assert signals == ["pause", "resume"]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_preview_transport_controller_syncs_pause_resume_and_restart(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    paused = {"value": False}
+    calls: list[tuple[str, object]] = []
+    session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="event",
+        title=f"事件 {controller.current_event.display_name or controller.current_event.id}",
+        detail=f"片段 {clip.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+    controller._audition_session = session
+
+    def has_active_event(event_id: str) -> bool:
+        return event_id == session.playback_owner_id
+
+    def is_event_paused(_event_id: str) -> bool:
+        return paused["value"]
+
+    def pause_event(event_id: str) -> bool:
+        calls.append(("pause", event_id))
+        paused["value"] = True
+        return True
+
+    def resume_event(event_id: str) -> bool:
+        calls.append(("resume", event_id))
+        paused["value"] = False
+        return True
+
+    def stop_playback(event_id: str) -> None:
+        calls.append(("stop-playback", event_id))
+
+    def stop_preview(event_id: str) -> None:
+        calls.append(("stop-preview", event_id))
+
+    def replay_preview(play_session: AuditionSession) -> str:
+        calls.append(("replay", play_session.clip_id))
+        paused["value"] = False
+        return "Replay ok"
+
+    monkeypatch.setattr(controller.playback_service, "has_active_event", has_active_event)
+    monkeypatch.setattr(controller.playback_service, "is_event_paused", is_event_paused)
+    monkeypatch.setattr(controller.playback_service, "pause_event", pause_event)
+    monkeypatch.setattr(controller.playback_service, "resume_event", resume_event)
+    monkeypatch.setattr(controller.playback_service, "stop_event", stop_playback)
+    monkeypatch.setattr(controller.preview_service, "stop_event", stop_preview)
+    monkeypatch.setattr(controller, "_play_audition_session", replay_preview)
+
+    controller._sync_preview_transport_state()
+    assert controller.window.preview_transport_pause_button.isEnabled()
+    assert controller.window.preview_transport_restart_button.isEnabled()
+    assert controller.window.preview_transport_stop_button.isEnabled()
+    assert controller.window.preview_transport_title_label.text() == session.title
+
+    controller.pause_current_event_preview()
+    QApplication.processEvents()
+    assert paused["value"] is True
+    assert controller.window.preview_transport_pause_button.toolTip() == "继续试听"
+
+    controller.resume_current_event_preview()
+    QApplication.processEvents()
+    assert paused["value"] is False
+    assert controller.window.preview_transport_pause_button.toolTip() == "暂停试听"
+
+    controller.restart_current_event_preview()
+    QApplication.processEvents()
+    assert ("replay", clip.id) in calls
+    assert ("stop-playback", session.playback_owner_id) in calls
+    assert ("stop-preview", controller.current_event.id) in calls
+
+    controller.stop_current_event_preview()
+    QApplication.processEvents()
+    assert calls.count(("stop-playback", session.playback_owner_id)) >= 2
+    assert calls.count(("stop-preview", controller.current_event.id)) >= 2
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_preview_transport_monitor_resets_playing_state_after_playback_finishes(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="event",
+        title=f"事件 {controller.current_event.display_name or controller.current_event.id}",
+        detail=f"片段 {clip.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+    controller._audition_session = session
+    active = {"value": True}
+
+    monkeypatch.setattr(controller.playback_service, "has_active_event", lambda _event_id: active["value"])
+    monkeypatch.setattr(controller.playback_service, "is_event_paused", lambda _event_id: False)
+
+    controller._sync_preview_transport_state()
+
+    assert controller.window.preview_transport_status_chip.text() == "播放中"
+    assert controller._preview_transport_timer.isActive() is True
+
+    active["value"] = False
+    controller._poll_preview_transport_state()
+
+    assert controller.window.preview_transport_status_chip.text() == "可重播"
+    assert controller.window.preview_transport_pause_button.isEnabled() is False
+    assert controller.window.preview_transport_detail_label.text().endswith("可重播")
+    assert controller._preview_transport_timer.isActive() is False
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_recent_preview_transport_survives_switching_to_folder(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="clip",
+        title=f"片段 {clip.id}",
+        detail=f"事件 {controller.current_event.display_name or controller.current_event.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+    controller._audition_session = session
+    calls: list[tuple[str, str]] = []
+    paused = {"value": False}
+
+    monkeypatch.setattr(
+        controller.playback_service,
+        "has_active_event",
+        lambda event_id: event_id == session.playback_owner_id,
+    )
+    monkeypatch.setattr(controller.playback_service, "is_event_paused", lambda _event_id: paused["value"])
+
+    def pause_event(event_id: str) -> bool:
+        calls.append(("pause", event_id))
+        paused["value"] = True
+        return True
+
+    def resume_event(event_id: str) -> bool:
+        calls.append(("resume", event_id))
+        paused["value"] = False
+        return True
+
+    monkeypatch.setattr(controller.playback_service, "pause_event", pause_event)
+    monkeypatch.setattr(controller.playback_service, "resume_event", resume_event)
+
+    folder_id = controller.project.root_folder_ids[0]
+    controller.select_node("folder", folder_id)
+    controller._sync_preview_transport_state()
+    QApplication.processEvents()
+
+    assert controller.current_event is None
+    assert controller.window.preview_transport_play_button.isEnabled()
+    assert controller.window.preview_transport_pause_button.isEnabled()
+    assert controller.window.preview_transport_title_label.text() == session.title
+
+    controller.pause_current_event_preview()
+    controller.resume_current_event_preview()
+    QApplication.processEvents()
+
+    assert calls == [("pause", session.playback_owner_id), ("resume", session.playback_owner_id)]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_recent_preview_play_replays_session_without_current_event(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="event",
+        title=f"事件 {controller.current_event.display_name or controller.current_event.id}",
+        detail=f"片段 {clip.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+    controller._audition_session = session
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(controller.playback_service, "has_active_event", lambda _event_id: False)
+
+    def replay_preview(play_session: AuditionSession) -> str:
+        calls.append(("replay", play_session.playback_owner_id))
+        return "Replay ok"
+
+    def fallback_preview() -> None:
+        calls.append(("fallback", "current"))
+
+    monkeypatch.setattr(controller, "_play_audition_session", replay_preview)
+    monkeypatch.setattr(controller, "preview_current_event", fallback_preview)
+
+    folder_id = controller.project.root_folder_ids[0]
+    controller.select_node("folder", folder_id)
+    controller._sync_preview_transport_state()
+    controller.window.preview_transport_play_button.click()
+    QApplication.processEvents()
+
+    assert controller.current_event is None
+    assert calls == [("replay", session.playback_owner_id)]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_recent_preview_play_republishes_session_metrics(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="event",
+        title=f"事件 {controller.current_event.display_name or controller.current_event.id}",
+        detail=f"片段 {clip.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+    controller._audition_session = session
+    published_sessions: list[str] = []
+    replay_calls: list[str] = []
+
+    monkeypatch.setattr(controller.playback_service, "has_active_event", lambda _event_id: False)
+    monkeypatch.setattr(
+        controller,
+        "_publish_audition_session",
+        lambda play_session: published_sessions.append(play_session.playback_owner_id),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_play_audition_session",
+        lambda play_session: replay_calls.append(play_session.playback_owner_id) or "Replay ok",
+    )
+
+    controller.play_recent_preview_transport()
+
+    assert replay_calls == [session.playback_owner_id]
+    assert published_sessions == [session.playback_owner_id]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_recent_preview_session_refreshes_metrics_after_event_volume_change(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    event = controller.current_event
+    clip = event.clips[0]
+    clip.source_path = "preview.wav"
+    session = AuditionSession(
+        playback_owner_id=f"event:{event.id}",
+        event_id=event.id,
+        event_name=event.display_name or event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path,
+        target_kind="clip",
+        title=f"片段 {clip.id}",
+        detail=f"事件 {event.display_name or event.id} | 资源 {clip.asset_key} | Bus {event.bus}",
+        bus_name=event.bus,
+        effective_volume_db=event.volume_db,
+        tracked_base_volume_db=event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+        event_volume_db_at_capture=event.volume_db,
+        event_pitch_cents_at_capture=event.pitch_cents,
+    )
+    controller._audition_session = session
+    published_sessions: list[AuditionSession] = []
+
+    monkeypatch.setattr(
+        controller,
+        "_publish_audition_session",
+        lambda refreshed_session: published_sessions.append(refreshed_session),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_resolve_effective_preview_volume_db",
+        lambda _bus_name, tracked_volume_db: tracked_volume_db + 3.0,
+    )
+
+    event.volume_db = session.event_volume_db_at_capture + 6.0
+
+    assert controller._refresh_recent_preview_session() is True
+    assert published_sessions
+    assert published_sessions[-1].tracked_base_volume_db == event.volume_db
+    assert published_sessions[-1].effective_volume_db == event.volume_db + 3.0
 
     controller.is_dirty = False
     controller.window.close()
