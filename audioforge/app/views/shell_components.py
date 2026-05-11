@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QTabWidget, QVBoxLayout, QWidget
 
+from audioforge.app.utils.constants import WWISE_MASTER_MIXER_TITLE
+
 
 class DetachedToolWindow(QWidget):
     closeRequested = Signal()
@@ -55,7 +57,7 @@ class TaskSidebar(QFrame):
         button_specs = [
             ("resources", "资源整理"),
             ("events", "事件设计"),
-            ("buses", "总线与混音"),
+            ("buses", WWISE_MASTER_MIXER_TITLE),
             ("validation", "校验修复"),
             ("build", "构建交付"),
         ]

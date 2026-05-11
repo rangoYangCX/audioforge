@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, QThread, Signal, Slot
@@ -28,6 +29,9 @@ from audioforge.app.utils.constants import (
     MIN_CLIP_WEIGHT,
     PROJECT_EXTENSION,
     SUPPORTED_AUDIO_EXTENSIONS,
+    WWISE_DEFAULT_BUS_LABEL,
+    WWISE_OUTPUT_BUS_LABEL,
+    WWISE_TRANSPORT_TITLE,
 )
 from audioforge.app.utils.runtime_logging import get_runtime_log_config
 from audioforge.app.views.main_window import MainWindow
@@ -40,6 +44,94 @@ LOUDNESS_SCAN_THRESHOLDS = {
 }
 
 logger = logging.getLogger(__name__)
+
+DIAGNOSTIC_FALLBACK_SUMMARY = "诊断概览已接入结果中心；等待新的日志、校验、构建或响度结果。"
+DIAGNOSTIC_SECTION_DEFAULTS = {
+    "log": "最近日志：等待运行输出。",
+    "validation": "等待校验。",
+    "build": "等待构建或差异预览。",
+    "loudness": "等待响度扫描。",
+    "bus": "等待 Bus 上下文。",
+}
+DIAGNOSTIC_PRIORITY_ORDER = ("validation", "build", "loudness", "bus", "log")
+DIAGNOSTIC_SECTION_TITLES = {
+    "validation": "校验",
+    "build": "构建",
+    "loudness": "响度",
+    "bus": "Bus 状态",
+    "log": "日志",
+}
+
+
+@dataclass(slots=True)
+class DiagnosticSection:
+    name: str
+    default_summary: str
+    summary: str = ""
+    detail: str = ""
+    status: str = "idle"
+    target_type: str = ""
+    target_id: str = ""
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.summary:
+            self.summary = self.default_summary
+        if not self.detail:
+            self.detail = self.summary
+
+    def reset(self) -> None:
+        self.summary = self.default_summary
+        self.detail = self.default_summary
+        self.status = "idle"
+        self.target_type = ""
+        self.target_id = ""
+        self.metadata = {}
+
+    def update(
+        self,
+        *,
+        summary: str,
+        detail: str | None = None,
+        status: str = "info",
+        target_type: str = "",
+        target_id: str = "",
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        normalized_summary = summary.strip() or self.default_summary
+        normalized_detail = (detail if detail is not None else normalized_summary).strip() or normalized_summary
+        self.summary = normalized_summary
+        self.detail = normalized_detail
+        self.status = status
+        self.target_type = target_type.strip()
+        self.target_id = target_id.strip()
+        self.metadata = dict(metadata or {})
+
+
+def _create_default_diagnostic_sections() -> dict[str, DiagnosticSection]:
+    return {
+        name: DiagnosticSection(name=name, default_summary=default_summary)
+        for name, default_summary in DIAGNOSTIC_SECTION_DEFAULTS.items()
+    }
+
+
+@dataclass(slots=True)
+class DiagnosticSnapshot:
+    summary: str = DIAGNOSTIC_FALLBACK_SUMMARY
+    sections: dict[str, DiagnosticSection] = field(default_factory=_create_default_diagnostic_sections)
+
+    def section(self, name: str) -> DiagnosticSection:
+        return self.sections[name]
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "summary": self.summary,
+            "log_summary": self.section("log").summary,
+            "validation_summary": self.section("validation").summary,
+            "build_summary": self.section("build").summary,
+            "loudness_summary": self.section("loudness").summary,
+            "bus_summary": self.section("bus").summary,
+        }
 
 
 class _BuildWorker(QObject):
@@ -150,6 +242,7 @@ class MainController(QObject):
         self.selected_folder_id: str | None = None
         self.is_dirty = False
         self._analysis_status: dict[str, dict[str, str]] = {}
+        self._diagnostic_snapshot = DiagnosticSnapshot()
         self._build_thread: QThread | None = None
         self._build_worker: _BuildWorker | None = None
         self._active_build_scope_label: str | None = None
@@ -265,6 +358,11 @@ class MainController(QObject):
         self.window.clipEdited.connect(self.update_clip_field)
         self.window.loudnessScanRequested.connect(self.scan_project_loudness)
         self.window.reportTargetRequested.connect(self.navigate_to_report_target)
+        self.window.logAppended.connect(self._handle_log_appended)
+        self.window.diagnosticContextChanged.connect(self._publish_diagnostic_snapshot)
+        self.window.validationReportUpdated.connect(self._handle_validation_report_updated)
+        self.window.buildStatusUpdated.connect(self._handle_build_status_updated)
+        self.window.loudnessReportUpdated.connect(self._handle_loudness_report_updated)
 
     def _refresh_ui(self) -> None:
         navigation_state = self.window.navigation_state()
@@ -296,6 +394,267 @@ class MainController(QObject):
         self._update_object_context()
         self._sync_build_selection_context()
         self.window.apply_navigation_state(navigation_state)
+        self._publish_diagnostic_snapshot()
+
+    def _reset_diagnostic_snapshot(self) -> None:
+        self._diagnostic_snapshot = DiagnosticSnapshot()
+
+    def _current_navigation_target(self) -> tuple[str, str]:
+        if self.selected_event_id is not None and self.selected_event_id in self.project.events:
+            return "event", self.selected_event_id
+        if self.selected_folder_id is not None and self.selected_folder_id in self.project.folders:
+            return "folder", self.selected_folder_id
+        return "", ""
+
+    def _current_build_target_summary(self) -> tuple[str, str, str, str]:
+        target_type, target_id = self._current_navigation_target()
+        _, summary, detail = self._resolve_build_selection_context()
+        selection_label = summary.replace("当前范围：", "", 1).strip() or "整个工程"
+        return target_type, target_id, selection_label, detail
+
+    def _set_validation_diagnostic_summary(self, issues: list[ValidationIssue]) -> None:
+        section = self._diagnostic_snapshot.section("validation")
+        if not issues:
+            section.update(
+                summary="校验通过，没有发现问题。",
+                status="success",
+                metadata={"issue_count": 0, "error_count": 0, "warning_count": 0, "info_count": 0},
+            )
+            return
+        error_count = sum(1 for issue in issues if issue.severity == "Error")
+        warning_count = sum(1 for issue in issues if issue.severity == "Warning")
+        info_count = sum(1 for issue in issues if issue.severity == "Info")
+        first_issue = issues[0]
+        target = first_issue.target.strip() or "-"
+        section.update(
+            summary=f"{first_issue.severity} | {target} | {first_issue.code} | {first_issue.message}",
+            detail=(
+                f"目标：{target} | 级别：{first_issue.severity} | 代码：{first_issue.code} | "
+                f"错误 {error_count} | 警告 {warning_count} | 信息 {info_count}\n\n{first_issue.message}"
+            ),
+            status={"Error": "error", "Warning": "warning", "Info": "info"}.get(first_issue.severity, "info"),
+            target_type="auto",
+            target_id=target,
+            metadata={
+                "issue_count": len(issues),
+                "error_count": error_count,
+                "warning_count": warning_count,
+                "info_count": info_count,
+                "first_issue_code": first_issue.code,
+            },
+        )
+
+    def _set_build_diagnostic_summary(
+        self,
+        summary: str,
+        detail: str | None = None,
+        *,
+        status: str = "info",
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        section = self._diagnostic_snapshot.section("build")
+        normalized = (detail or summary).strip()
+        target_type, target_id, selection_label, selection_detail = self._current_build_target_summary()
+        section.update(
+            summary=normalized or DIAGNOSTIC_SECTION_DEFAULTS["build"],
+            detail=detail or summary,
+            status=status,
+            target_type=target_type,
+            target_id=target_id,
+            metadata={
+                "summary": summary,
+                "detail": detail or summary,
+                "selection_label": selection_label,
+                "selection_detail": selection_detail,
+                **(metadata or {}),
+            },
+        )
+
+    def _set_loudness_diagnostic_summary(self, report: dict[str, object]) -> None:
+        section = self._diagnostic_snapshot.section("loudness")
+        rows = report.get("rows") or []
+        flagged_events = int(report.get("flagged_events") or 0)
+        analyzed_events = int(report.get("analyzed_events") or 0)
+        if not rows:
+            section.update(
+                summary="没有可分析的事件或片段。",
+                status="info",
+                metadata={"analyzed_events": analyzed_events, "flagged_events": flagged_events},
+            )
+            return
+        first_row = rows[0]
+        findings = first_row.get("findings") or []
+        detail = "；".join(findings) if findings else "未发现超标项"
+        section.update(
+            summary=f"事件 {first_row['event_id']} | {detail}",
+            detail=(
+                f"事件 {first_row['event_id']} | 片段 {first_row['clip_id']} | 资源 {first_row['asset_key']} | "
+                f"Integrated {first_row['integrated_lufs']:.1f} LUFS | "
+                f"Momentary Max {first_row['momentary_max_lufs']:.1f} LUFS | True Peak {first_row['true_peak_db']:.1f} dBTP"
+            ),
+            status="warning" if flagged_events else "success",
+            target_type="event",
+            target_id=str(first_row["event_id"]),
+            metadata={
+                "analyzed_events": analyzed_events,
+                "flagged_events": flagged_events,
+                "clip_id": first_row["clip_id"],
+                "asset_key": first_row["asset_key"],
+            },
+        )
+
+    def _set_bus_diagnostic_summary(self) -> None:
+        section = self._diagnostic_snapshot.section("bus")
+        current_project_bus = self.window.current_project_bus_name() or self.project.settings.default_bus or "-"
+        current_event_bus = self.current_event.bus if self.current_event is not None else current_project_bus
+        default_bus = self.project.settings.default_bus or "-"
+        summary = (
+            f"Bus 视图 {current_project_bus} | {WWISE_OUTPUT_BUS_LABEL} {current_event_bus} | "
+            f"{WWISE_DEFAULT_BUS_LABEL} {default_bus}"
+        )
+        section.update(
+            summary=summary,
+            detail=(
+                f"当前 Bus 视图 {current_project_bus} | 当前对象输出 {current_event_bus} | 默认 Bus {default_bus} | "
+                f"总线数 {len(self.project.settings.buses)}"
+            ),
+            status="info",
+            target_type="event" if self.current_event is not None else ("folder" if self.selected_folder_id else ""),
+            target_id=self.current_event.id if self.current_event is not None else (self.selected_folder_id or ""),
+            metadata={
+                "current_project_bus": current_project_bus,
+                "current_event_bus": current_event_bus,
+                "default_bus": default_bus,
+                "bus_count": len(self.project.settings.buses),
+            },
+        )
+
+    def _build_diagnostic_section_items(self) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        for section_name in DIAGNOSTIC_PRIORITY_ORDER:
+            section = self._diagnostic_snapshot.section(section_name)
+            items.append(
+                {
+                    "title": f"{DIAGNOSTIC_SECTION_TITLES[section_name]} | {section.summary}",
+                    "detail": section.detail,
+                    "target_type": section.target_type,
+                    "target_id": section.target_id,
+                    "severity": section.status,
+                    "section": section_name,
+                }
+            )
+        return items
+
+    def _build_build_profile_items(self) -> list[dict[str, object]]:
+        section = self._diagnostic_snapshot.section("build")
+        metadata = section.metadata
+        target_type, target_id, selection_label, selection_detail = self._current_build_target_summary()
+        requested_scope_label = str(metadata.get("requested_scope_label") or "").strip()
+        effective_scope_label = str(metadata.get("effective_scope_label") or "").strip()
+        requested_scope = str(metadata.get("requested_scope") or "").strip()
+        effective_scope = str(metadata.get("effective_scope") or "").strip()
+        requested_scope_label = requested_scope_label or self._build_scope_label(requested_scope or self.window.current_build_scope())
+        effective_scope_label = effective_scope_label or (self._build_scope_label(effective_scope) if effective_scope else requested_scope_label)
+        rebuilt_asset_count = int(metadata.get("rebuilt_asset_count", -1))
+        reused_asset_count = int(metadata.get("reused_asset_count", -1))
+        removed_asset_count = int(metadata.get("removed_asset_count", -1))
+        out_of_scope_dirty_count = int(metadata.get("out_of_scope_dirty_count", -1))
+        export_root = str(metadata.get("export_root") or self.project.settings.export_root)
+        data_file = str(metadata.get("data_file") or "").strip()
+        manifest_file = str(metadata.get("manifest_file") or "").strip()
+
+        asset_detail = "等待预览导出差异或执行构建后，这里会显示重建、复用和移除画像。"
+        if rebuilt_asset_count >= 0 or reused_asset_count >= 0 or removed_asset_count >= 0:
+            asset_detail = (
+                f"重建 {max(rebuilt_asset_count, 0)} | 复用 {max(reused_asset_count, 0)} | "
+                f"移除 {max(removed_asset_count, 0)}"
+            )
+            if out_of_scope_dirty_count >= 0:
+                asset_detail = f"{asset_detail} | 选区外附带脏资源 {max(out_of_scope_dirty_count, 0)}"
+
+        delivery_detail = f"导出目录：{export_root} | 运行时格式：{self.project.settings.runtime_audio_format}"
+        if data_file or manifest_file:
+            delivery_detail = f"{delivery_detail} | 数据：{data_file or '-'} | 清单：{manifest_file or '-'}"
+
+        return [
+            {
+                "title": f"状态 | {section.summary}",
+                "detail": section.detail,
+                "severity": section.status,
+                "target_type": section.target_type,
+                "target_id": section.target_id,
+            },
+            {
+                "title": f"范围 | 请求 {requested_scope_label} | 实际 {effective_scope_label}",
+                "detail": f"当前模式画像以最近一次构建状态为准；若未构建，则显示当前选中的构建范围。",
+                "severity": "info",
+            },
+            {
+                "title": f"目标 | {str(metadata.get('selection_label') or selection_label)}",
+                "detail": str(metadata.get("selection_detail") or selection_detail),
+                "severity": "info",
+                "target_type": target_type,
+                "target_id": target_id,
+            },
+            {
+                "title": f"资源 | {asset_detail}",
+                "detail": asset_detail,
+                "severity": section.status if rebuilt_asset_count >= 0 else "info",
+            },
+            {
+                "title": f"交付 | {self.project.settings.source_audio_format} -> {self.project.settings.runtime_audio_format}",
+                "detail": delivery_detail,
+                "severity": "success" if data_file or manifest_file else "info",
+            },
+        ]
+
+    def _compose_diagnostic_summary(self) -> str:
+        for section_name in DIAGNOSTIC_PRIORITY_ORDER:
+            section = self._diagnostic_snapshot.section(section_name)
+            if section.summary != section.default_summary:
+                return section.summary
+        return "诊断概览已接入结果中心；这里统一汇总日志、校验、构建、响度和 Bus 状态。"
+
+    @Slot(str)
+    def _handle_log_appended(self, message: str) -> None:
+        normalized = message.strip()
+        self._diagnostic_snapshot.section("log").update(
+            summary=f"最近日志：{normalized}" if normalized else DIAGNOSTIC_SECTION_DEFAULTS["log"],
+            detail=normalized or DIAGNOSTIC_SECTION_DEFAULTS["log"],
+            status="info" if normalized else "idle",
+            metadata={"message": normalized},
+        )
+        self._publish_diagnostic_snapshot()
+
+    @Slot(object)
+    def _handle_validation_report_updated(self, issues: object) -> None:
+        self._set_validation_diagnostic_summary(list(issues or []))
+        self._publish_diagnostic_snapshot()
+
+    @Slot(str, str)
+    def _handle_build_status_updated(self, summary: str, detail: str) -> None:
+        self._set_build_diagnostic_summary(summary, detail)
+        self._publish_diagnostic_snapshot()
+
+    @Slot(str)
+    def _handle_loudness_report_updated(self, summary_text: str) -> None:
+        normalized = summary_text.strip()
+        self._diagnostic_snapshot.section("loudness").update(
+            summary=normalized or DIAGNOSTIC_SECTION_DEFAULTS["loudness"],
+            detail=normalized or DIAGNOSTIC_SECTION_DEFAULTS["loudness"],
+            status="success" if normalized else "idle",
+            metadata={"summary_text": normalized},
+        )
+        self._publish_diagnostic_snapshot()
+
+    @Slot()
+    def _publish_diagnostic_snapshot(self) -> None:
+        self._set_bus_diagnostic_summary()
+        self._diagnostic_snapshot.summary = self._compose_diagnostic_summary()
+        payload = self._diagnostic_snapshot.as_payload()
+        payload["sections"] = self._build_diagnostic_section_items()
+        payload["build_profile"] = self._build_build_profile_items()
+        self.window.set_diagnostic_snapshot(payload)
 
     @property
     def current_event(self) -> EventModel | None:
@@ -323,6 +682,7 @@ class MainController(QObject):
         self.selected_event_ids = []
         self.selected_folder_id = self.project.root_folder_ids[0]
         self.is_dirty = False
+        self._reset_diagnostic_snapshot()
         self._clear_recovery_snapshot()
         self.window.append_log("已新建工程。")
         self._refresh_ui()
@@ -358,6 +718,7 @@ class MainController(QObject):
         self.preview_service.clear()
         self.history.clear()
         self.is_dirty = False
+        self._reset_diagnostic_snapshot()
         self._clear_recovery_snapshot()
         self.selected_event_id = next(iter(self.project.events), None)
         self.selected_event_ids = [self.selected_event_id] if self.selected_event_id else []
@@ -622,7 +983,7 @@ class MainController(QObject):
         self.playback_service.refresh_bus_volumes(self._resolve_effective_preview_volume_db)
         self.sync_preview_bus_editor()
         self.window.append_log(
-            f"试听总线已更新：{state.name} 音量={state.volume_linear * 100:.0f}% 静音={'是' if state.is_muted else '否'}"
+            f"{WWISE_TRANSPORT_TITLE} 已更新：{state.name} 音量={state.volume_linear * 100:.0f}% 静音={'是' if state.is_muted else '否'}"
         )
 
     def apply_default_bus_to_all_events(self) -> None:
@@ -639,7 +1000,7 @@ class MainController(QObject):
             return changed
 
         if self._apply_mutation("Apply Default Bus To All Events", mutate):
-            self.window.append_log(f"已将默认总线“{default_bus}”应用到所有事件。")
+            self.window.append_log(f"已将 {WWISE_DEFAULT_BUS_LABEL} “{default_bus}”应用到所有事件。")
             self.window.set_active_property_category("事件")
             self._refresh_ui()
 
@@ -1462,6 +1823,8 @@ class MainController(QObject):
         )
         self.window.show_report_tab(3)
         self.window.append_log(f"响度扫描完成：共分析 {report['analyzed_events']} 个事件，超标 {report['flagged_events']} 个。")
+        self._set_loudness_diagnostic_summary(report)
+        self._publish_diagnostic_snapshot()
 
     def _scan_project_loudness(self) -> dict[str, object]:
         rows: list[dict[str, object]] = []
@@ -1704,7 +2067,7 @@ class MainController(QObject):
                 object_name=f"已选 {len(selected_events)} 个事件",
                 breadcrumb=self.project.name,
                 stats_text=f"片段 {clip_count} | 目录 {folder_count}",
-                summary_primary=f"总线 {self._selected_events_bus_summary()} | 可批量改总线/重命名/删除",
+                summary_primary=f"Bus {self._selected_events_bus_summary()} | 可批量改 Bus/重命名/删除",
                 summary_secondary=f"当前主事件 {self.selected_event_id or '-'} | 导出 {self.project.settings.runtime_audio_format}",
                 can_navigate_parent=False,
             )
@@ -1732,7 +2095,7 @@ class MainController(QObject):
                 object_name=event.display_name or event.id,
                 breadcrumb=" / ".join(part for part in breadcrumb_parts if part),
                 stats_text=f"片段 {len(event.clips)} | 标签 {len(clip_tags)} | 冷却 {cooldown_text}",
-                summary_primary=f"模式 {event.play_mode} | 总线 {event.bus} | 试听 {self.preview_bus_mixer.describe_bus(event.bus)}",
+                summary_primary=f"模式 {event.play_mode} | {WWISE_OUTPUT_BUS_LABEL} {event.bus} | 试听 {self.preview_bus_mixer.describe_bus(event.bus)}",
                 summary_secondary=f"实例 {instances_text} | 负载 {event.load_policy} | 输出 {self.project.settings.source_audio_format} -> {self.project.settings.runtime_audio_format}",
                 can_navigate_parent=folder_id is not None,
             )
@@ -1759,7 +2122,7 @@ class MainController(QObject):
                 object_name=folder.name,
                 breadcrumb=" / ".join(part for part in breadcrumb_parts if part),
                 stats_text=f"子文件夹 {len(folder.child_folder_ids)} | 事件 {len(folder.child_event_ids)}",
-                summary_primary=f"默认总线 {self.project.settings.default_bus} | 总线数 {len(self.project.settings.buses)}",
+                summary_primary=f"{WWISE_DEFAULT_BUS_LABEL} {self.project.settings.default_bus} | Bus 数 {len(self.project.settings.buses)}",
                 summary_secondary=f"导出目录 {self.project.settings.export_root} | 运行时 {self.project.settings.runtime_audio_format} | 最近对象 {self.selected_event_id or '无'}",
                 can_navigate_parent=self.project.find_folder_parent_id(folder.id) is not None,
             )
@@ -1779,7 +2142,7 @@ class MainController(QObject):
             object_name=self.project.name,
             breadcrumb=self.project.name,
             stats_text=f"事件 {len(self.project.events)} | 文件夹 {len(self.project.folders)}",
-            summary_primary=f"默认总线 {self.project.settings.default_bus} | 总线数 {len(self.project.settings.buses)}",
+            summary_primary=f"{WWISE_DEFAULT_BUS_LABEL} {self.project.settings.default_bus} | Bus 数 {len(self.project.settings.buses)}",
             summary_secondary=f"导出目录 {self.project.settings.export_root} | 运行时 {self.project.settings.runtime_audio_format}",
             can_navigate_parent=False,
         )
@@ -1892,6 +2255,7 @@ class MainController(QObject):
         self.preview_service.clear()
         self.history.clear()
         self.is_dirty = True
+        self._reset_diagnostic_snapshot()
         self.selected_event_id = next(iter(self.project.events), None)
         self.selected_event_ids = [self.selected_event_id] if self.selected_event_id else []
         self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id) if self.selected_event_id else next(iter(self.project.root_folder_ids), None)
@@ -1949,6 +2313,8 @@ class MainController(QObject):
         self.window.set_validation_report(self._format_validation_report(issues), issues)
         self.window.show_report_tab(1)
         self.window.show_validation_summary(issues)
+        self._set_validation_diagnostic_summary(issues)
+        self._publish_diagnostic_snapshot()
 
     def build_project(self) -> None:
         if self._is_build_running():
@@ -1959,6 +2325,12 @@ class MainController(QObject):
                 "请等待当前构建完成后再发起新的构建请求。",
                 activate_results=True,
             )
+            self._set_build_diagnostic_summary(
+                "构建正在进行中。",
+                "请等待当前构建完成后再发起新的构建请求。",
+                status="warning",
+            )
+            self._publish_diagnostic_snapshot()
             return
 
         build_request = self._current_build_request()
@@ -1969,6 +2341,8 @@ class MainController(QObject):
             self.window.set_build_report("构建未开始\n\n原因：当前选区没有可导出的事件。\n请先选择事件或包含事件的文件夹。")
             self.window.show_report_tab(2)
             self.window.append_log(f"选中构建已中止：{message}")
+            self._set_build_diagnostic_summary("选中构建无法开始。", message, status="warning")
+            self._publish_diagnostic_snapshot()
             return
 
         requested_scope_label = self._build_scope_label(build_request.scope)
@@ -1986,6 +2360,17 @@ class MainController(QObject):
             f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 已切换到后台构建，界面保持可响应。",
         )
         self.window.append_log(f"已开始构建导出：模式={requested_scope_label} 目标={build_request.selection_label}")
+        self._set_build_diagnostic_summary(
+            "正在构建导出，请稍候。",
+            f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 正在导出到：{self.project.settings.export_root}",
+            status="info",
+            metadata={
+                "requested_scope": build_request.scope,
+                "requested_scope_label": requested_scope_label,
+                "selection_label": build_request.selection_label,
+                "export_root": self.project.settings.export_root,
+            },
+        )
         if log_config is not None:
             self.window.append_log(f"诊断日志路径：{log_config.latest_log}")
         logger.info(
@@ -1996,6 +2381,7 @@ class MainController(QObject):
             self.project.name,
         )
         self.window.show_report_tab(2)
+        self._publish_diagnostic_snapshot()
 
         export_root = Path(self.project.settings.export_root)
         if not export_root.is_absolute():
@@ -2013,6 +2399,8 @@ class MainController(QObject):
             self.window.set_build_report("构建计划不可用\n\n原因：当前选区没有可导出的事件。\n请先选择事件或包含事件的文件夹。")
             self.window.show_report_tab(2)
             self.window.append_log(f"选中构建预览已中止：{message}")
+            self._set_build_diagnostic_summary("构建计划不可用。", message, status="warning")
+            self._publish_diagnostic_snapshot()
             return
         export_root = Path(self.project.settings.export_root)
         if not export_root.is_absolute():
@@ -2021,14 +2409,33 @@ class MainController(QObject):
             plan = self.exporter.plan_export(self.project, export_root, build_request)
             plan_summary, plan_detail = self._format_build_plan_summary(plan)
             self.window.set_build_plan_summary(plan_summary, plan_detail)
+            self._set_build_diagnostic_summary(
+                plan_summary,
+                plan_detail,
+                status="info",
+                metadata={
+                    "requested_scope": plan.requested_scope,
+                    "requested_scope_label": self._build_scope_label(plan.requested_scope),
+                    "effective_scope": plan.effective_scope,
+                    "effective_scope_label": self._build_scope_label(plan.effective_scope),
+                    "selection_label": plan.selection_label,
+                    "rebuilt_asset_count": len(plan.rebuilt_asset_keys),
+                    "reused_asset_count": len(plan.reused_asset_keys),
+                    "removed_asset_count": len(plan.removed_asset_keys),
+                    "out_of_scope_dirty_count": len(plan.out_of_scope_dirty_asset_keys),
+                    "export_root": str(export_root),
+                },
+            )
             report = self._format_export_diff_preview(export_root, plan)
         except Exception as exc:
             self.window.set_build_plan_summary("构建计划生成失败。", str(exc))
+            self._set_build_diagnostic_summary("构建计划生成失败。", str(exc), status="error")
             report = f"导出差异预览失败\n\n导出目录：{export_root}\n原因：{exc}"
             self.window.append_log(f"导出差异预览失败：{exc}")
         self.window.set_build_report(report)
         self.window.show_report_tab(2)
         self.window.append_log("已生成导出差异预览。")
+        self._publish_diagnostic_snapshot()
 
     def _create_build_validator(self) -> ProjectValidator:
         return ProjectValidator()
@@ -2077,6 +2484,18 @@ class MainController(QObject):
         )
         self.window.show_report_tab(1)
         self.window.show_validation_summary(issues)
+        self._set_validation_diagnostic_summary(issues)
+        self._set_build_diagnostic_summary(
+            "构建已中止。",
+            f"{requested_scope_label} 在校验阶段被拦截：存在 {error_count} 个错误。",
+            status="error",
+            metadata={
+                "error_count": error_count,
+                "requested_scope_label": requested_scope_label,
+                "export_root": str(self._active_build_export_root or self.project.settings.export_root),
+            },
+        )
+        self._publish_diagnostic_snapshot()
 
     @Slot(str, object)
     def _handle_build_failure(self, error_message: str, plan: ExportPlan | None) -> None:
@@ -2111,6 +2530,17 @@ class MainController(QObject):
             )
         )
         self.window.show_report_tab(2)
+        self._set_build_diagnostic_summary(
+            "构建失败。",
+            f"模式：{requested_scope_label} | 导出目录：{export_root} | 原因：{error_message}",
+            status="error",
+            metadata={
+                "requested_scope_label": requested_scope_label,
+                "export_root": str(export_root),
+                "selection_label": self._active_build_scope_label or requested_scope_label,
+            },
+        )
+        self._publish_diagnostic_snapshot()
         QMessageBox.critical(self.window, "构建失败", error_message)
 
     @Slot(object, object)
@@ -2138,6 +2568,27 @@ class MainController(QObject):
         )
         self.window.set_build_report(build_report)
         self.window.show_report_tab(2)
+        self._set_validation_diagnostic_summary(issues)
+        self._set_build_diagnostic_summary(
+            "构建完成。",
+            f"模式：{scope_display} | 已导出到：{result.data_file} | 清单：{result.manifest_file}",
+            status="success",
+            metadata={
+                "requested_scope": result.plan.requested_scope,
+                "requested_scope_label": requested_scope_label,
+                "effective_scope": result.plan.effective_scope,
+                "effective_scope_label": effective_scope_label,
+                "selection_label": result.plan.selection_label,
+                "rebuilt_asset_count": len(result.plan.rebuilt_asset_keys),
+                "reused_asset_count": len(result.plan.reused_asset_keys),
+                "removed_asset_count": len(result.plan.removed_asset_keys),
+                "out_of_scope_dirty_count": len(result.plan.out_of_scope_dirty_asset_keys),
+                "export_root": str(result.export_root),
+                "data_file": str(result.data_file),
+                "manifest_file": str(result.manifest_file),
+            },
+        )
+        self._publish_diagnostic_snapshot()
 
     @Slot()
     def _finalize_build_worker(self) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_NAME = "AudioForge"
-APP_VERSION = "0.05"
+APP_VERSION = "0.06.0"
 PROJECT_EXTENSION = ".afproj"
 SCHEMA_VERSION = 1
 PROJECT_VERSION = 1
@@ -36,3 +36,21 @@ MAX_CLIP_WEIGHT = 100
 CLIP_WEIGHT_PRESETS = [1, 2, 5, 10, 20, 50, 100]
 MIN_CLIP_TIME_MS = 0
 MAX_CLIP_TIME_MS = 999999
+
+WWISE_MASTER_MIXER_TITLE = "Bus 混音台"
+WWISE_MASTER_MIXER_HIERARCHY_TITLE = "Bus 层级"
+WWISE_PROPERTY_EDITOR_TITLE = "属性编辑器"
+WWISE_TRANSPORT_TITLE = "传输控制"
+WWISE_MASTER_AUDIO_BUS_TITLE = "主 Bus"
+WWISE_OUTPUT_BUS_LABEL = "输出 Bus"
+WWISE_TARGET_BUS_LABEL = "目标 Bus"
+WWISE_DEFAULT_BUS_LABEL = "默认 Bus"
+WWISE_BUS_NAME_LABEL = "Bus 名称"
+WWISE_PARENT_BUS_LABEL = "父 Bus"
+WWISE_ROUTING_LABEL = "路由"
+WWISE_CHILD_BUSES_LABEL = "子 Bus"
+WWISE_EFFECTIVE_OUTPUT_LABEL = "有效输出"
+WWISE_BUS_VIEW_LABEL = "Bus 视图"
+WWISE_BUS_WORKSPACE_KEYWORDS = "bus混音台 bus 混音台 master-mixer master mixer 总线 混音 bus层级 bus 层级 bus视图 bus 视图 输出bus 输出 bus 默认bus 默认 bus 父bus 父 bus 子bus 子 bus 主bus 主 bus 路由 属性编辑器 传输控制"
+WWISE_BUS_SEARCH_KEYWORDS = "bus 总线 路由 bus视图 bus 视图 输出bus 输出 bus 默认bus 默认 bus 父bus 父 bus 子bus 子 bus 主bus 主 bus"
+WWISE_RESOURCES_BATCH_FEEDBACK_KEYWORDS = "批量反馈 最近批量 批量编辑反馈 批处理反馈 batch feedback recent batch"

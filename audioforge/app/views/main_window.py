@@ -74,6 +74,23 @@ from audioforge.app.utils.constants import (
     MIN_PITCH_CENTS,
     MIN_VOLUME_DB,
     PROJECT_EXTENSION,
+    WWISE_BUS_NAME_LABEL,
+    WWISE_BUS_SEARCH_KEYWORDS,
+    WWISE_BUS_VIEW_LABEL,
+    WWISE_BUS_WORKSPACE_KEYWORDS,
+    WWISE_CHILD_BUSES_LABEL,
+    WWISE_DEFAULT_BUS_LABEL,
+    WWISE_EFFECTIVE_OUTPUT_LABEL,
+    WWISE_MASTER_AUDIO_BUS_TITLE,
+    WWISE_MASTER_MIXER_HIERARCHY_TITLE,
+    WWISE_MASTER_MIXER_TITLE,
+    WWISE_OUTPUT_BUS_LABEL,
+    WWISE_PARENT_BUS_LABEL,
+    WWISE_PROPERTY_EDITOR_TITLE,
+    WWISE_RESOURCES_BATCH_FEEDBACK_KEYWORDS,
+    WWISE_ROUTING_LABEL,
+    WWISE_TARGET_BUS_LABEL,
+    WWISE_TRANSPORT_TITLE,
 )
 from audioforge.app.widgets.clip_table import ClipTableWidget
 from audioforge.app.widgets.clip_waveform_editor import ClipWaveformEditor
@@ -124,6 +141,11 @@ class MainWindow(QMainWindow):
     projectSettingsChanged = Signal()
     previewBusSelectionChanged = Signal()
     previewBusStateChanged = Signal()
+    logAppended = Signal(str)
+    diagnosticContextChanged = Signal()
+    validationReportUpdated = Signal(object)
+    buildStatusUpdated = Signal(str, str)
+    loudnessReportUpdated = Signal(str)
     createFolderRequested = Signal()
     createEventRequested = Signal()
     renameSelectedRequested = Signal()
@@ -198,15 +220,15 @@ class MainWindow(QMainWindow):
         self.object_name_label = QLabel("未选择对象")
         self.object_scope_label = QLabel("Project / Root")
         self.object_stats_label = QLabel("片段 0 | 标签 0")
-        self.object_summary_primary_label = QLabel("模式 - | 总线 -")
+        self.object_summary_primary_label = QLabel(f"模式 - | {WWISE_OUTPUT_BUS_LABEL} -")
         self.object_summary_secondary_label = QLabel("生成 - | 来源 -")
-        self.object_event_bus_chip = QLabel("事件总线 -")
-        self.object_bus_browser_chip = QLabel("总线浏览 -")
+        self.object_event_bus_chip = QLabel(f"{WWISE_OUTPUT_BUS_LABEL} -")
+        self.object_bus_browser_chip = QLabel(f"{WWISE_BUS_VIEW_LABEL} -")
         self.object_context_hint_label = QLabel("当前浏览与编辑状态会在这里显示。")
         self.object_parent_button = QToolButton()
         self.object_preview_button = QPushButton("试听对象")
         self.object_contents_button = QPushButton("片段列表")
-        self.object_follow_bus_button = QPushButton("跟随事件总线")
+        self.object_follow_bus_button = QPushButton(f"跟随 {WWISE_OUTPUT_BUS_LABEL}")
         self.object_report_button = QPushButton("问题中心")
         self.reference_parent_value_button = QToolButton()
         self.reference_bus_value_button = QToolButton()
@@ -234,17 +256,17 @@ class MainWindow(QMainWindow):
         self.default_bus_combo = QComboBox()
         self.default_bus_combo.addItems(DEFAULT_BUSES)
         self.inline_bus_new_button = QPushButton("新建并分配")
-        self.inline_bus_set_default_button = QPushButton("设为默认")
-        self.inline_bus_to_master_button = QPushButton("挂回 Master")
-        self.inline_bus_open_parent_button = QPushButton("切到父总线")
+        self.inline_bus_set_default_button = QPushButton(f"设为 {WWISE_DEFAULT_BUS_LABEL}")
+        self.inline_bus_to_master_button = QPushButton(f"挂回 {WWISE_MASTER_AUDIO_BUS_TITLE}")
+        self.inline_bus_open_parent_button = QPushButton(f"切到 {WWISE_PARENT_BUS_LABEL}")
         self.inline_bus_header = QFrame()
-        self.inline_bus_name_chip = QLabel("总线 -")
-        self.inline_bus_parent_chip = QLabel("父级 -")
-        self.inline_bus_default_chip = QLabel("默认 -")
+        self.inline_bus_name_chip = QLabel("Bus -")
+        self.inline_bus_parent_chip = QLabel(f"{WWISE_PARENT_BUS_LABEL} -")
+        self.inline_bus_default_chip = QLabel(f"{WWISE_DEFAULT_BUS_LABEL} -")
         self.inline_bus_export_chip = QLabel("导出 -")
         self.project_bus_list = ProjectBusTreeWidget()
-        self.project_bus_add_button = QPushButton("新建总线")
-        self.project_bus_remove_button = QPushButton("删除总线")
+        self.project_bus_add_button = QPushButton("新建 Bus")
+        self.project_bus_remove_button = QPushButton("删除 Bus")
         self.project_bus_name_edit = QLineEdit()
         self.project_bus_name_edit.setPlaceholderText("Music")
         self.project_bus_parent_combo = QComboBox()
@@ -254,18 +276,18 @@ class MainWindow(QMainWindow):
         self.project_bus_volume_spin.setSingleStep(0.5)
         self.project_bus_volume_spin.setSuffix(" dB")
         self.project_bus_mute_check = QCheckBox("导出时静音")
-        self.project_bus_count_label = QLabel("总线 0 条")
-        self.project_bus_default_label = QLabel("默认总线：-")
-        self.project_bus_export_label = QLabel("未选择总线")
-        self.project_bus_route_label = QLabel("未选择总线")
+        self.project_bus_count_label = QLabel("Bus 0 条")
+        self.project_bus_default_label = QLabel(f"{WWISE_DEFAULT_BUS_LABEL}: -")
+        self.project_bus_export_label = QLabel("未选择 Bus")
+        self.project_bus_route_label = QLabel("未选择 Bus")
         self.project_bus_route_bar = QWidget()
-        self.project_bus_children_label = QLabel("下游总线：-")
+        self.project_bus_children_label = QLabel(f"{WWISE_CHILD_BUSES_LABEL}: -")
         self.project_bus_effective_value = QLabel("0%")
         self.project_bus_effective_bar = QProgressBar()
         self.project_bus_effective_bar.setRange(0, 100)
-        self.project_bus_summary_label = QLabel("在左侧选择总线后，可在音频属性页直接编辑当前总线。")
+        self.project_bus_summary_label = QLabel("在左侧选择 Bus 后，可在属性编辑器中直接编辑当前 Bus。")
         self.project_bus_summary_label.setWordWrap(True)
-        self.project_bus_focus_audio_button = QPushButton("在音频属性页编辑当前总线")
+        self.project_bus_focus_audio_button = QPushButton("在属性编辑器中编辑当前 Bus")
         self.project_master_summary_label = QLabel("Master")
         self.project_master_volume_spin = QDoubleSpinBox()
         self.project_master_volume_spin.setRange(MIN_VOLUME_DB, MAX_VOLUME_DB)
@@ -276,14 +298,14 @@ class MainWindow(QMainWindow):
         self.project_master_effective_value = QLabel("100%")
         self.project_master_effective_bar = QProgressBar()
         self.project_master_effective_bar.setRange(0, 100)
-        self.project_master_hint_label = QLabel("Master 现在会作为正式工程总线一起保存和导出；试听总控仍可在下方试听总线面板中单独调整。")
+        self.project_master_hint_label = QLabel("主 Bus 会作为正式工程 Bus 一起保存和导出；试听总控仍可在下方传输控制面板中单独调整。")
         self.preview_bus_combo = QComboBox()
         self.preview_bus_volume_spin = QDoubleSpinBox()
         self.preview_bus_volume_spin.setRange(0.0, 100.0)
         self.preview_bus_volume_spin.setDecimals(0)
         self.preview_bus_volume_spin.setSuffix(" %")
         self.preview_bus_mute_check = QCheckBox("静音")
-        self.preview_bus_effective_label = QLabel("有效输出：100%")
+        self.preview_bus_effective_label = QLabel(f"{WWISE_EFFECTIVE_OUTPUT_LABEL}: 100%")
         self.export_root_edit = QLineEdit()
         self.export_root_edit.setPlaceholderText("./Export")
         self.export_root_browse_button = QPushButton("选择目录")
@@ -337,10 +359,10 @@ class MainWindow(QMainWindow):
         ])
         self.clip_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.clip_selected_label = QLabel("未选择片段")
-        self.clip_source_detail_edit = QLineEdit()
-        self.clip_source_detail_edit.setPlaceholderText("源文件路径；可直接修正或粘贴")
         self.clip_asset_detail_edit = QLineEdit()
         self.clip_asset_detail_edit.setPlaceholderText("ui/click_01")
+        self.clip_source_detail_edit = QLineEdit()
+        self.clip_source_detail_edit.setPlaceholderText("C:/Audio/ui/click_01.wav")
         self.clip_weight_detail_spin = QSpinBox()
         self.clip_weight_detail_spin.setRange(MIN_CLIP_WEIGHT, MAX_CLIP_WEIGHT)
         self.clip_weight_detail_spin.setToolTip("相对权重，推荐 1-100；不需要所有片段加起来等于 100，0 不允许。")
@@ -476,6 +498,26 @@ class MainWindow(QMainWindow):
         self.loudness_report_output.setReadOnly(True)
         self.loudness_report_output.setPlaceholderText("响度扫描完成后，这里会显示条目细节、阈值与超标说明。")
         self._latest_log_message = ""
+        self.diagnostic_summary_label = QLabel("诊断概览已接入结果中心；等待新的日志、校验、构建或响度结果。")
+        self.diagnostic_log_summary_label = QLabel("最近日志：等待运行输出。")
+        self.diagnostic_validation_summary_label = QLabel(self.validation_summary_label.text())
+        self.diagnostic_build_summary_label = QLabel(self.build_summary_label.text())
+        self.diagnostic_loudness_summary_label = QLabel(self.loudness_summary_label.text())
+        self.diagnostic_bus_summary_label = QLabel("等待 Bus 上下文。")
+        self.diagnostic_section_list = QListWidget()
+        self.diagnostic_section_detail_output = QPlainTextEdit()
+        self.diagnostic_section_detail_output.setReadOnly(True)
+        self.diagnostic_section_detail_output.setPlaceholderText("选择左侧诊断 section 后，这里会显示控制器收口后的 detail、定位目标和上下文。")
+        self._diagnostic_snapshot_data = {
+            "summary": self.diagnostic_summary_label.text(),
+            "log_summary": self.diagnostic_log_summary_label.text(),
+            "validation_summary": self.diagnostic_validation_summary_label.text(),
+            "build_summary": self.diagnostic_build_summary_label.text(),
+            "loudness_summary": self.diagnostic_loudness_summary_label.text(),
+            "bus_summary": self.diagnostic_bus_summary_label.text(),
+            "sections": [],
+            "build_profile": [],
+        }
         self.clip_filter_edit = QLineEdit()
         self.clip_filter_edit.setPlaceholderText("按片段 ID、源路径、资源键或标签过滤")
         self.bulk_clip_weight_spin = QSpinBox()
@@ -507,6 +549,12 @@ class MainWindow(QMainWindow):
         self.build_plan_summary_label.setWordWrap(True)
         self.build_plan_detail_label = QLabel("点击“预览导出差异”或执行构建后，这里会显示重建、复用和移除计划。")
         self.build_plan_detail_label.setWordWrap(True)
+        self.build_profile_list = QListWidget()
+        self.build_profile_list.setMaximumHeight(132)
+        self.build_profile_detail_output = QPlainTextEdit()
+        self.build_profile_detail_output.setReadOnly(True)
+        self.build_profile_detail_output.setMaximumHeight(96)
+        self.build_profile_detail_output.setPlaceholderText("最近一次构建画像会在这里展开范围、资源差异与交付目标。")
         self.loudness_scan_button = QPushButton("响度扫描")
         self.recent_projects_combo = QComboBox()
         self.recent_projects_combo.setMinimumWidth(280)
@@ -560,20 +608,20 @@ class MainWindow(QMainWindow):
         self.new_event_button = QPushButton("新建事件")
         self.rename_button = QPushButton("重命名")
         self.delete_button = QPushButton("删除")
-        self.bulk_event_bus_button = QPushButton("批量改总线")
+        self.bulk_event_bus_button = QPushButton(f"批量改 {WWISE_OUTPUT_BUS_LABEL}")
         self.undo_button = QPushButton("撤销")
         self.redo_button = QPushButton("重做")
         self.validate_button = QPushButton("校验")
         self.preview_button = QPushButton("试听")
         self.stop_preview_event_button = QPushButton("停事件")
-        self.stop_preview_bus_button = QPushButton("停总线")
+        self.stop_preview_bus_button = QPushButton("停止 Bus")
         self.build_button = QPushButton("构建交付")
         self.build_execute_button = QPushButton("开始构建导出")
         self.import_clips_button = QPushButton("导入音频")
         self.remove_clips_button = QPushButton("移除片段")
         self.bulk_weight_button = QPushButton("批量权重")
         self.batch_rename_button = QPushButton("批量重命名")
-        self.apply_default_bus_button = QPushButton("默认总线应用到全部事件")
+        self.apply_default_bus_button = QPushButton(f"应用 {WWISE_DEFAULT_BUS_LABEL} 到全部事件")
         self.tree_search_button = QToolButton()
         self.global_search_edit = QLineEdit()
         self.global_search_edit.setPlaceholderText("搜索对象、总线、问题或结果")
@@ -586,6 +634,7 @@ class MainWindow(QMainWindow):
         self.activity_validation_summary_label = QLabel(self.validation_summary_label.text())
         self.activity_build_summary_label = QLabel(self.build_summary_label.text())
         self.activity_loudness_summary_label = QLabel(self.loudness_summary_label.text())
+        self.activity_diagnostic_summary_label = QLabel(self.diagnostic_summary_label.text())
         self.events_workspace_status_label = QLabel("等待选择事件。")
         self.event_overview_hint_label = QLabel("从左侧概览快速切到参数、资源或结果页。")
         self.resources_workspace_status_label = QLabel("等待导入或选择片段。")
@@ -598,8 +647,8 @@ class MainWindow(QMainWindow):
         self.resources_batch_feedback_field_label = QLabel("字段 -")
         self.resources_batch_feedback_summary_label = QLabel("进入“批处理”或使用资源页工具后，这里会显示最近一次成组修改。")
         self.resources_batch_feedback_detail_label = QLabel("支持批量权重、批量属性、批量重命名和排序反馈。")
-        self.buses_workspace_status_label = QLabel("等待选择事件总线。")
-        self.buses_overview_hint_label = QLabel("从左侧概览选择当前要处理的总线工作流。")
+        self.buses_workspace_status_label = QLabel(f"等待选择 {WWISE_OUTPUT_BUS_LABEL}。")
+        self.buses_overview_hint_label = QLabel(f"从左侧概览选择当前要处理的 {WWISE_MASTER_MIXER_TITLE} 工作流。")
         self.build_workspace_status_label = QLabel("等待准备导出配置。")
         self.build_overview_hint_label = QLabel("先确认导出设置，再查看差异和构建结果。")
         self.validation_overview_hint_label = QLabel("按级别与关键字聚焦问题，再回到对象或资源页修复。")
@@ -668,7 +717,7 @@ class MainWindow(QMainWindow):
         reference_layout.setVerticalSpacing(6)
         reference_layout.addWidget(QLabel("父级"), 0, 0)
         reference_layout.addWidget(self.reference_parent_value_button, 0, 1)
-        reference_layout.addWidget(QLabel("输出总线"), 0, 2)
+        reference_layout.addWidget(QLabel(WWISE_OUTPUT_BUS_LABEL), 0, 2)
         reference_layout.addWidget(self.reference_bus_value_button, 0, 3)
         reference_layout.addWidget(QLabel("资源"), 1, 0)
         reference_layout.addWidget(self.reference_assets_value_button, 1, 1)
@@ -681,7 +730,7 @@ class MainWindow(QMainWindow):
         general_layout = QFormLayout(self.event_general_group)
         general_layout.addRow("名称", self.display_name_edit)
         general_layout.addRow("对象 ID", self.event_id_edit)
-        general_layout.addRow("输出总线", self.bus_combo)
+        general_layout.addRow(WWISE_OUTPUT_BUS_LABEL, self.bus_combo)
         general_layout.addRow("播放机制", self.play_mode_combo)
         general_layout.addRow("加载方式", self.load_policy_combo)
         general_layout.addRow("标签", self.tags_summary_edit)
@@ -722,7 +771,7 @@ class MainWindow(QMainWindow):
         notes_layout = QVBoxLayout(self.notes_group)
         notes_layout.addWidget(self.notes_edit)
 
-        self.inline_bus_group = QGroupBox("当前输出总线")
+        self.inline_bus_group = QGroupBox(WWISE_PROPERTY_EDITOR_TITLE)
         inline_bus_layout = QVBoxLayout(self.inline_bus_group)
         self.inline_bus_header.setObjectName("InlineBusHeader")
         inline_bus_header_layout = QHBoxLayout(self.inline_bus_header)
@@ -744,17 +793,17 @@ class MainWindow(QMainWindow):
         route_bar_layout = QVBoxLayout(self.project_bus_route_bar)
         route_bar_layout.setContentsMargins(0, 0, 0, 0)
         route_bar_layout.setSpacing(6)
-        self.bus_routing_group = QGroupBox("Routing")
+        self.bus_routing_group = QGroupBox(WWISE_ROUTING_LABEL)
         bus_routing_layout = QVBoxLayout(self.bus_routing_group)
         bus_identity_form = QFormLayout()
-        bus_identity_form.addRow("总线名称", self.project_bus_name_edit)
-        bus_identity_form.addRow("父总线", self.project_bus_parent_combo)
+        bus_identity_form.addRow(WWISE_BUS_NAME_LABEL, self.project_bus_name_edit)
+        bus_identity_form.addRow(WWISE_PARENT_BUS_LABEL, self.project_bus_parent_combo)
         bus_routing_layout.addLayout(bus_identity_form)
-        route_caption = QLabel("总线路由")
+        route_caption = QLabel(WWISE_ROUTING_LABEL)
         route_caption.setProperty("role", "meterTitle")
         bus_routing_layout.addWidget(route_caption)
         bus_routing_layout.addWidget(self.project_bus_route_bar)
-        child_caption = QLabel("下游总线")
+        child_caption = QLabel(WWISE_CHILD_BUSES_LABEL)
         child_caption.setProperty("role", "meterTitle")
         bus_routing_layout.addWidget(child_caption)
         bus_routing_layout.addWidget(self.project_bus_children_label)
@@ -762,7 +811,7 @@ class MainWindow(QMainWindow):
         bus_level_layout = QFormLayout(self.bus_level_group)
         bus_level_layout.addRow("基础音量（dB）", self.project_bus_volume_spin)
         bus_level_layout.addRow("静音", self.project_bus_mute_check)
-        bus_level_layout.addRow("作者态输出", self.project_bus_effective_value)
+        bus_level_layout.addRow(WWISE_EFFECTIVE_OUTPUT_LABEL, self.project_bus_effective_value)
         bus_level_layout.addRow("输出表", self.project_bus_effective_bar)
         self.bus_validation_group = QGroupBox("导出结果")
         bus_validation_layout = QVBoxLayout(self.bus_validation_group)
@@ -814,15 +863,26 @@ class MainWindow(QMainWindow):
         build_layout.addWidget(self.build_plan_summary_label)
         build_layout.addWidget(self.build_plan_detail_label)
         build_layout.addWidget(self.preview_export_diff_button)
+        build_profile_group = QGroupBox("构建画像")
+        build_profile_layout = QVBoxLayout(build_profile_group)
+        build_profile_layout.setContentsMargins(10, 8, 10, 8)
+        build_profile_layout.setSpacing(6)
+        build_profile_hint = QLabel("这里直接消费控制器的 build metadata，不再从页面标签反推。")
+        build_profile_hint.setWordWrap(True)
+        build_profile_hint.setProperty("role", "workspaceSectionSummary")
+        build_profile_layout.addWidget(build_profile_hint)
+        build_profile_layout.addWidget(self.build_profile_list)
+        build_profile_layout.addWidget(self.build_profile_detail_output)
+        build_layout.addWidget(build_profile_group)
         build_layout.addStretch(1)
 
         self.project_settings_group = QGroupBox("工程总览")
         project_settings_layout = QFormLayout(self.project_settings_group)
-        project_settings_layout.addRow("默认总线", self.default_bus_combo)
+        project_settings_layout.addRow(WWISE_DEFAULT_BUS_LABEL, self.default_bus_combo)
         project_settings_layout.addRow("总线概况", self.project_bus_count_label)
         project_settings_layout.addRow("批量操作", self.apply_default_bus_button)
 
-        self.bus_browser_group = QGroupBox("总线浏览器")
+        self.bus_browser_group = QGroupBox(WWISE_MASTER_MIXER_HIERARCHY_TITLE)
         bus_browser_layout = QVBoxLayout(self.bus_browser_group)
         bus_browser_actions = QHBoxLayout()
         bus_browser_actions.addWidget(self.project_bus_add_button)
@@ -831,16 +891,16 @@ class MainWindow(QMainWindow):
         bus_browser_layout.addWidget(self.project_bus_list)
         bus_browser_layout.addWidget(self.project_bus_default_label)
 
-        self.master_bus_group = QGroupBox("Master 总线")
+        self.master_bus_group = QGroupBox(WWISE_MASTER_AUDIO_BUS_TITLE)
         master_bus_layout = QFormLayout(self.master_bus_group)
-        master_bus_layout.addRow("总线名称", self.project_master_summary_label)
+        master_bus_layout.addRow(WWISE_BUS_NAME_LABEL, self.project_master_summary_label)
         master_bus_layout.addRow("基础音量（dB）", self.project_master_volume_spin)
         master_bus_layout.addRow("静音", self.project_master_mute_check)
-        master_bus_layout.addRow("作者态输出", self.project_master_effective_value)
+        master_bus_layout.addRow(WWISE_EFFECTIVE_OUTPUT_LABEL, self.project_master_effective_value)
         master_bus_layout.addRow("输出表", self.project_master_effective_bar)
         master_bus_layout.addRow("说明", self.project_master_hint_label)
 
-        self.project_bus_overview_group = QGroupBox("总线工作区")
+        self.project_bus_overview_group = QGroupBox(WWISE_MASTER_MIXER_TITLE)
         project_bus_overview_layout = QVBoxLayout(self.project_bus_overview_group)
         project_bus_overview_layout.addWidget(self.project_bus_summary_label)
         project_bus_overview_layout.addWidget(self.project_bus_focus_audio_button)
@@ -1004,7 +1064,7 @@ class MainWindow(QMainWindow):
         loudness_view_layout.addWidget(self._build_loudness_monitor_view())
 
         self._property_compat_scroll_pages = {
-            1: self._build_property_compat_scroll("音频属性兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实编辑已迁到“总线与混音”工作区。"),
+            1: self._build_property_compat_scroll("音频属性兼容页", f"旧兼容接口仍会把这一页视作可滚动属性页；真实编辑已迁到“{WWISE_MASTER_MIXER_TITLE}”工作区。"),
             2: self._build_property_compat_scroll("生成兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实编辑已迁到“构建交付”工作区。"),
             3: self._build_property_compat_scroll("工程兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实工程配置已收口到独立工作区。"),
         }
@@ -1030,14 +1090,15 @@ class MainWindow(QMainWindow):
         self.property_group = self.events_workspace
 
         self.report_pages = QStackedWidget()
-        self._report_page_titles = ["当前：日志", "当前：校验报告", "当前：构建报告", "当前：响度扫描"]
+        self._report_page_titles = ["当前：日志", "当前：校验报告", "当前：构建报告", "当前：响度扫描", "当前：诊断概览"]
         self._report_pages: dict[int, QWidget] = {
             0: self._build_log_results_page(),
             1: self._build_validation_results_page(),
             2: self._build_build_results_page(),
             3: self._build_loudness_results_page(),
+            4: self._build_diagnostic_results_page(),
         }
-        for index in range(4):
+        for index in range(len(self._report_pages)):
             self.report_pages.addWidget(self._report_pages[index])
         self._active_report_index = 0
 
@@ -1046,6 +1107,7 @@ class MainWindow(QMainWindow):
         self.report_tabs.addTab(QWidget(), "校验报告")
         self.report_tabs.addTab(QWidget(), "构建报告")
         self.report_tabs.addTab(QWidget(), "响度扫描")
+        self.report_tabs.addTab(QWidget(), "诊断概览")
         self.report_tabs.hide()
 
         self.report_header = QFrame()
@@ -1061,6 +1123,7 @@ class MainWindow(QMainWindow):
         report_header_layout.addWidget(self._build_report_jump_button("校验", 1))
         report_header_layout.addWidget(self._build_report_jump_button("构建", 2))
         report_header_layout.addWidget(self._build_report_jump_button("扫描", 3))
+        report_header_layout.addWidget(self._build_report_jump_button("诊断", 4))
 
         self.results_center_panel = self._build_results_center_panel()
         self.activity_panel = self._build_activity_panel()
@@ -1076,7 +1139,7 @@ class MainWindow(QMainWindow):
         for mode, title, description in [
             ("events", "事件设计", "以事件参数、触发控制和响度监视作为专属工作区，不再依赖旧属性编辑器。"),
             ("resources", "资源整理", "集中处理片段编排、批处理和生成预览，不再从属性页反复跳转。"),
-            ("buses", "总线与混音", "将当前事件总线、总线浏览器和 Master 输出整合为独立混音工作区。"),
+            ("buses", WWISE_MASTER_MIXER_TITLE, "将当前输出 Bus、Bus 层级和主 Bus 整合为独立工作区。"),
             ("validation", "校验修复", "直接进入问题中心，按校验结果修复对象与资源。"),
             ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
             ("results", "结果中心", "统一回看日志、构建输出和响度扫描；校验修复仍在专门工作区完成。"),
@@ -1284,7 +1347,7 @@ class MainWindow(QMainWindow):
             return "event"
         if any(token in title for token in ["资源", "片段", "批处理"]):
             return "content"
-        if any(token in title for token in ["总线", "混音", "Routing", "Bus"]):
+        if any(token in title for token in ["总线", "混音", "Routing", "Bus", WWISE_MASTER_MIXER_TITLE, WWISE_PROPERTY_EDITOR_TITLE, WWISE_TRANSPORT_TITLE, "Master-Mixer"]):
             return "bus"
         if any(token in title for token in ["校验", "问题"]):
             return "validate"
@@ -1585,7 +1648,6 @@ class MainWindow(QMainWindow):
                 [
                     ("新建事件", self.createEventRequested.emit, "event"),
                     ("试听对象", self.previewRequested.emit, "play"),
-                    ("资源整理", lambda: self._activate_workspace_mode("resources"), "content"),
                     ("跟随总线", self._follow_current_event_bus, "bus"),
                 ],
             )
@@ -1612,18 +1674,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(
-            self._build_workspace_note_card(
-                "编辑节奏",
-                [
-                    "先确定对象命名、总线和播放机制，再处理随机范围与连击逻辑。",
-                    "响度监视器保持事件内联，便于边试听边校准。",
-                    "当前对象摘要与引用关系收回到左侧上下文区，主画布只保留编辑控件。",
-                ],
-            )
-        )
         layout.addWidget(self._wrap_emphasis_card("当前对象", self.object_header_frame, icon_name="event"))
-        layout.addWidget(self._wrap_emphasis_card("对象引用", self.reference_group, icon_name="route"))
         layout.addStretch(1)
         return panel
 
@@ -1680,7 +1731,6 @@ class MainWindow(QMainWindow):
                     ("导入音频", self._request_clip_import, "content"),
                     ("批量权重", self._request_bulk_weight, "audio"),
                     ("生成预览", lambda: self.set_active_contents_category("生成"), "generate"),
-                    ("进入构建交付", lambda: self._activate_workspace_mode("build"), "generate"),
                 ],
             )
         )
@@ -1694,23 +1744,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
         layout.addWidget(
-            self._build_workspace_note_card(
-                "混音工作台",
-                [
-                    "工程摘要保留在左侧上下文区，主画布聚焦总线树、路由和输出结果。",
-                    "需要手动比较路由和结果时，直接拖拽中间分割条扩展工作区。",
-                ],
-            )
-        )
-        layout.addWidget(self._wrap_emphasis_card("工程摘要", self.hero_panel, icon_name="app"))
-        layout.addWidget(
             self._build_workspace_overview_card(
-                "混音导航",
+                "Bus 导航",
                 self.buses_overview_hint_label,
                 [
-                    ("当前事件总线", self._follow_current_event_bus, "bus", 0, 0),
-                    ("切到父总线", self._select_parent_bus_for_current, "route", 0, 1),
-                    ("Master 输出", lambda: self._select_project_bus_by_name("Master"), "generate", 1, 0),
+                    (f"跟随 {WWISE_OUTPUT_BUS_LABEL}", self._follow_current_event_bus, "bus", 0, 0),
+                    (f"切到 {WWISE_PARENT_BUS_LABEL}", self._select_parent_bus_for_current, "route", 0, 1),
+                    (WWISE_MASTER_AUDIO_BUS_TITLE, lambda: self._select_project_bus_by_name("Master"), "generate", 1, 0),
                     ("回到事件", lambda: self._activate_workspace_mode("events"), "event", 1, 1),
                 ],
             )
@@ -1743,13 +1783,12 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         layout.addWidget(
             self._build_workspace_action_bar(
-                "总线与混音",
+                WWISE_MASTER_MIXER_TITLE,
                 self.buses_workspace_status_label,
                 [
-                    ("新建总线", self._request_add_project_bus, "bus"),
-                    ("设为默认", self._set_current_bus_as_default, "generate"),
-                    ("挂到 Master", self._route_current_bus_to_master, "route"),
-                    ("回到事件", lambda: self._activate_workspace_mode("events"), "event"),
+                    ("新建 Bus", self._request_add_project_bus, "bus"),
+                    (f"设为 {WWISE_DEFAULT_BUS_LABEL}", self._set_current_bus_as_default, "generate"),
+                    (f"挂到 {WWISE_MASTER_AUDIO_BUS_TITLE}", self._route_current_bus_to_master, "route"),
                 ],
             )
         )
@@ -1822,7 +1861,6 @@ class MainWindow(QMainWindow):
                     ("校验", self.validate_button.click, "validate"),
                     ("导出差异", self.previewExportDiffRequested.emit, "report"),
                     ("开始构建", self.buildRequested.emit, "generate"),
-                    ("交付回看", lambda: self.show_report_tab(2), "report"),
                 ],
             )
         )
@@ -1946,7 +1984,7 @@ class MainWindow(QMainWindow):
             "快速进入",
             [
                 "资源整理：先批量导入、清洗资源键，再切到事件设计。",
-                "总线与混音：集中看事件总线、父子路由和 Master 输出。",
+                f"{WWISE_MASTER_MIXER_TITLE}：集中看 {WWISE_OUTPUT_BUS_LABEL}、{WWISE_PARENT_BUS_LABEL} 路由和 {WWISE_MASTER_AUDIO_BUS_TITLE}。",
                 "结果中心：所有日志、校验、构建和响度结果都统一收口到这里。",
             ],
         )
@@ -1985,7 +2023,7 @@ class MainWindow(QMainWindow):
                 [
                     ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 0, 0),
                     ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 0, 1),
-                    ("总线与混音", lambda: self._activate_workspace_mode("buses"), "bus", 1, 0),
+                    (WWISE_MASTER_MIXER_TITLE, lambda: self._activate_workspace_mode("buses"), "bus", 1, 0),
                     ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 1, 1),
                 ],
             )
@@ -2027,6 +2065,57 @@ class MainWindow(QMainWindow):
         results_splitter.setStretchFactor(1, 5)
         layout.addWidget(results_splitter, 1)
         layout.addWidget(self._build_empty_state_card("日志区当前为空", "这通常意味着你刚打开工程，或者当前操作还没有触发导入、校验或构建链路。"))
+        return page
+
+    def _build_diagnostic_results_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_mode_surface_card(
+                "诊断概览",
+                "把最近日志、校验、构建、响度和 Bus 上下文统一收口到同一页；这里只做汇总和导航，不复制原有模块。",
+            )
+        )
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "当前约束",
+                [
+                    "不改 Unity 对接 SDK，也不改既有导出契约语义。",
+                    "诊断页只复用现有结果中心、结果坞和 Bus 状态，不新起平行模块。",
+                ],
+            )
+        )
+
+        summary_group = QGroupBox("当前诊断快照")
+        summary_layout = QVBoxLayout(summary_group)
+        summary_layout.setContentsMargins(12, 10, 12, 10)
+        summary_layout.setSpacing(8)
+        self.diagnostic_summary_label.setWordWrap(True)
+        self.diagnostic_summary_label.setProperty("role", "modeCardDescription")
+        summary_layout.addWidget(self.diagnostic_summary_label)
+
+        sections_group = QGroupBox("统一 Section 视图")
+        sections_layout = QVBoxLayout(sections_group)
+        sections_layout.setContentsMargins(12, 10, 12, 10)
+        sections_layout.setSpacing(8)
+        section_hint = QLabel("双击条目可跳转到对应对象；颜色与排序直接继承控制器的 section 状态。")
+        section_hint.setProperty("role", "workspaceSectionSummary")
+        section_hint.setWordWrap(True)
+        sections_layout.addWidget(section_hint)
+        section_splitter = QSplitter()
+        section_splitter.setOrientation(Qt.Orientation.Horizontal)
+        section_splitter.setChildrenCollapsible(False)
+        section_splitter.addWidget(self.diagnostic_section_list)
+        section_splitter.addWidget(self.diagnostic_section_detail_output)
+        section_splitter.setStretchFactor(0, 2)
+        section_splitter.setStretchFactor(1, 3)
+        sections_layout.addWidget(section_splitter, 1)
+
+        layout.addWidget(summary_group)
+        layout.addWidget(sections_group, 1)
+        layout.addWidget(self._build_empty_state_card("诊断页已就绪", "这里默认显示最近一次日志、校验、构建、响度和 Bus 上下文；后续只在现有链路上继续加深，不扩成第二套系统。"))
         return page
 
     def _build_validation_results_page(self) -> QWidget:
@@ -2109,6 +2198,7 @@ class MainWindow(QMainWindow):
                     ("校验", lambda: self.show_report_tab(1), "validate", 0, 1),
                     ("构建", lambda: self.show_report_tab(2), "generate", 1, 0),
                     ("响度", lambda: self.show_report_tab(3), "audio", 1, 1),
+                    ("诊断", lambda: self.show_report_tab(4), "report", 2, 0),
                 ],
             )
         )
@@ -2194,6 +2284,90 @@ class MainWindow(QMainWindow):
             fallback="等待响度扫描。",
         )
 
+    def _update_diagnostic_snapshot_labels(self) -> None:
+        snapshot = self._diagnostic_snapshot_data
+        self._set_activity_summary_text(
+            self.diagnostic_log_summary_label,
+            str(snapshot.get("log_summary", "")),
+            fallback="最近日志：等待运行输出。",
+        )
+        self._set_activity_summary_text(
+            self.diagnostic_validation_summary_label,
+            str(snapshot.get("validation_summary", "")),
+            fallback="等待校验。",
+        )
+        self._set_activity_summary_text(
+            self.diagnostic_build_summary_label,
+            str(snapshot.get("build_summary", "")),
+            fallback="等待构建或差异预览。",
+        )
+        self._set_activity_summary_text(
+            self.diagnostic_loudness_summary_label,
+            str(snapshot.get("loudness_summary", "")),
+            fallback="等待响度扫描。",
+        )
+        self._set_activity_summary_text(
+            self.diagnostic_bus_summary_label,
+            str(snapshot.get("bus_summary", "")),
+            fallback="等待 Bus 上下文。",
+        )
+        self._set_activity_summary_text(
+            self.diagnostic_summary_label,
+            str(snapshot.get("summary", "")),
+            fallback="诊断概览已接入结果中心；这里统一汇总日志、校验、构建、响度和 Bus 状态。",
+        )
+        self._set_activity_summary_text(
+            self.activity_diagnostic_summary_label,
+            str(snapshot.get("summary", "")),
+            fallback="诊断概览：统一回看最近日志、校验、构建、响度和 Bus 状态。",
+        )
+
+    def _update_snapshot_report_panel(
+        self,
+        list_widget: QListWidget,
+        output: QPlainTextEdit,
+        items: list[dict[str, object]],
+        empty_text: str,
+    ) -> None:
+        panel_state = self._capture_report_panel_state(list_widget, output)
+        self._set_report_items(list_widget, items)
+        if list_widget.count():
+            self._update_report_detail_from_item(list_widget, output)
+        else:
+            output.setPlainText(empty_text)
+        self._restore_report_panel_state(list_widget, output, panel_state)
+        if list_widget.count():
+            self._update_report_detail_from_item(list_widget, output)
+        else:
+            output.setPlainText(empty_text)
+
+    def set_diagnostic_snapshot(self, snapshot: dict[str, object]) -> None:
+        section_items = snapshot.get("sections", self._diagnostic_snapshot_data.get("sections", []))
+        build_profile_items = snapshot.get("build_profile", self._diagnostic_snapshot_data.get("build_profile", []))
+        self._diagnostic_snapshot_data = {
+            "summary": str(snapshot.get("summary", self._diagnostic_snapshot_data.get("summary", ""))),
+            "log_summary": str(snapshot.get("log_summary", self._diagnostic_snapshot_data.get("log_summary", ""))),
+            "validation_summary": str(snapshot.get("validation_summary", self._diagnostic_snapshot_data.get("validation_summary", ""))),
+            "build_summary": str(snapshot.get("build_summary", self._diagnostic_snapshot_data.get("build_summary", ""))),
+            "loudness_summary": str(snapshot.get("loudness_summary", self._diagnostic_snapshot_data.get("loudness_summary", ""))),
+            "bus_summary": str(snapshot.get("bus_summary", self._diagnostic_snapshot_data.get("bus_summary", ""))),
+            "sections": [dict(item) for item in section_items] if isinstance(section_items, list) else [],
+            "build_profile": [dict(item) for item in build_profile_items] if isinstance(build_profile_items, list) else [],
+        }
+        self._update_diagnostic_snapshot_labels()
+        self._update_snapshot_report_panel(
+            self.diagnostic_section_list,
+            self.diagnostic_section_detail_output,
+            self._diagnostic_snapshot_data["sections"],
+            "当前没有可显示的诊断 section。",
+        )
+        self._update_snapshot_report_panel(
+            self.build_profile_list,
+            self.build_profile_detail_output,
+            self._diagnostic_snapshot_data["build_profile"],
+            "当前还没有构建画像。",
+        )
+
     def _build_activity_panel(self) -> QWidget:
         panel = QWidget()
         panel.setMinimumHeight(self._minimum_report_panel_height)
@@ -2210,7 +2384,7 @@ class MainWindow(QMainWindow):
 
         activity_entry_label = QLabel("结果坞")
         activity_entry_label.setProperty("role", "busHeaderChip")
-        self.activity_hint_label.setText("底部常驻结果坞用于快速回看日志、校验、构建和响度结果。")
+        self.activity_hint_label.setText("底部常驻结果坞只保留高优先级摘要；完整回看统一进入结果中心。")
 
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
@@ -2229,19 +2403,10 @@ class MainWindow(QMainWindow):
         action_row.setContentsMargins(0, 0, 0, 0)
         action_row.setSpacing(6)
         results_button = QPushButton("结果中心")
-        validate_button = QPushButton("校验结果")
-        build_button = QPushButton("构建结果")
-        loudness_button = QPushButton("响度结果")
-        for compact_button in [results_button, validate_button, build_button, loudness_button]:
+        for compact_button in [results_button]:
             compact_button.setProperty("role", "activityCompactButton")
         results_button.clicked.connect(lambda: self._activate_workspace_mode("results"))
-        validate_button.clicked.connect(lambda: self.show_report_tab(1))
-        build_button.clicked.connect(lambda: self.show_report_tab(2))
-        loudness_button.clicked.connect(lambda: self.show_report_tab(3))
         action_row.addWidget(results_button)
-        action_row.addWidget(validate_button)
-        action_row.addWidget(build_button)
-        action_row.addWidget(loudness_button)
         action_row.addStretch(1)
 
         dock_note = QLabel("结果坞保持常驻，不改变导出契约；需要完整回看时仍可切到结果中心。")
@@ -2258,7 +2423,6 @@ class MainWindow(QMainWindow):
         summary_grid.addWidget(self._build_activity_summary_card("校验", self.activity_validation_summary_label), 0, 1)
         summary_grid.addWidget(self._build_activity_summary_card("构建", self.activity_build_summary_label), 1, 0)
         summary_grid.addWidget(self._build_activity_summary_card("响度", self.activity_loudness_summary_label), 1, 1)
-
         body_layout.addLayout(header_row)
         body_layout.addLayout(action_row)
         body_layout.addLayout(summary_grid)
@@ -2334,16 +2498,16 @@ class MainWindow(QMainWindow):
         intro_label = QLabel("把低频的应用级控制集中收纳到这里，避免工程首页堆叠。")
         intro_label.setWordWrap(True)
 
-        preview_bus_group = QGroupBox("试听总线")
+        preview_bus_group = QGroupBox(WWISE_TRANSPORT_TITLE)
         preview_bus_layout = QFormLayout(preview_bus_group)
-        preview_bus_layout.addRow("目标总线", self.preview_bus_combo)
+        preview_bus_layout.addRow(WWISE_TARGET_BUS_LABEL, self.preview_bus_combo)
         preview_bus_layout.addRow("预览音量", self.preview_bus_volume_spin)
         preview_bus_layout.addRow("静音", self.preview_bus_mute_check)
-        preview_bus_layout.addRow("有效输出", self.preview_bus_effective_label)
+        preview_bus_layout.addRow(WWISE_EFFECTIVE_OUTPUT_LABEL, self.preview_bus_effective_label)
 
         import_template_group = QGroupBox("导入模板默认值")
         import_template_layout = QFormLayout(import_template_group)
-        import_template_layout.addRow("默认总线", self.import_template_bus_combo)
+        import_template_layout.addRow(WWISE_DEFAULT_BUS_LABEL, self.import_template_bus_combo)
         import_template_layout.addRow("资源前缀", self.import_template_asset_prefix_edit)
         import_template_layout.addRow("默认标签", self.import_template_tags_edit)
         import_template_layout.addRow("说明", self.import_template_hint_label)
@@ -2409,7 +2573,7 @@ class MainWindow(QMainWindow):
             {
                 "title": "切到资源整理",
                 "description": "进入片段导入、批量编辑和内容整理工作区。",
-                "keywords": "resources clips content 资源 片段",
+                "keywords": f"resources clips content 资源 片段 {WWISE_RESOURCES_BATCH_FEEDBACK_KEYWORDS}",
                 "action": lambda: self._activate_workspace_mode("resources"),
             },
             {
@@ -2419,9 +2583,9 @@ class MainWindow(QMainWindow):
                 "action": lambda: self._activate_workspace_mode("events"),
             },
             {
-                "title": "切到总线与混音",
-                "description": "集中查看工程总线、父子路由和 Master 输出。",
-                "keywords": "buses mixer master 总线 混音 路由",
+                "title": f"切到 {WWISE_MASTER_MIXER_TITLE}",
+                "description": f"集中查看 {WWISE_OUTPUT_BUS_LABEL}、{WWISE_ROUTING_LABEL}、{WWISE_MASTER_MIXER_HIERARCHY_TITLE} 和 {WWISE_MASTER_AUDIO_BUS_TITLE}。",
+                "keywords": WWISE_BUS_WORKSPACE_KEYWORDS,
                 "action": lambda: self._activate_workspace_mode("buses"),
             },
             {
@@ -2442,31 +2606,22 @@ class MainWindow(QMainWindow):
                 "keywords": "results logs report 结果 日志 报告",
                 "action": lambda: self._activate_workspace_mode("results"),
             },
-            {
-                "title": "打开日志结果",
-                "description": "切到结果坞中的日志页。",
-                "keywords": "results logs 日志 结果",
-                "action": lambda: self.show_report_tab(0),
-            },
-            {
-                "title": "打开校验结果",
-                "description": "切到结果坞中的校验页。",
-                "keywords": "results validation 校验 结果",
-                "action": lambda: self.show_report_tab(1),
-            },
-            {
-                "title": "打开构建结果",
-                "description": "切到结果坞中的构建页。",
-                "keywords": "results build 构建 结果",
-                "action": lambda: self.show_report_tab(2),
-            },
-            {
-                "title": "打开响度结果",
-                "description": "切到结果坞中的响度页。",
-                "keywords": "results loudness 响度 结果",
-                "action": lambda: self.show_report_tab(3),
-            },
         ]
+
+    def _filter_command_palette_items(
+        self,
+        query: str,
+        commands: list[dict[str, object]] | None = None,
+    ) -> list[tuple[int, dict[str, object]]]:
+        available_commands = commands or self._command_palette_items()
+        normalized_query = query.strip().casefold()
+        filtered: list[tuple[int, dict[str, object]]] = []
+        for index, command in enumerate(available_commands):
+            haystack = f"{command['title']} {command['description']} {command['keywords']}".casefold()
+            if normalized_query and normalized_query not in haystack:
+                continue
+            filtered.append((index, command))
+        return filtered
 
     def _show_command_palette(self) -> None:
         commands = self._command_palette_items()
@@ -2481,11 +2636,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        intro_label = QLabel("输入关键字筛选工作区、结果页或隐藏动作，按 Enter 执行当前高亮项，Esc 关闭。")
+        intro_label = QLabel("输入关键字筛选工作区、对象入口或隐藏动作，按 Enter 执行当前高亮项，Esc 关闭。")
         intro_label.setWordWrap(True)
         filter_edit = QLineEdit()
         filter_edit.setClearButtonEnabled(True)
-        filter_edit.setPlaceholderText("搜索工作区、结果或隐藏动作，例如：总线、日志、另存")
+        filter_edit.setPlaceholderText("搜索工作区或隐藏动作，例如：bus、批量反馈、结果中心、另存")
         filter_edit.setProperty("role", "topSearchField")
 
         command_list = QListWidget()
@@ -2501,20 +2656,16 @@ class MainWindow(QMainWindow):
         def update_selected_command_detail() -> None:
             current_item = command_list.currentItem()
             if current_item is None:
-                detail_label.setText("没有匹配项。可以尝试输入“总线”“日志”“另存”等关键字。")
+                detail_label.setText("没有匹配项。可以尝试输入“bus”“批量反馈”“结果中心”“另存”等关键字。")
                 return
             command_index = current_item.data(Qt.ItemDataRole.UserRole)
             command = commands[int(command_index)]
             detail_label.setText(f"{command['title']}\n{command['description']}")
 
         def refresh_command_list() -> None:
-            query = filter_edit.text().strip().casefold()
             command_list.clear()
             visible_count = 0
-            for index, command in enumerate(commands):
-                haystack = f"{command['title']} {command['description']} {command['keywords']}".casefold()
-                if query and query not in haystack:
-                    continue
+            for index, command in self._filter_command_palette_items(filter_edit.text(), commands):
                 item = QListWidgetItem(f"{command['title']}\n{command['description']}")
                 item.setData(Qt.ItemDataRole.UserRole, index)
                 item.setToolTip(str(command["description"]))
@@ -2551,7 +2702,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(status_label)
 
         refresh_command_list()
-        filter_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
         dialog.exec()
 
     def _set_workspace_mode(self, mode: str) -> None:
@@ -2559,20 +2709,27 @@ class MainWindow(QMainWindow):
             "home": "欢迎页",
             "resources": "资源整理",
             "events": "事件设计",
-            "buses": "总线与混音",
+            "buses": WWISE_MASTER_MIXER_TITLE,
             "validation": "校验修复",
             "build": "构建交付",
             "results": "结果中心",
         }
         self._active_workspace_mode = mode
         self.task_sidebar.set_active_mode(mode)
-        self.shell_mode_title_label.setText(mode_titles.get(mode, "欢迎页"))
-        self.activity_summary_label.setText(f"当前工作模式：{mode_titles.get(mode, '欢迎页')}")
-        self.activity_hint_label.setText(self._current_workspace_context_text())
+        self.status_label.setText(f"当前工作区：{mode_titles.get(mode, mode)}")
 
     def _activate_workspace_mode(self, mode: str) -> None:
-        if mode == "validation-results":
-            mode = "validation"
+        previous_main_sizes = self._effective_main_splitter_sizes()
+        if mode == "logs-results":
+            self._active_report_index = 0
+            self.report_pages.setCurrentIndex(0)
+            self.report_tabs.setCurrentIndex(0)
+            mode = "results"
+        elif mode == "validation-results":
+            self._active_report_index = 1
+            self.report_pages.setCurrentIndex(1)
+            self.report_tabs.setCurrentIndex(1)
+            mode = "results"
         elif mode == "build-results":
             self._active_report_index = 2
             self.report_pages.setCurrentIndex(2)
@@ -2624,6 +2781,8 @@ class MainWindow(QMainWindow):
         self.workspace_mode_stack.updateGeometry()
         self.main_splitter.updateGeometry()
         self.workspace_splitter.updateGeometry()
+        if previous_main_sizes and not self._explorer_detached:
+            self._set_main_splitter_sizes(previous_main_sizes)
         self._set_workspace_mode(mode)
         self._update_object_bus_status()
 
@@ -2639,7 +2798,7 @@ class MainWindow(QMainWindow):
         candidates = self._global_search_candidates()
         matches = self._filter_global_search_candidates(query, candidates)
         if not matches:
-            self.report_detail_label.setText(f"没有找到匹配“{query}”的对象、总线或结果。")
+            self.report_detail_label.setText(f"没有找到匹配“{query}”的工作区、对象、Bus 或结果。")
             self.report_detail_label.setToolTip(query)
             return
         if len(matches) == 1:
@@ -2649,43 +2808,76 @@ class MainWindow(QMainWindow):
 
     def _global_search_candidates(self) -> list[dict[str, object]]:
         candidates: list[dict[str, object]] = []
+        candidates.extend(self._collect_workspace_search_candidates())
         candidates.extend(self._collect_tree_search_candidates())
         candidates.extend(self._collect_project_bus_search_candidates())
-        candidates.extend(
-            [
-                {
-                    "title": "结果页 | 日志",
-                    "description": "结果中心 / 日志页。",
-                    "keywords": "结果 日志 logs report",
-                    "priority": 30,
-                    "action": lambda: self.show_report_tab(0),
-                },
-                {
-                    "title": "结果页 | 校验",
-                    "description": "结果中心 / 校验页。",
-                    "keywords": "结果 校验 validation report",
-                    "priority": 30,
-                    "action": lambda: self.show_report_tab(1),
-                },
-                {
-                    "title": "结果页 | 构建",
-                    "description": "结果中心 / 构建页。",
-                    "keywords": "结果 构建 build report",
-                    "priority": 30,
-                    "action": lambda: self.show_report_tab(2),
-                },
-                {
-                    "title": "结果页 | 响度",
-                    "description": "结果中心 / 响度页。",
-                    "keywords": "结果 响度 loudness report",
-                    "priority": 30,
-                    "action": lambda: self.show_report_tab(3),
-                },
-            ]
-        )
         candidates.extend(self._collect_report_list_search_candidates(self.validation_issue_list, 1, "校验问题", 10))
         candidates.extend(self._collect_report_list_search_candidates(self.build_issue_list, 2, "构建结果", 20))
         candidates.extend(self._collect_report_list_search_candidates(self.loudness_issue_list, 3, "响度结果", 20))
+        return candidates
+
+    def _collect_workspace_search_candidates(self) -> list[dict[str, object]]:
+        candidates = [
+            {
+                "title": "工作区 | 欢迎页",
+                "description": "欢迎页 / 首页快捷入口。",
+                "keywords": "欢迎页 首页 home welcome",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("home"),
+            },
+            {
+                "title": "工作区 | 资源整理",
+                "description": "资源整理 / 片段编排、批处理、最近批量反馈。",
+                "keywords": f"资源整理 片段 编排 批处理 {WWISE_RESOURCES_BATCH_FEEDBACK_KEYWORDS}",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("resources"),
+            },
+            {
+                "title": "工作区 | 事件设计",
+                "description": "事件设计 / 事件属性、播放模式和引用关系。",
+                "keywords": "事件设计 事件 属性 播放模式 引用关系 events design",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("events"),
+            },
+            {
+                "title": f"工作区 | {WWISE_MASTER_MIXER_TITLE}",
+                "description": f"{WWISE_MASTER_MIXER_TITLE} / {WWISE_OUTPUT_BUS_LABEL}、{WWISE_ROUTING_LABEL}、{WWISE_MASTER_AUDIO_BUS_TITLE}。",
+                "keywords": WWISE_BUS_WORKSPACE_KEYWORDS,
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("buses"),
+            },
+            {
+                "title": "工作区 | 校验修复",
+                "description": "校验修复 / 问题筛选、定位和修复。",
+                "keywords": "校验 修复 validation issue problem",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("validation"),
+            },
+            {
+                "title": "工作区 | 构建交付",
+                "description": "构建交付 / 导出范围、交付预览和构建入口。",
+                "keywords": "构建 交付 导出 build export delivery",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("build"),
+            },
+            {
+                "title": "工作区 | 结果中心",
+                "description": "结果中心 / 日志、校验、构建和响度结果。",
+                "keywords": "结果中心 结果 日志 校验 构建 响度 results logs validation build loudness",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("results"),
+            },
+        ]
+        if self._has_resources_batch_feedback:
+            candidates.append(
+                {
+                    "title": "资源页 | 最近批量反馈",
+                    "description": self.resources_batch_feedback_summary_label.text().strip() or "查看最近一次批量编辑反馈。",
+                    "keywords": f"{WWISE_RESOURCES_BATCH_FEEDBACK_KEYWORDS} {self.resources_batch_feedback_title_label.text().strip()} {self.resources_batch_feedback_field_label.text().strip()}",
+                    "priority": 12,
+                    "action": lambda: self._activate_workspace_mode("resources"),
+                }
+            )
         return candidates
 
     def _collect_tree_search_candidates(self) -> list[dict[str, object]]:
@@ -2740,9 +2932,9 @@ class MainWindow(QMainWindow):
             muted_text = "静音" if bool(config.get("is_muted", False)) else "可用"
             candidates.append(
                 {
-                    "title": f"总线 | {bus_name}",
-                    "description": f"总线与混音 / 父级 {parent_bus} / {volume_db:.1f} dB / {muted_text}",
-                    "keywords": f"总线 bus mixer {bus_name} {parent_bus} {muted_text}",
+                    "title": f"Bus | {bus_name}",
+                    "description": f"{WWISE_MASTER_MIXER_TITLE} / {WWISE_PARENT_BUS_LABEL} {parent_bus} / {volume_db:.1f} dB / {muted_text}",
+                    "keywords": f"{WWISE_BUS_SEARCH_KEYWORDS} {bus_name} {parent_bus} {muted_text}",
                     "priority": 5,
                     "action": lambda name=bus_name: self._focus_project_bus_search_result(name),
                 }
@@ -3106,7 +3298,7 @@ class MainWindow(QMainWindow):
                 object_name="未选择对象",
                 breadcrumb="Project / Root",
                 stats_text="片段 0 | 标签 0",
-                summary_primary="模式 - | 总线 -",
+                summary_primary=f"模式 - | {WWISE_OUTPUT_BUS_LABEL} -",
                 summary_secondary="生成 - | 来源 -",
                 can_navigate_parent=False,
             )
@@ -3146,7 +3338,7 @@ class MainWindow(QMainWindow):
             object_name=event.display_name or event.id,
             breadcrumb=f"Project / Event / {event.id}",
             stats_text=f"片段 {len(event.clips)} | 标签 {len(event_tags)}",
-            summary_primary=f"模式 {event.play_mode} | 总线 {event.bus}",
+            summary_primary=f"模式 {event.play_mode} | {WWISE_OUTPUT_BUS_LABEL} {event.bus}",
             summary_secondary=f"实例 {'不限' if event.max_instances == 0 else event.max_instances} | 导出 {self.runtime_audio_format_combo.currentText()}",
             can_navigate_parent=True,
         )
@@ -3327,7 +3519,7 @@ class MainWindow(QMainWindow):
         elif self._active_workspace_mode == "events":
             editor_title = f"事件设计/{self.events_workspace_tabs.tabText(self.events_workspace_tabs.currentIndex())}"
         elif self._active_workspace_mode == "buses":
-            editor_title = "总线与混音/混音台"
+            editor_title = f"{WWISE_MASTER_MIXER_TITLE}/{WWISE_PROPERTY_EDITOR_TITLE}"
         elif self._active_workspace_mode == "build":
             editor_title = "构建交付/交付准备"
         elif self._active_workspace_mode == "resources":
@@ -3438,6 +3630,8 @@ class MainWindow(QMainWindow):
             "validation_report_panel": self._capture_report_panel_state(self.validation_issue_list, self.validation_report_output),
             "build_report_panel": self._capture_report_panel_state(self.build_issue_list, self.build_report_output),
             "loudness_report_panel": self._capture_report_panel_state(self.loudness_issue_list, self.loudness_report_output),
+            "diagnostic_report_panel": self._capture_report_panel_state(self.diagnostic_section_list, self.diagnostic_section_detail_output),
+            "build_profile_panel": self._capture_report_panel_state(self.build_profile_list, self.build_profile_detail_output),
         }
 
     def apply_navigation_state(self, state: dict[str, object] | None) -> None:
@@ -3478,19 +3672,22 @@ class MainWindow(QMainWindow):
         self._restore_report_panel_state(self.validation_issue_list, self.validation_report_output, state.get("validation_report_panel"))
         self._restore_report_panel_state(self.build_issue_list, self.build_report_output, state.get("build_report_panel"))
         self._restore_report_panel_state(self.loudness_issue_list, self.loudness_report_output, state.get("loudness_report_panel"))
+        self._restore_report_panel_state(self.diagnostic_section_list, self.diagnostic_section_detail_output, state.get("diagnostic_report_panel"))
+        self._restore_report_panel_state(self.build_profile_list, self.build_profile_detail_output, state.get("build_profile_panel"))
 
     def _update_object_bus_status(self) -> None:
         current_event_bus = self._current_event_bus_name() or "-"
         current_project_bus = self.current_project_bus_name() or "-"
-        self.object_event_bus_chip.setText(f"事件总线 {current_event_bus}")
+        self.object_event_bus_chip.setText(f"{WWISE_OUTPUT_BUS_LABEL} {current_event_bus}")
         if self._project_bus_selection_overridden and current_project_bus != current_event_bus:
-            self.object_bus_browser_chip.setText(f"手动浏览 {current_project_bus}")
-            bus_hint = f"当前正在浏览其他总线 {current_project_bus}；点击“跟随事件总线”可回到当前事件。"
+            self.object_bus_browser_chip.setText(f"{WWISE_BUS_VIEW_LABEL} {current_project_bus}")
+            bus_hint = f"当前正在浏览其他 Bus {current_project_bus}；点击“跟随 {WWISE_OUTPUT_BUS_LABEL}”可回到当前对象。"
         else:
-            self.object_bus_browser_chip.setText(f"跟随事件 {current_project_bus}")
-            bus_hint = f"当前总线浏览跟随事件 {current_project_bus}。"
+            self.object_bus_browser_chip.setText(f"{WWISE_BUS_VIEW_LABEL} {current_project_bus}")
+            bus_hint = f"当前 {WWISE_BUS_VIEW_LABEL} 跟随 {WWISE_OUTPUT_BUS_LABEL} {current_project_bus}。"
         self.object_context_hint_label.setText(f"{self._current_workspace_context_text()} | {bus_hint}")
         self._update_workspace_summary_labels()
+        self.diagnosticContextChanged.emit()
 
     def _update_workspace_summary_labels(self) -> None:
         selected_event_count = len(self.selected_tree_event_ids())
@@ -3504,10 +3701,10 @@ class MainWindow(QMainWindow):
         resources_workspace_title = self.contents_tabs.tabText(self.contents_tabs.currentIndex())
 
         self.events_workspace_status_label.setText(
-            f"已选事件 {selected_event_count} | 当前子页 {event_workspace_title} | 事件总线 {current_event_bus}。"
+            f"已选事件 {selected_event_count} | 当前子页 {event_workspace_title} | {WWISE_OUTPUT_BUS_LABEL} {current_event_bus}。"
         )
         self.event_overview_hint_label.setText(
-            f"对象摘要已前置到左侧。当前浏览 {event_workspace_title}，可快速跳去资源片段或校验结果继续处理。"
+            f"当前浏览 {event_workspace_title}。左侧保留单一对象摘要，主画布聚焦事件参数与响度。"
         )
         self.resources_workspace_status_label.setText(
             f"已选片段 {selected_clip_count} | 当前页 {resources_workspace_title} | 资源整理后可直接切到生成预览。"
@@ -3521,29 +3718,30 @@ class MainWindow(QMainWindow):
                 f"当前浏览 {resources_workspace_title}，已选片段 {selected_clip_count}。先做片段编排，再进批处理或预览镜像。"
             )
         self.buses_workspace_status_label.setText(
-            f"浏览总线 {current_project_bus} | 事件总线 {current_event_bus} | 默认总线 {self.default_bus_combo.currentText() or '-'}。"
+            f"{WWISE_BUS_VIEW_LABEL} {current_project_bus} | {WWISE_OUTPUT_BUS_LABEL} {current_event_bus} | {WWISE_DEFAULT_BUS_LABEL} {self.default_bus_combo.currentText() or '-'}。"
         )
         self.buses_overview_hint_label.setText(
-            f"当前浏览总线 {current_project_bus}。可直接切默认总线、挂到 Master，或回到事件总线继续调整。"
+            f"当前浏览 Bus {current_project_bus}。左侧只保留导航与工程设置，主画布用于路由和输出调整。"
         )
         if self._build_status_detail_override is not None:
             self.build_workspace_status_label.setText(self._build_status_detail_override)
         else:
             self.build_workspace_status_label.setText(
-                f"导出目录 {export_root} | 运行时格式 {runtime_format} | 最近结果页 {current_results_title}。"
+                f"导出目录 {export_root} | 运行时格式 {runtime_format} | {self.build_scope_target_label.text().strip()}。"
             )
         if self._build_status_summary_override is not None:
             self.build_overview_hint_label.setText(self._build_status_summary_override)
         else:
             self.build_overview_hint_label.setText(
-                f"导出目录 {export_root}，运行时格式 {runtime_format}。构建后优先回看 {current_results_title}。"
+                f"先确认导出目录、构建范围和差异画像，再执行正式构建。"
             )
         self.validation_overview_hint_label.setText(
-            f"{self.validation_filter_status_label.text()} 当前结果页为 {current_results_title}。"
+            f"{self.validation_filter_status_label.text()} 优先修错误，再处理警告。"
         )
         self.results_overview_hint_label.setText(
-            f"当前结果页 {current_results_title}。可在这里统一回看日志、校验、构建和响度输出。"
+            f"当前结果页 {current_results_title}。这里统一回看日志、校验、构建、响度和诊断。"
         )
+        self._update_diagnostic_snapshot_labels()
         self._update_activity_report_snapshot_labels()
 
     def _build_report_center_page(self, summary_label: QLabel, issue_list: QListWidget, detail_output: QPlainTextEdit) -> QWidget:
@@ -3565,11 +3763,16 @@ class MainWindow(QMainWindow):
         return page
 
     def _report_item_state(self, payload: dict[str, object]) -> str:
+        explicit_state = str(payload.get("state", "")).strip().casefold()
+        if explicit_state in {"error", "warning", "success", "info"}:
+            return explicit_state
         severity = str(payload.get("severity", "")).strip().casefold()
         if severity == "error":
             return "error"
         if severity == "warning":
             return "warning"
+        if severity == "success":
+            return "success"
         if severity == "info":
             return "info"
         title = str(payload.get("title", "")).casefold()
@@ -4185,6 +4388,7 @@ class MainWindow(QMainWindow):
         self.report_detail_label.setText(f"最近日志：{message[:80]}")
         self.report_detail_label.setToolTip(message)
         self._update_workspace_summary_labels()
+        self.logAppended.emit(message)
 
     def show_validation_summary(self, issues: list[ValidationIssue]) -> None:
         if not issues:
@@ -4292,7 +4496,7 @@ class MainWindow(QMainWindow):
         self.export_root_edit.setText(settings.export_root)
         self.source_audio_format_combo.setCurrentText(settings.source_audio_format)
         self.runtime_audio_format_combo.setCurrentText(settings.runtime_audio_format)
-        self.project_bus_default_label.setText(f"默认总线：{settings.default_bus}")
+        self.project_bus_default_label.setText(f"{WWISE_DEFAULT_BUS_LABEL}: {settings.default_bus}")
         self._sync_event_import_template_controls(settings.buses)
         self._load_selected_project_bus_details()
         self._loading_event = False
@@ -4367,7 +4571,7 @@ class MainWindow(QMainWindow):
     def current_project_bus_name(self) -> str:
         item = self.project_bus_list.currentItem()
         if item is None:
-            return ""
+            return "Master" if self._active_project_bus_name == "Master" else ""
         return str(item.data(0, Qt.ItemDataRole.UserRole) or "")
 
     def _project_master_bus_config(self) -> dict[str, object]:
@@ -4418,7 +4622,7 @@ class MainWindow(QMainWindow):
             return
         self._clear_layout_items(layout)
         if not route_names:
-            placeholder = QLabel("未选择总线")
+            placeholder = QLabel("未选择 Bus")
             placeholder.setProperty("role", "meterContext")
             layout.addWidget(placeholder)
             return
@@ -4432,17 +4636,17 @@ class MainWindow(QMainWindow):
                 subtitle = "当前"
             elif route_name == "Master":
                 tone = "master"
-                subtitle = "输出"
+                subtitle = "主 Bus"
             else:
                 tone = "parent"
-                subtitle = "上游"
+                subtitle = WWISE_PARENT_BUS_LABEL
             route_row.addWidget(self._build_project_bus_route_node(route_name, tone=tone, subtitle=subtitle))
             if index < len(route_names) - 1:
                 separator = QLabel("->")
                 separator.setProperty("role", "routeConnector")
                 route_row.addWidget(separator)
         if effective_linear is not None:
-            output_chip = QLabel(f"作者态 {effective_linear * 100:.0f}%")
+            output_chip = QLabel(f"{WWISE_EFFECTIVE_OUTPUT_LABEL} {effective_linear * 100:.0f}%")
             output_chip.setProperty("role", "busHeaderChip")
             route_row.addWidget(output_chip)
         route_row.addStretch(1)
@@ -4451,7 +4655,7 @@ class MainWindow(QMainWindow):
         branch_row = QHBoxLayout()
         branch_row.setContentsMargins(0, 0, 0, 0)
         branch_row.setSpacing(6)
-        branch_label = QLabel("下游")
+        branch_label = QLabel(WWISE_CHILD_BUSES_LABEL)
         branch_label.setProperty("role", "meterTitle")
         branch_row.addWidget(branch_label)
         if child_names:
@@ -4462,7 +4666,7 @@ class MainWindow(QMainWindow):
                 button.clicked.connect(lambda _checked=False, name=child_name: self._select_project_bus_by_name(name))
                 branch_row.addWidget(button)
         else:
-            placeholder = QLabel("无下游总线")
+            placeholder = QLabel("无子 Bus")
             placeholder.setProperty("role", "meterContext")
             branch_row.addWidget(placeholder)
         branch_row.addStretch(1)
@@ -4486,11 +4690,8 @@ class MainWindow(QMainWindow):
         button.setProperty("routeTone", tone)
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setAutoRaise(False)
-        button.setToolTip(f"切到总线：{bus_name}")
-        if bus_name == "Master":
-            button.clicked.connect(lambda _checked=False: self.project_master_volume_spin.setFocus(Qt.FocusReason.OtherFocusReason))
-        else:
-            button.clicked.connect(lambda _checked=False, name=bus_name: self._select_project_bus_by_name(name))
+        button.setToolTip(f"切到 Bus：{bus_name}")
+        button.clicked.connect(lambda _checked=False, name=bus_name: self._select_project_bus_by_name(name))
         return button
 
     def _refresh_project_bus_parent_options(self, selected_bus_name: str, current_parent_name: str) -> None:
@@ -4681,7 +4882,7 @@ class MainWindow(QMainWindow):
             ]
         self._project_bus_configs = [normalized_master, *normalized_children]
         self._rebuild_project_bus_tree(selected_bus_name=selected_bus_name)
-        self.project_bus_count_label.setText(f"总线 {len(self._project_bus_configs) - 1} 条")
+        self.project_bus_count_label.setText(f"Bus {len(self._project_bus_configs) - 1} 条")
         self._refresh_master_bus_summary()
 
     def _selected_project_bus_index(self) -> int:
@@ -4708,25 +4909,48 @@ class MainWindow(QMainWindow):
         self.inline_bus_to_master_button.setEnabled(has_selection)
         self.inline_bus_open_parent_button.setEnabled(has_selection)
         if not has_selection:
+            if self._active_project_bus_name == "Master":
+                child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == "Master"]
+                effective_linear = self._project_bus_effective_linear("Master")
+                self.project_bus_name_edit.clear()
+                self.project_bus_parent_combo.clear()
+                self.project_bus_volume_spin.setValue(0.0)
+                self.project_bus_mute_check.setChecked(False)
+                self.project_bus_export_label.setText("主 Bus，已写入 BusConfigs；Unity 初始化会恢复主 Bus 的音量与静音。")
+                self.project_bus_route_label.setText("Master")
+                self._rebuild_project_bus_route_bar(["Master"], child_names=child_names, effective_linear=effective_linear)
+                self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: " + (", ".join(child_names) if child_names else "-"))
+                self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
+                self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
+                self.inline_bus_group.setTitle(f"{WWISE_PROPERTY_EDITOR_TITLE}: {WWISE_MASTER_AUDIO_BUS_TITLE}")
+                self.inline_bus_set_default_button.setEnabled(False)
+                self.inline_bus_to_master_button.setEnabled(False)
+                self.inline_bus_open_parent_button.setEnabled(False)
+                self.project_bus_summary_label.setText("当前查看主 Bus；详细音量与静音可直接在右侧主 Bus 编辑区调整。")
+                self.inline_bus_name_chip.setText("Bus Master")
+                self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
+                self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
+                self.inline_bus_export_chip.setText("导出 BusConfigs")
+                return
             self._active_project_bus_name = ""
             self.project_bus_name_edit.clear()
             self.project_bus_parent_combo.clear()
             self.project_bus_volume_spin.setValue(0.0)
             self.project_bus_mute_check.setChecked(False)
-            self.project_bus_export_label.setText("未选择总线")
-            self.project_bus_route_label.setText("未选择总线")
+            self.project_bus_export_label.setText("未选择 Bus")
+            self.project_bus_route_label.setText("未选择 Bus")
             self._rebuild_project_bus_route_bar([])
-            self.project_bus_children_label.setText("下游总线：-")
+            self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: -")
             self.project_bus_effective_value.setText("0%")
             self.project_bus_effective_bar.setValue(0)
-            self.inline_bus_group.setTitle("当前输出总线")
+            self.inline_bus_group.setTitle(WWISE_PROPERTY_EDITOR_TITLE)
             self.inline_bus_set_default_button.setEnabled(False)
             self.inline_bus_to_master_button.setEnabled(False)
             self.inline_bus_open_parent_button.setEnabled(False)
-            self.project_bus_summary_label.setText("在左侧选择总线后，可在音频属性页直接编辑当前总线。")
-            self.inline_bus_name_chip.setText("总线 -")
-            self.inline_bus_parent_chip.setText("父级 -")
-            self.inline_bus_default_chip.setText("默认 -")
+            self.project_bus_summary_label.setText("在左侧选择 Bus 后，可在属性编辑器中直接编辑当前 Bus。")
+            self.inline_bus_name_chip.setText("Bus -")
+            self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
+            self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
             self.inline_bus_export_chip.setText("导出 -")
             return
         config = self._project_bus_configs[row]
@@ -4736,7 +4960,7 @@ class MainWindow(QMainWindow):
         self._refresh_project_bus_parent_options(bus_name, str(config.get("parent_bus", "Master")))
         self.project_bus_volume_spin.setValue(float(config["volume_db"]))
         self.project_bus_mute_check.setChecked(bool(config["is_muted"]))
-        role_text = "默认输出总线" if self.default_bus_combo.currentText() == bus_name else "普通输出总线"
+        role_text = WWISE_DEFAULT_BUS_LABEL if self.default_bus_combo.currentText() == bus_name else "普通 Bus"
         route_text = " -> ".join(self._project_bus_route_names(bus_name))
         child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == bus_name]
         effective_linear = self._project_bus_effective_linear(bus_name)
@@ -4746,20 +4970,20 @@ class MainWindow(QMainWindow):
             child_names=child_names,
             effective_linear=effective_linear,
         )
-        self.project_bus_children_label.setText("下游总线：" + (", ".join(child_names) if child_names else "-"))
+        self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: " + (", ".join(child_names) if child_names else "-"))
         self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
         self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
-        self.project_bus_export_label.setText(f"{role_text}，已写入 BusConfigs；Unity 初始化会按该路由链恢复音量与静音。")
-        self.inline_bus_group.setTitle(f"当前输出总线：{bus_name}")
+        self.project_bus_export_label.setText(f"{role_text}，已写入 BusConfigs；Unity 初始化会按该路由恢复音量与静音。")
+        self.inline_bus_group.setTitle(f"{WWISE_PROPERTY_EDITOR_TITLE}: {bus_name}")
         self.inline_bus_set_default_button.setEnabled(self.default_bus_combo.currentText() != bus_name)
         parent_bus_name = str(config.get("parent_bus", "Master") or "Master")
         self.inline_bus_open_parent_button.setEnabled(parent_bus_name != "Master")
-        self.inline_bus_name_chip.setText(f"总线 {bus_name}")
-        self.inline_bus_parent_chip.setText(f"父级 {parent_bus_name}")
-        self.inline_bus_default_chip.setText("默认 是" if self.default_bus_combo.currentText() == bus_name else "默认 否")
+        self.inline_bus_name_chip.setText(f"Bus {bus_name}")
+        self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} {parent_bus_name}")
+        self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} 是" if self.default_bus_combo.currentText() == bus_name else f"{WWISE_DEFAULT_BUS_LABEL} 否")
         self.inline_bus_export_chip.setText("导出 BusConfigs")
         self.project_bus_summary_label.setText(
-            f"当前选中：{bus_name}\n路由：{route_text}\n下游：{', '.join(child_names) if child_names else '无'}\n常用编辑已整合到音频属性页。"
+            f"当前选中：{bus_name}\n{WWISE_ROUTING_LABEL}: {route_text}\n{WWISE_CHILD_BUSES_LABEL}: {', '.join(child_names) if child_names else '无'}\n常用编辑已整合到属性编辑器。"
         )
 
     def _sync_project_bus_editor_to_state(
@@ -4786,21 +5010,21 @@ class MainWindow(QMainWindow):
             self.project_bus_name_edit.setText(current_name)
             self.project_bus_name_edit.blockSignals(False)
             if show_errors:
-                QMessageBox.warning(self, "总线名称重复", f"总线“{new_name}”已存在，请换一个名称。")
+                QMessageBox.warning(self, "Bus 名称重复", f"Bus“{new_name}”已存在，请换一个名称。")
             return False
         if new_parent_bus.casefold() == new_name.casefold():
             self.project_bus_parent_combo.blockSignals(True)
             self.project_bus_parent_combo.setCurrentText("Master")
             self.project_bus_parent_combo.blockSignals(False)
             if show_errors:
-                QMessageBox.warning(self, "父总线非法", "总线不能把自己作为父总线。")
+                QMessageBox.warning(self, "父 Bus 非法", "Bus 不能把自己作为父 Bus。")
             return False
         if self._would_create_project_bus_cycle(new_name, new_parent_bus):
             self.project_bus_parent_combo.blockSignals(True)
             self.project_bus_parent_combo.setCurrentText("Master")
             self.project_bus_parent_combo.blockSignals(False)
             if show_errors:
-                QMessageBox.warning(self, "父总线非法", "当前选择会形成总线路由环，请改为 Master 或其他上游总线。")
+                QMessageBox.warning(self, "父 Bus 非法", "当前选择会形成路由环，请改为 Master 或其他父 Bus。")
             return False
         current_config["name"] = new_name
         current_config["parent_bus"] = new_parent_bus
@@ -4814,8 +5038,8 @@ class MainWindow(QMainWindow):
                 config["parent_bus"] = new_name
         self.set_bus_options([str(config["name"]) for config in self._project_bus_child_configs()])
         self.default_bus_combo.setCurrentText(current_default_bus)
-        self.project_bus_default_label.setText(f"默认总线：{self.default_bus_combo.currentText() or '-'}")
-        self.project_bus_count_label.setText(f"总线 {len(self._project_bus_configs) - 1} 条")
+        self.project_bus_default_label.setText(f"{WWISE_DEFAULT_BUS_LABEL}: {self.default_bus_combo.currentText() or '-'}")
+        self.project_bus_count_label.setText(f"Bus {len(self._project_bus_configs) - 1} 条")
         self._set_project_bus_configs(
             [
                 BusConfig(
@@ -4829,7 +5053,7 @@ class MainWindow(QMainWindow):
             selected_bus_name=selected_bus_name or new_name,
         )
         self.default_bus_combo.setCurrentText(current_default_bus)
-        self.project_bus_default_label.setText(f"默认总线：{self.default_bus_combo.currentText() or '-'}")
+        self.project_bus_default_label.setText(f"{WWISE_DEFAULT_BUS_LABEL}: {self.default_bus_combo.currentText() or '-'}")
         self._load_selected_project_bus_details()
         return True
 
@@ -4851,9 +5075,40 @@ class MainWindow(QMainWindow):
         self._load_selected_project_bus_details()
         self._update_object_bus_status()
 
+    def _focus_master_bus_view(self) -> bool:
+        previous_bus_name = self._active_project_bus_name
+        if previous_bus_name and previous_bus_name != "Master":
+            if not self._sync_project_bus_editor_to_state(
+                show_errors=True,
+                bus_name=previous_bus_name,
+                selected_bus_name=previous_bus_name,
+            ):
+                return False
+            if not self._loading_event:
+                self.projectSettingsChanged.emit()
+
+        self._syncing_project_bus_selection = True
+        self.project_bus_list.blockSignals(True)
+        try:
+            self.project_bus_list.clearSelection()
+            self.project_bus_list.setCurrentItem(None)
+        finally:
+            self.project_bus_list.blockSignals(False)
+            self._syncing_project_bus_selection = False
+
+        if not self._loading_event:
+            self._project_bus_selection_overridden = True
+        self._active_project_bus_name = "Master"
+        self._load_selected_project_bus_details()
+        self._update_object_bus_status()
+        self.project_master_volume_spin.setFocus(Qt.FocusReason.OtherFocusReason)
+        return True
+
     def _select_project_bus_by_name(self, bus_name: str) -> bool:
         if not bus_name:
             return False
+        if bus_name == "Master":
+            return self._focus_master_bus_view()
         pending = [self.project_bus_list.topLevelItem(index) for index in range(self.project_bus_list.topLevelItemCount())]
         while pending:
             item = pending.pop(0)
@@ -4869,7 +5124,7 @@ class MainWindow(QMainWindow):
     def _sync_current_event_bus_selection(self, force: bool = False) -> None:
         bus_name = self._current_event_bus_name()
         if not bus_name:
-            self.inline_bus_group.setTitle("当前输出总线")
+            self.inline_bus_group.setTitle(WWISE_PROPERTY_EDITOR_TITLE)
             return
         if self._project_bus_selection_overridden and not force:
             return
@@ -4885,7 +5140,7 @@ class MainWindow(QMainWindow):
             return
         existing_names = {str(config["name"]).casefold() for config in self._project_bus_configs}
         if bus_name.casefold() in existing_names:
-            QMessageBox.warning(self, "新建总线失败", f"总线“{bus_name}”已存在。")
+            QMessageBox.warning(self, "新建 Bus 失败", f"Bus“{bus_name}”已存在。")
             return
         self._project_bus_configs.append(
             {
@@ -4919,7 +5174,7 @@ class MainWindow(QMainWindow):
         if not bus_name:
             return
         self.default_bus_combo.setCurrentText(bus_name)
-        self.project_bus_default_label.setText(f"默认总线：{bus_name}")
+        self.project_bus_default_label.setText(f"{WWISE_DEFAULT_BUS_LABEL}: {bus_name}")
         self._load_selected_project_bus_details()
         self._emit_project_settings_changed()
 
@@ -4937,7 +5192,7 @@ class MainWindow(QMainWindow):
             return
         parent_bus_name = str(self._project_bus_configs[row].get("parent_bus", "Master") or "Master")
         if parent_bus_name == "Master":
-            QMessageBox.information(self, "切到父总线", "当前总线已经直接挂在 Master 下。")
+            QMessageBox.information(self, f"切到 {WWISE_PARENT_BUS_LABEL}", f"当前 Bus 已经直接挂在 {WWISE_MASTER_AUDIO_BUS_TITLE} 下。")
             return
         self._select_project_bus_by_name(parent_bus_name)
         self.set_active_property_category("音频属性")
@@ -4953,7 +5208,7 @@ class MainWindow(QMainWindow):
             return
         existing_names = {str(config["name"]).casefold() for config in self._project_bus_configs}
         if bus_name.casefold() in existing_names:
-            QMessageBox.warning(self, "新建总线失败", f"总线“{bus_name}”已存在。")
+            QMessageBox.warning(self, "新建 Bus 失败", f"Bus“{bus_name}”已存在。")
             return
         current_parent = self.current_project_bus_name() or "Master"
         self._project_bus_configs.append(
@@ -4978,7 +5233,7 @@ class MainWindow(QMainWindow):
             selected_bus_name=bus_name,
         )
         self.set_bus_options([str(config["name"]) for config in self._project_bus_child_configs()])
-        self.project_bus_default_label.setText(f"默认总线：{self.default_bus_combo.currentText() or '-'}")
+        self.project_bus_default_label.setText(f"{WWISE_DEFAULT_BUS_LABEL}: {self.default_bus_combo.currentText() or '-'}")
         self._load_selected_project_bus_details()
         self._emit_project_settings_changed()
 
@@ -4987,10 +5242,10 @@ class MainWindow(QMainWindow):
         if row < 0:
             return
         if str(self._project_bus_configs[row]["name"]) == "Master":
-            QMessageBox.information(self, "删除总线", "Master 是固定总线，不能删除。")
+            QMessageBox.information(self, "删除 Bus", f"{WWISE_MASTER_AUDIO_BUS_TITLE} 是固定 Bus，不能删除。")
             return
         if len(self._project_bus_configs) <= 2:
-            QMessageBox.information(self, "删除总线", "工程至少需要保留一条总线。")
+            QMessageBox.information(self, "删除 Bus", "工程至少需要保留一条 Bus。")
             return
         removed_name = str(self._project_bus_configs[row]["name"])
         removed_parent = str(self._project_bus_configs[row].get("parent_bus", "Master"))
@@ -5014,7 +5269,7 @@ class MainWindow(QMainWindow):
         self.set_bus_options([str(config["name"]) for config in self._project_bus_child_configs()])
         if self.default_bus_combo.currentText().casefold() == removed_name.casefold():
             self.default_bus_combo.setCurrentText(selected_bus_name)
-        self.project_bus_default_label.setText(f"默认总线：{self.default_bus_combo.currentText() or '-'}")
+        self.project_bus_default_label.setText(f"{WWISE_DEFAULT_BUS_LABEL}: {self.default_bus_combo.currentText() or '-'}")
         self._load_selected_project_bus_details()
         self._emit_project_settings_changed()
 
@@ -5095,6 +5350,7 @@ class MainWindow(QMainWindow):
         self._restore_report_panel_state(self.validation_issue_list, self.validation_report_output, panel_state)
         self.report_detail_label.setText("校验报告已刷新，可在问题中心快速定位对象。")
         self._update_workspace_summary_labels()
+        self.validationReportUpdated.emit(issues)
 
     def set_build_report(self, report_text: str, highlights: list[dict[str, object]] | None = None) -> None:
         panel_state = self._capture_report_panel_state(self.build_issue_list, self.build_report_output)
@@ -5134,6 +5390,7 @@ class MainWindow(QMainWindow):
             self.report_pages.setCurrentIndex(2)
             self.report_tabs.setCurrentIndex(2)
         self._update_workspace_summary_labels()
+        self.buildStatusUpdated.emit(summary, detail)
 
     def clear_build_status(self) -> None:
         self._build_status_summary_override = None
@@ -5163,6 +5420,7 @@ class MainWindow(QMainWindow):
         self.loudness_summary_label.setText(summary_text or "响度扫描报告已刷新。双击条目可跳转到事件。")
         self.report_detail_label.setText("响度扫描报告已刷新。")
         self._update_workspace_summary_labels()
+        self.loudnessReportUpdated.emit(summary_text or "响度扫描报告已刷新。双击条目可跳转到事件。")
 
     def show_report_tab(self, index: int) -> None:
         if not 0 <= index < len(self._report_page_titles):
@@ -5206,7 +5464,7 @@ class MainWindow(QMainWindow):
         bus_name, accepted = QInputDialog.getItem(
             self,
             "导入模板",
-            "导入后挂到哪个总线",
+            f"导入后挂到哪个 {WWISE_OUTPUT_BUS_LABEL}",
             bus_options,
             current=bus_options.index(current_bus_label) if current_bus_label in bus_options else (bus_options.index(default_bus) if default_bus in bus_options else 0),
             editable=False,
@@ -5251,7 +5509,7 @@ class MainWindow(QMainWindow):
         return event_id.strip() if accepted else ""
 
     def ask_new_bus_name(self) -> str:
-        bus_name, accepted = QInputDialog.getText(self, "新建总线", "总线名称")
+        bus_name, accepted = QInputDialog.getText(self, "新建 Bus", WWISE_BUS_NAME_LABEL)
         return bus_name.strip() if accepted else ""
 
     def ask_rename_value(self, title: str, label: str, initial_value: str) -> str:
@@ -5292,8 +5550,8 @@ class MainWindow(QMainWindow):
             return None
         bus_name, accepted = QInputDialog.getItem(
             self,
-            "批量修改事件总线",
-            "目标总线",
+            f"批量修改事件{WWISE_OUTPUT_BUS_LABEL}",
+            WWISE_TARGET_BUS_LABEL,
             bus_names,
             current=bus_names.index(current_bus) if current_bus in bus_names else 0,
             editable=False,
@@ -5706,8 +5964,16 @@ class MainWindow(QMainWindow):
         self.validation_issue_list.itemSelectionChanged.connect(self._sync_validation_issue_actions)
         self.build_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.build_issue_list, self.build_report_output))
         self.loudness_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.loudness_issue_list, self.loudness_report_output))
+        self.diagnostic_section_list.itemSelectionChanged.connect(
+            lambda: self._update_report_detail_from_item(self.diagnostic_section_list, self.diagnostic_section_detail_output)
+        )
+        self.build_profile_list.itemSelectionChanged.connect(
+            lambda: self._update_report_detail_from_item(self.build_profile_list, self.build_profile_detail_output)
+        )
         self.validation_issue_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.validation_issue_list))
         self.loudness_issue_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.loudness_issue_list))
+        self.diagnostic_section_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.diagnostic_section_list))
+        self.build_profile_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.build_profile_list))
         self.tree_filter_edit.textChanged.connect(self.tree.apply_filter)
         self.tree_filter_edit.returnPressed.connect(self._search_next_tree_event)
         self.tree_search_button.clicked.connect(self._search_next_tree_event)
@@ -5795,7 +6061,7 @@ class MainWindow(QMainWindow):
         new_event_action = menu.addAction("新建事件")
         import_action = menu.addAction("批量导入音频为事件...")
         menu.addSeparator()
-        bulk_bus_action = menu.addAction("批量改事件总线...")
+        bulk_bus_action = menu.addAction(f"批量改事件{WWISE_OUTPUT_BUS_LABEL}...")
         rename_action = menu.addAction("重命名")
         delete_action = menu.addAction("删除")
         copy_id_action = menu.addAction("复制对象标识")
@@ -6062,6 +6328,7 @@ class MainWindow(QMainWindow):
         self.report_tabs.setTabIcon(1, load_app_icon("validate"))
         self.report_tabs.setTabIcon(2, load_app_icon("generate"))
         self.report_tabs.setTabIcon(3, load_app_icon("audio"))
+        self.report_tabs.setTabIcon(4, load_app_icon("report"))
         self.zoom_out_button.setText("A-")
         self.zoom_out_button.setIcon(load_app_icon("content"))
         self.zoom_out_button.setToolTip("缩小界面")
@@ -6550,10 +6817,10 @@ class MainWindow(QMainWindow):
             QToolButton {{
                 text-align: left;
             }}
-            QGroupBox[title="总线工作区"] QLabel {{
+            QGroupBox[title="{WWISE_MASTER_MIXER_TITLE}"] QLabel {{
                 color: #b9c7d6;
             }}
-            QGroupBox[title="当前输出总线"] QLabel {{
+            QGroupBox[title="{WWISE_PROPERTY_EDITOR_TITLE}"] QLabel {{
                 background: transparent;
             }}
             QLineEdit::placeholder, QPlainTextEdit::placeholder {{

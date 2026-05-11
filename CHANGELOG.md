@@ -8,9 +8,19 @@
 - 每个版本至少记录：新增能力、行为变化、修复项、验证结果。
 - Git 提交负责记录实现细节；本文件负责回答“这一版具体给用户带来了什么变化”。
 
-当前已补录的版本范围：0.03 - 0.05，并使用 `Unreleased` 记录尚未单独发版的维护更新。
+当前已补录的版本范围：0.03 - 0.06.0，并使用 `Unreleased` 记录尚未单独发版的维护更新。
 
 ## [Unreleased]
+
+- 暂无。
+
+## [0.06.0] - 2026-05-11
+
+### Added
+
+- 结果中心新增“诊断概览”页，统一展示最近日志、校验、构建、响度和 Bus 上下文，不再平行新增第二套诊断模块。
+- `MainController` 新增结构化 `DiagnosticSnapshot` / `DiagnosticSection` 收口，诊断 section 与 build metadata 会直接回流到主窗口。
+- 构建交付页新增构建画像列表与详情，当前构建范围、资源差异和交付目标会直接显示在页面内。
 
 ### Changed
 
@@ -21,23 +31,25 @@
 - 顶部“命令面板”已进一步收敛为导航与隐藏动作面板，并新增 `Ctrl+Shift+P` 快捷入口；顶栏和工作区中已经显式可见的执行按钮不再在这里重复暴露。
 - 顶部全局搜索保留工程树过滤同步，但执行搜索时已升级为跨对象跳转，可直接命中工程对象、总线、校验问题、构建结果和响度结果。
 - 底部结果坞新增结构化摘要卡，日志、校验、构建和响度状态会同步汇总到常驻入口层，减少在结果中心与主工作区之间来回切换。
-- 总线工作区新增路由图，可直接查看当前总线到 Master 的上游链路、下游分支和作者态输出百分比，并从图上跳转到相邻总线。
+- Bus 混音台新增路由图，可直接查看当前 Bus 到主 Bus 的父 Bus 链路、子 Bus 和有效输出百分比，并从图上跳转到相邻 Bus。
 - 资源工作区新增批量编辑反馈卡，最近一次批量权重、批量属性、批量重命名、排序和拖拽重排都会在当前事件上下文中保留摘要。
 
 ### Fixed
 
 - 修复大批量构建在 UI 线程同步导出时容易卡死甚至崩溃的问题。
 - 修复部分 OGG 资源在“同格式、无额外处理”路径下重复编码时可能卡住导出的问题。
+- 修复工作区在 `events` / `build` / `validation` / `results` 间切换时 `main_splitter` 被当前页 `sizeHint` 重新分配，导致中央编辑区被挤窄、内页签布局错乱的问题。
 
 ### Validation
 
 - `pytest tests/unit/test_main_controller_full_flow.py::test_build_project_returns_before_background_export_finishes tests/unit/test_main_controller_full_flow.py::test_full_authoring_flow_from_wav_import_to_export tests/unit/test_main_controller_full_flow.py::test_invalid_combo_and_instance_limits_block_build_consistently tests/unit/test_main_controller_layout.py::test_build_project_handles_export_failure`：4/4 通过。
 - `pytest tests/unit/test_exporter.py::test_audio_processor_copies_same_format_without_reencoding tests/unit/test_exporter.py::test_runtime_exporter_writes_bundle_and_assets tests/unit/test_exporter.py::test_runtime_exporter_is_stable_across_repeated_exports tests/unit/test_exporter.py::test_runtime_exporter_incremental_rebuilds_only_changed_assets`：4/4 通过。
+- `pytest tests/unit/test_main_controller_layout.py`：41/41 通过。
 - 问题文件 `game_bgm.ogg` 的同格式导出隔离探针已通过，不再卡在 OGG 写出阶段。
 - PySide 离屏烟雾验证已通过：命令面板会保留导航与隐藏动作条目，且不再重复暴露新建工程、保存工程、构建导出等显式按钮动作。
 - PySide 离屏烟雾验证已通过：全局搜索候选可命中事件、总线和构建结果，且能触发对应跳转动作。
 - PySide 离屏烟雾验证已通过：结果坞摘要卡会同步最近日志、校验计数、构建亮点和响度结论。
-- PySide 离屏烟雾验证已通过：总线路由图会生成“上游链路 + 下游分支”两层结构，资源页最近批量反馈会在同一事件内保留并回写概览提示。
+- PySide 离屏烟雾验证已通过：Bus 路由图会生成“父 Bus 链路 + 子 Bus”两层结构，资源页最近批量反馈会在同一事件内保留并回写概览提示。
 
 ## [0.05] - 2026-04-30
 

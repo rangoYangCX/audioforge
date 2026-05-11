@@ -2,7 +2,7 @@
 
 这个目录是 Unity 侧运行时资源的独立维护包，也是仓库内的唯一源码真源。
 
-当前文档同步日期：2026-05-08
+当前文档同步日期：2026-05-11
 
 ## 目录定位
 
@@ -31,18 +31,18 @@
 - `Verification/`：最近一次机器验证报告与内部签收摘要。
 - `README.md`：包根总说明。
 
-## 2026-05-08 维护说明
+## 2026-05-11 版本说明
 
-- 本轮维护更新只改了桌面工具侧的构建执行、日志和同格式音频导出策略，没有修改 `unity_package/Assets/AudioForgeRuntime` 下的 Unity 运行时代码。
-- 因此已经生成好的 `dist/AudioForgeUnityPackage-0.05/` 不会被动变化；只有重新执行 `python tools/package_unity_integration_package.py` 或完整发版流程时，包内文档副本、验证材料和示例导出物才会刷新。
-- 如果你只是把 SDK 代码交给 Unity 开发同学，这轮维护更新不要求重新拷贝 `AudioForgeRuntime`；如果你还要同步新的导出样例或新的 Verification 证据，则需要重新打包。
+- 0.06.0 这轮发布主要更新了桌面工具侧的诊断收口、工作台布局和交付文档，没有修改 `unity_package/Assets/AudioForgeRuntime` 下的 Unity 运行时代码。
+- 因此已经生成好的 Unity SDK 包不会被动变化；只有重新执行 `python tools/package_unity_integration_package.py` 或完整发版流程时，包内文档副本、验证材料和示例导出物才会刷新。
+- 如果你只是把 SDK 代码交给 Unity 开发同学，这次版本不要求重新拷贝 `AudioForgeRuntime`；如果你还要同步新的文档、副本验证结果或新的导出样例，则需要重新打包。
 
 ## 打包产物
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.05/`
-- `AudioForgeUnityPackage-0.05.zip`
+- `AudioForgeUnityPackage-0.06.0/`
+- `AudioForgeUnityPackage-0.06.0.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 

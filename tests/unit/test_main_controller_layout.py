@@ -9,8 +9,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from audioforge.app.controllers.main_controller import MainController
 from audioforge.app.models.audio_project import ClipModel, ValidationIssue
 from audioforge.app.services.recovery_service import RecoveryService
+from audioforge.app.utils.constants import WWISE_BUS_VIEW_LABEL, WWISE_MASTER_MIXER_TITLE
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QToolButton
 
 
 def _wait_for_build_completion(controller: MainController, timeout_seconds: float = 10.0) -> None:
@@ -262,6 +264,32 @@ def test_refresh_ui_preserves_editor_and_splitter_state(monkeypatch) -> None:
     controller.window.close()
 
 
+def test_workspace_mode_switch_keeps_main_editor_width(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.resize(1280, 800)
+    controller.window.show()
+    QApplication.processEvents()
+
+    controller.window._activate_workspace_mode("events")
+    controller.window.main_splitter.setSizes([290, 788])
+    QApplication.processEvents()
+    expected_main_sizes = controller.window.main_splitter.sizes()
+
+    for mode in ["build", "validation", "results", "events"]:
+        controller.window._activate_workspace_mode(mode)
+        QApplication.processEvents()
+
+        assert controller.window.main_splitter.sizes() == expected_main_sizes
+        assert controller.window.workspace_mode_stack.width() == expected_main_sizes[1]
+        assert controller.window.workspace_mode_stack.currentWidget() is not None
+        assert controller.window.workspace_mode_stack.currentWidget().width() == expected_main_sizes[1]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_restore_default_layout_resets_tabs_and_reports(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
@@ -422,8 +450,88 @@ def test_manual_project_bus_selection_updates_object_status(monkeypatch) -> None
     controller.window._select_project_bus_by_name("SFX")
     QApplication.processEvents()
 
-    assert controller.window.object_event_bus_chip.text() == "事件总线 UI"
-    assert controller.window.object_bus_browser_chip.text() == "手动浏览 SFX"
+    assert controller.window.object_event_bus_chip.text() == "输出 Bus UI"
+    assert controller.window.object_bus_browser_chip.text() == "Bus 视图 SFX"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_route_graph_master_node_switches_to_master_bus_view(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.show()
+    controller.window._activate_workspace_mode("buses")
+    controller.window._select_project_bus_by_name("SFX")
+    QApplication.processEvents()
+
+    route_nodes = [
+        button
+        for button in controller.window.project_bus_route_bar.findChildren(QToolButton)
+        if button.property("role") == "routeNode"
+    ]
+    master_node = next(button for button in route_nodes if button.text().startswith("Master\n"))
+
+    master_node.click()
+    QApplication.processEvents()
+
+    assert controller.window.current_project_bus_name() == "Master"
+    assert controller.window.object_bus_browser_chip.text() == f"{WWISE_BUS_VIEW_LABEL} Master"
+    assert controller.window.project_master_volume_spin.hasFocus()
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_resources_batch_feedback_persists_after_bulk_weight(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window.contents_tabs.setCurrentIndex(0)
+    controller.window.clip_table.selectRow(0)
+    QApplication.processEvents()
+
+    controller.apply_bulk_weight(7)
+    QApplication.processEvents()
+
+    assert controller.window.resources_batch_feedback_title_label.text() == "批量权重已应用"
+    assert controller.window.resources_batch_feedback_field_label.text() == "字段 权重"
+    assert controller.window.resources_batch_feedback_summary_label.text() == "已将 1 个片段的权重统一为 7。"
+
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    assert controller.window.resources_batch_feedback_title_label.text() == "批量权重已应用"
+    assert controller.window.resources_batch_feedback_summary_label.text() == "已将 1 个片段的权重统一为 7。"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_command_palette_and_global_search_aliases_cover_bus_workspace_and_batch_feedback(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    commands = controller.window._command_palette_items()
+    command_titles = [command["title"] for command in commands]
+
+    bus_alias_matches = controller.window._filter_command_palette_items("父bus", commands)
+    english_alias_matches = controller.window._filter_command_palette_items("master-mixer", commands)
+
+    assert any(command["title"] == f"切到 {WWISE_MASTER_MIXER_TITLE}" for _index, command in bus_alias_matches)
+    assert any(command["title"] == f"切到 {WWISE_MASTER_MIXER_TITLE}" for _index, command in english_alias_matches)
+    assert "打开日志结果" not in command_titles
+    assert "打开校验结果" not in command_titles
+    assert "打开构建结果" not in command_titles
+    assert "打开响度结果" not in command_titles
+
+    global_candidates = controller.window._global_search_candidates()
+    global_matches = controller.window._filter_global_search_candidates("批量反馈", global_candidates)
+    assert any(candidate["title"] == "工作区 | 资源整理" for candidate in global_matches)
+    assert any(candidate["title"] == "工作区 | 结果中心" for candidate in global_candidates)
+    assert not any(str(candidate["title"]).startswith("结果页 | ") for candidate in global_candidates)
 
     controller.is_dirty = False
     controller.window.close()
@@ -709,6 +817,132 @@ def test_refreshing_validation_report_preserves_problem_center_context(monkeypat
     assert current_item.data(0x0100)["target_id"] == "event_15"
     assert issue_scroll_bar.value() == expected_issue_scroll
     assert detail_scroll_bar.value() == expected_detail_scroll
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_diagnostic_results_page_reuses_existing_report_state(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.resize(960, 640)
+    controller.window.show()
+    QApplication.processEvents()
+
+    issues = [
+        ValidationIssue(
+            severity="Warning",
+            code="BUS_ROUTE_WARNING",
+            message="Bus route needs review.",
+            target="UI_Click_Normal",
+        )
+    ]
+    controller.window.append_log("诊断链路已刷新。")
+    controller.window.set_validation_report("Validation Report", issues)
+    controller.window.set_build_status("构建摘要：等待签收。", "构建报告已准备，等待进一步确认。")
+    controller.window.set_loudness_report("Loudness Report", summary_text="响度扫描完成，当前无超标项。")
+    controller.window.show_report_tab(4)
+    QApplication.processEvents()
+
+    assert controller.window.report_tabs.count() == 5
+    assert controller.window.report_tabs.tabText(4) == "诊断概览"
+    assert "诊断链路已刷新" in controller.window.diagnostic_log_summary_label.toolTip()
+    assert "BUS_ROUTE_WARNING" in controller.window.diagnostic_validation_summary_label.toolTip()
+    assert "构建报告已准备" in controller.window.diagnostic_build_summary_label.toolTip()
+    assert "响度扫描完成" in controller.window.diagnostic_loudness_summary_label.toolTip()
+    assert controller.window.current_project_bus_name() in controller.window.diagnostic_bus_summary_label.toolTip()
+    assert controller.window.activity_diagnostic_summary_label.text().strip()
+    assert controller.window.diagnostic_section_list.count() == 5
+    current_item = controller.window.diagnostic_section_list.currentItem()
+    assert current_item is not None
+    current_payload = current_item.data(0x0100)
+    assert current_payload["section"] == "validation"
+    assert "BUS_ROUTE_WARNING" in current_payload["title"]
+    assert "Bus route needs review." in controller.window.diagnostic_section_detail_output.toPlainText()
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_controller_tracks_structured_diagnostic_sections(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.resize(960, 640)
+    controller.window.show()
+    QApplication.processEvents()
+
+    issues = [
+        ValidationIssue(
+            severity="Warning",
+            code="BUS_ROUTE_WARNING",
+            message="Bus route needs review.",
+            target="UI_Click_Normal",
+        )
+    ]
+    controller.window.append_log("诊断链路已刷新。")
+    controller.window.set_validation_report("Validation Report", issues)
+    controller.window.set_build_status("构建摘要：等待签收。", "构建报告已准备，等待进一步确认。")
+    controller.window.set_loudness_report("Loudness Report", summary_text="响度扫描完成，当前无超标项。")
+    QApplication.processEvents()
+
+    snapshot = controller._diagnostic_snapshot
+    assert "BUS_ROUTE_WARNING" in snapshot.summary
+
+    log_section = snapshot.section("log")
+    assert log_section.detail == "诊断链路已刷新。"
+    assert log_section.metadata["message"] == "诊断链路已刷新。"
+
+    validation_section = snapshot.section("validation")
+    assert validation_section.status == "warning"
+    assert validation_section.target_type == "auto"
+    assert validation_section.target_id == "UI_Click_Normal"
+    assert validation_section.metadata["issue_count"] == 1
+    assert validation_section.metadata["first_issue_code"] == "BUS_ROUTE_WARNING"
+
+    build_section = snapshot.section("build")
+    assert build_section.status == "info"
+    assert build_section.detail == "构建报告已准备，等待进一步确认。"
+    assert build_section.metadata["summary"] == "构建摘要：等待签收。"
+
+    loudness_section = snapshot.section("loudness")
+    assert loudness_section.status == "success"
+    assert loudness_section.summary == "响度扫描完成，当前无超标项。"
+    assert loudness_section.metadata["summary_text"] == "响度扫描完成，当前无超标项。"
+
+    bus_section = snapshot.section("bus")
+    assert bus_section.status == "info"
+    assert bus_section.metadata["default_bus"] == controller.project.settings.default_bus
+    assert bus_section.metadata["current_project_bus"] == controller.window.current_project_bus_name()
+
+    controller._set_build_diagnostic_summary(
+        "构建完成。",
+        "模式：选中构建 -> 增量构建 | 已导出到：AudioData.json | 清单：AudioManifest.json",
+        status="success",
+        metadata={
+            "requested_scope": "selection",
+            "requested_scope_label": "选中构建",
+            "effective_scope": "incremental",
+            "effective_scope_label": "增量构建",
+            "selection_label": "事件 UI_Click_Normal",
+            "rebuilt_asset_count": 2,
+            "reused_asset_count": 5,
+            "removed_asset_count": 1,
+            "export_root": "./Export",
+            "data_file": "AudioData.json",
+            "manifest_file": "AudioManifest.json",
+        },
+    )
+    controller._publish_diagnostic_snapshot()
+    QApplication.processEvents()
+
+    build_profile_titles = [controller.window.build_profile_list.item(index).text() for index in range(controller.window.build_profile_list.count())]
+    assert any("请求 选中构建 | 实际 增量构建" in title for title in build_profile_titles)
+    assert any("重建 2 | 复用 5 | 移除 1" in title for title in build_profile_titles)
+    controller.window.build_profile_list.setCurrentRow(controller.window.build_profile_list.count() - 1)
+    QApplication.processEvents()
+    assert "AudioManifest.json" in controller.window.build_profile_detail_output.toPlainText()
 
     controller.is_dirty = False
     controller.window.close()
