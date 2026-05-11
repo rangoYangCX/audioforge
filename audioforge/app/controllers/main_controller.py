@@ -1748,6 +1748,7 @@ class MainController(QObject):
 
     def _publish_audition_session(self, session: AuditionSession) -> None:
         self.window.set_recent_preview_session_summary(session.title, session.detail)
+        self.window.set_recent_preview_source(session.file_path, session.clip_id, session.asset_key)
         self.window.set_preview_audio_metrics(
             self.audio_meter_service.analyze_file(
                 session.file_path,
@@ -1806,11 +1807,13 @@ class MainController(QObject):
         event = self.current_event
         if event is not None:
             event_name = event.display_name or event.id
+            self.window.clear_recent_preview_insight()
             self.window.set_recent_preview_session_summary(
                 "当前对象可试听",
                 f"事件 {event_name} | 开始试听后，可在不同流程继续控制这次试听。",
             )
             return
+        self.window.clear_recent_preview_insight()
         self.window.set_recent_preview_session_summary(
             "最近试听",
             "切换事件、资源或流程时，会保留最近一次试听会话。",
@@ -2554,7 +2557,11 @@ class MainController(QObject):
         try:
             self.recovery_service.save_snapshot(self.project)
         except Exception as exc:
-            self.window.append_log(f"自动恢复快照保存失败：{exc}")
+            self.window.append_log(f"自动恢复快照保存失败：{type(exc).__name__}: {exc}")
+            try:
+                self.recovery_service.clear_snapshot()
+            except Exception as cleanup_exc:
+                self.window.append_log(f"自动恢复快照清理失败：{type(cleanup_exc).__name__}: {cleanup_exc}")
 
     def _clear_recovery_snapshot(self) -> None:
         try:

@@ -11,10 +11,14 @@ class ProjectSerializer:
         project.file_path = str(file_path)
         project.touch()
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(
-            json.dumps(project.to_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        temp_path = file_path.with_suffix(".tmp")
+        payload = json.dumps(project.to_dict(), ensure_ascii=False, indent=2)
+        try:
+            temp_path.write_text(payload, encoding="utf-8")
+            temp_path.replace(file_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def load(self, file_path: Path) -> AudioProject:
         payload = json.loads(file_path.read_text(encoding="utf-8"))

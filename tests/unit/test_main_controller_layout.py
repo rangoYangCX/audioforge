@@ -1349,7 +1349,7 @@ def test_build_project_handles_export_failure(monkeypatch) -> None:
     controller.window.close()
 
 
-def test_recent_preview_transport_buttons_are_compact_and_toggle_pause_resume(monkeypatch) -> None:
+def test_tree_preview_actions_and_preview_strip_replace_bottom_transport_card(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
@@ -1405,42 +1405,36 @@ def test_recent_preview_transport_buttons_are_compact_and_toggle_pause_resume(mo
     controller.window.show()
     controller.window._activate_workspace_mode("resources")
     QApplication.processEvents()
+    controller._publish_audition_session(session)
 
-    transport_buttons = [
-        controller.window.preview_transport_play_button,
-        controller.window.preview_transport_pause_button,
-        controller.window.preview_transport_restart_button,
-        controller.window.preview_transport_stop_button,
-        controller.window.open_loudness_view_button,
-    ]
-    preview_host = controller.window._workspace_preview_hosts["resources"].parentWidget()
+    preview_host = controller.window.activity_preview_host
+    current_page = controller.window._workspace_mode_pages["resources"]
 
-    assert all(isinstance(button, QToolButton) for button in transport_buttons)
-    assert all(controller.window.loudness_group.isAncestorOf(button) for button in transport_buttons)
     assert preview_host is not None
-    assert preview_host.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Preferred
-    assert preview_host.maximumWidth() > 1000
-    assert preview_host.width() >= 360
-    assert controller.window.loudness_group.height() < preview_host.height() // 2
-    assert controller.window.loudness_group.minimumWidth() >= 380
-    assert controller.window.preview_transport_play_button.width() >= 32
-    assert controller.window.preview_transport_title_label.wordWrap() is True
-    assert controller.window.preview_transport_metrics_frame.minimumWidth() >= 360
-    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_metric_source_context_label)
-    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_metric_context_label)
+    assert preview_host.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert controller.window.activity_panel.isAncestorOf(controller.window.loudness_group)
+    assert controller.window.workspace_status_bar.isAncestorOf(controller.window.loudness_group) is False
+    assert current_page.isAncestorOf(controller.window.loudness_group) is False
+    assert controller.window.loudness_group.parentWidget() is preview_host
+    assert controller.window.activity_panel.height() >= controller.window.loudness_group.height()
+    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_waveform_strip)
+    assert controller.window.preview_transport_title_label.wordWrap() is False
+    assert controller.window.preview_transport_detail_label.wordWrap() is False
+    assert controller.window.preview_transport_detail_label.isVisible() is True
+    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_inline_momentary_max_value)
+    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_transport_play_button) is False
+    assert controller.window.loudness_group.isAncestorOf(controller.window.preview_transport_metrics_frame) is False
 
     controller.window.set_preview_transport_state("idle", has_target=True, can_replay=False)
-    assert controller.window.preview_transport_play_button.isEnabled()
-    assert not controller.window.preview_transport_pause_button.isEnabled()
-    assert not controller.window.preview_transport_restart_button.isEnabled()
-    assert not controller.window.preview_transport_stop_button.isEnabled()
     assert controller.window.preview_transport_status_chip.text() == "可试听"
+    assert controller.window._tree_preview_context_actions(has_event_target=True) == [("preview", "试听事件")]
 
     controller.window.set_preview_transport_state("idle", has_target=False, can_replay=True)
-    assert controller.window.preview_transport_play_button.isEnabled()
-    assert controller.window.preview_transport_restart_button.isEnabled()
-    assert controller.window.preview_transport_play_button.toolTip() == "播放最近试听"
     assert controller.window.preview_transport_status_chip.text() == "可重播"
+    assert controller.window._tree_preview_context_actions(has_event_target=True) == [
+        ("preview", "试听事件"),
+        ("restart", "从头播放最近试听"),
+    ]
 
     signals: list[str] = []
     controller.window.pausePreviewRequested.connect(lambda: signals.append("pause"))
@@ -1448,18 +1442,20 @@ def test_recent_preview_transport_buttons_are_compact_and_toggle_pause_resume(mo
 
     controller.window.set_preview_transport_state("playing", has_target=True, can_replay=True)
     assert controller.window.preview_transport_status_chip.text() == "播放中"
-    controller.window.preview_transport_pause_button.click()
+    assert controller.window._tree_preview_context_actions(has_event_target=True) == [
+        ("preview", "试听事件"),
+        ("pause", "暂停当前试听"),
+        ("stop", "停止当前试听"),
+        ("restart", "从头播放最近试听"),
+    ]
+
+    controller.window._dispatch_tree_preview_context_action("pause")
     QApplication.processEvents()
 
-    assert paused["value"] is True
-    assert controller.window.preview_transport_pause_button.toolTip() == "继续试听"
-    assert controller.window.preview_transport_status_chip.text() == "已暂停"
-    controller.window.preview_transport_pause_button.click()
+    controller.window.set_preview_transport_state("paused", has_target=True, can_replay=True)
+    controller.window._dispatch_tree_preview_context_action("resume")
     QApplication.processEvents()
 
-    assert paused["value"] is False
-    assert controller.window.preview_transport_pause_button.toolTip() == "暂停试听"
-    assert controller.window.preview_transport_status_chip.text() == "播放中"
     assert signals == ["pause", "resume"]
 
     controller.is_dirty = False
@@ -1532,20 +1528,23 @@ def test_preview_transport_controller_syncs_pause_resume_and_restart(monkeypatch
     monkeypatch.setattr(controller, "_play_audition_session", replay_preview)
 
     controller._sync_preview_transport_state()
-    assert controller.window.preview_transport_pause_button.isEnabled()
-    assert controller.window.preview_transport_restart_button.isEnabled()
-    assert controller.window.preview_transport_stop_button.isEnabled()
+    assert controller.window._tree_preview_context_actions(has_event_target=True) == [
+        ("preview", "试听事件"),
+        ("pause", "暂停当前试听"),
+        ("stop", "停止当前试听"),
+        ("restart", "从头播放最近试听"),
+    ]
     assert controller.window.preview_transport_title_label.text() == session.title
 
     controller.pause_current_event_preview()
     QApplication.processEvents()
     assert paused["value"] is True
-    assert controller.window.preview_transport_pause_button.toolTip() == "继续试听"
+    assert controller.window.preview_transport_status_chip.text() == "已暂停"
 
     controller.resume_current_event_preview()
     QApplication.processEvents()
     assert paused["value"] is False
-    assert controller.window.preview_transport_pause_button.toolTip() == "暂停试听"
+    assert controller.window.preview_transport_status_chip.text() == "播放中"
 
     controller.restart_current_event_preview()
     QApplication.processEvents()
@@ -1597,14 +1596,25 @@ def test_preview_transport_monitor_resets_playing_state_after_playback_finishes(
     controller._sync_preview_transport_state()
 
     assert controller.window.preview_transport_status_chip.text() == "播放中"
+    assert controller.window.preview_transport_detail_label.isHidden() is False
+    assert controller.window._tree_preview_context_actions(has_event_target=True) == [
+        ("preview", "试听事件"),
+        ("pause", "暂停当前试听"),
+        ("stop", "停止当前试听"),
+        ("restart", "从头播放最近试听"),
+    ]
     assert controller._preview_transport_timer.isActive() is True
 
     active["value"] = False
     controller._poll_preview_transport_state()
 
     assert controller.window.preview_transport_status_chip.text() == "可重播"
-    assert controller.window.preview_transport_pause_button.isEnabled() is False
     assert controller.window.preview_transport_detail_label.text().endswith("可重播")
+    assert controller.window.preview_transport_detail_label.isHidden() is False
+    assert controller.window._tree_preview_context_actions(has_event_target=True) == [
+        ("preview", "试听事件"),
+        ("restart", "从头播放最近试听"),
+    ]
     assert controller._preview_transport_timer.isActive() is False
 
     controller.is_dirty = False
@@ -1667,9 +1677,8 @@ def test_recent_preview_transport_survives_switching_to_folder(monkeypatch) -> N
     QApplication.processEvents()
 
     assert controller.current_event is None
-    assert controller.window.preview_transport_play_button.isEnabled()
-    assert controller.window.preview_transport_pause_button.isEnabled()
     assert controller.window.preview_transport_title_label.text() == session.title
+    assert controller.window._tree_preview_context_actions(has_event_target=False) == []
 
     controller.pause_current_event_preview()
     controller.resume_current_event_preview()
@@ -1725,7 +1734,7 @@ def test_recent_preview_play_replays_session_without_current_event(monkeypatch) 
     folder_id = controller.project.root_folder_ids[0]
     controller.select_node("folder", folder_id)
     controller._sync_preview_transport_state()
-    controller.window.preview_transport_play_button.click()
+    controller.play_recent_preview_transport()
     QApplication.processEvents()
 
     assert controller.current_event is None

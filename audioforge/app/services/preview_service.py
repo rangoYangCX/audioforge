@@ -4,6 +4,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from audioforge.app.models.audio_project import ClipModel, EventModel
 
@@ -89,6 +90,14 @@ class PreviewService:
         clip = self._select_clip(event, state)
         if clip is None:
             return PreviewResult(accepted=False, reason="No clip was selected.")
+        clip_source_path = str(clip.source_path or "").strip()
+        if not clip_source_path:
+            return PreviewResult(accepted=False, reason=f"Clip source file is missing: {clip.id}")
+        try:
+            if not Path(clip_source_path).exists():
+                return PreviewResult(accepted=False, reason=f"Clip source file not found: {clip_source_path}")
+        except OSError:
+            return PreviewResult(accepted=False, reason=f"Clip source path is invalid: {clip_source_path}")
 
         combo_step = self._resolve_combo_step(event, state, trigger_time)
         volume_db = event.volume_db + self._rng.uniform(event.volume_rand_min_db, event.volume_rand_max_db)

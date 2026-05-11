@@ -212,6 +212,12 @@ class MainWindow(QMainWindow):
         self._preview_transport_state = "idle"
         self._preview_transport_has_target = False
         self._preview_transport_can_replay = False
+        self._preview_transport_expansion_pinned: bool | None = None
+        self._preview_transport_details_expanded = False
+        self._preview_transport_compact_min_width = 248
+        self._preview_transport_compact_max_width = 320
+        self._preview_transport_expanded_min_width = 312
+        self._preview_transport_expanded_max_width = 420
         self._clip_lookup: dict[str, object] = {}
         self._project_bus_configs: list[dict[str, object]] = []
         self._active_project_bus_name = ""
@@ -475,9 +481,12 @@ class MainWindow(QMainWindow):
         self.audio_meter_summary_true_peak_value = QLabel("-Inf")
         self.audio_meter_summary_source_integrated_value = QLabel("-Inf")
         self.audio_meter_summary_source_true_peak_value = QLabel("-Inf")
+        self.preview_waveform_strip = ClipWaveformEditor()
+        self.preview_inline_momentary_max_value = QLabel("-Inf")
         self.preview_transport_header = QFrame()
         self.preview_transport_title_label = QLabel("最近试听")
         self.preview_transport_status_chip = QLabel("待命")
+        self.preview_transport_toggle_button = QToolButton()
         self.preview_transport_detail_label = QLabel("切换事件、资源或流程时，会保留最近一次试听会话。")
         self.preview_transport_frame = QFrame()
         self.preview_transport_metrics_frame = QFrame()
@@ -788,33 +797,32 @@ class MainWindow(QMainWindow):
         combo_layout.addRow("重置时间（秒）", self.combo_reset_spin)
         combo_layout.addRow("最大步数", self.combo_max_step_spin)
 
-        self.loudness_group = QGroupBox("最近试听")
-        self.loudness_group.setMinimumWidth(380)
-        self.loudness_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        loudness_group_layout = QVBoxLayout(self.loudness_group)
-        loudness_group_layout.setContentsMargins(10, 8, 10, 8)
-        loudness_group_layout.setSpacing(10)
-        self.preview_transport_header.setObjectName("PreviewTransportHeader")
-        preview_transport_header_layout = QHBoxLayout(self.preview_transport_header)
-        preview_transport_header_layout.setContentsMargins(0, 0, 0, 0)
-        preview_transport_header_layout.setSpacing(8)
+        self.loudness_group = QGroupBox()
+        self.loudness_group.setTitle("")
+        self.loudness_group.setProperty("role", "inlineRecentPreview")
+        self.loudness_group.setMinimumWidth(0)
+        self.loudness_group.setMinimumHeight(36)
+        self.loudness_group.setMaximumHeight(44)
+        self.loudness_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        loudness_group_layout = QHBoxLayout(self.loudness_group)
+        loudness_group_layout.setContentsMargins(0, 0, 0, 0)
+        loudness_group_layout.setSpacing(8)
         self.preview_transport_title_label.setProperty("role", "previewTransportTitle")
         self.preview_transport_status_chip.setProperty("role", "previewTransportStatusChip")
         self.preview_transport_status_chip.setProperty("transportState", "idle")
-        preview_transport_header_layout.addWidget(self.preview_transport_title_label)
-        preview_transport_header_layout.addStretch(1)
-        preview_transport_header_layout.addWidget(self.preview_transport_status_chip, 0, Qt.AlignmentFlag.AlignTop)
+        self.preview_transport_toggle_button.setCheckable(True)
+        self.preview_transport_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.preview_transport_toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.preview_transport_toggle_button.setProperty("role", "previewTransportToggle")
+        self.preview_transport_toggle_button.setProperty("expanded", False)
         self.preview_transport_detail_label.setProperty("role", "previewTransportDetail")
-        self.preview_transport_title_label.setWordWrap(True)
-        self.preview_transport_title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.preview_transport_detail_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.preview_transport_detail_label.setWordWrap(True)
+        self.preview_transport_title_label.setWordWrap(False)
+        self.preview_transport_title_label.setMinimumWidth(0)
+        self.preview_transport_title_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.preview_transport_detail_label.setMinimumWidth(0)
+        self.preview_transport_detail_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.preview_transport_detail_label.setWordWrap(False)
         self.preview_transport_frame.setObjectName("PreviewTransportFrame")
-        self.preview_transport_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        preview_transport_layout = QHBoxLayout(self.preview_transport_frame)
-        preview_transport_layout.setContentsMargins(6, 6, 6, 6)
-        preview_transport_layout.setSpacing(6)
-        preview_transport_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         for button, kind in [
             (self.preview_transport_play_button, "primary"),
             (self.preview_transport_pause_button, "secondary"),
@@ -825,35 +833,38 @@ class MainWindow(QMainWindow):
             button.setProperty("role", "previewTransportButton")
             button.setProperty("transportKind", kind)
             button.setProperty("transportState", "idle")
-            preview_transport_layout.addWidget(button)
         self.preview_transport_metrics_frame.setObjectName("PreviewMetricsFrame")
-        self.preview_transport_metrics_frame.setMinimumWidth(360)
-        preview_metrics_layout = QHBoxLayout(self.preview_transport_metrics_frame)
-        preview_metrics_layout.setContentsMargins(0, 0, 0, 0)
-        preview_metrics_layout.setSpacing(8)
-        preview_metrics_layout.setStretch(0, 1)
-        preview_metrics_layout.setStretch(1, 1)
-        preview_metrics_layout.addWidget(
-            self._build_preview_metric_column(
-                "源文件",
-                self.preview_metric_source_context_label,
-                self.preview_metric_source_integrated_value,
-                self.preview_metric_source_true_peak_value,
-            )
-        )
-        preview_metrics_layout.addWidget(
-            self._build_preview_metric_column(
-                "事件后",
-                self.preview_metric_context_label,
-                self.preview_metric_integrated_value,
-                self.preview_metric_true_peak_value,
-            )
-        )
-        loudness_group_layout.addWidget(self.preview_transport_header)
-        loudness_group_layout.addWidget(self.preview_transport_detail_label)
-        loudness_group_layout.addWidget(self.preview_transport_frame)
-        loudness_group_layout.addWidget(self.preview_transport_metrics_frame)
+        preview_summary_widget = QWidget()
+        preview_summary_widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        preview_summary_layout = QVBoxLayout(preview_summary_widget)
+        preview_summary_layout.setContentsMargins(0, 0, 0, 0)
+        preview_summary_layout.setSpacing(0)
+        preview_summary_title_row = QHBoxLayout()
+        preview_summary_title_row.setContentsMargins(0, 0, 0, 0)
+        preview_summary_title_row.setSpacing(6)
+        preview_summary_title_row.addWidget(self.preview_transport_title_label)
+        preview_summary_title_row.addWidget(self.preview_transport_status_chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        preview_summary_title_row.addStretch(1)
+        preview_summary_layout.addLayout(preview_summary_title_row)
+        preview_summary_layout.addWidget(self.preview_transport_detail_label)
+
+        self.preview_waveform_strip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.preview_waveform_strip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.preview_waveform_strip.setMinimumHeight(32)
+        self.preview_waveform_strip.setMaximumHeight(32)
+        self.preview_waveform_strip.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.preview_waveform_strip.setToolTip("最近一次试听的波形概览。")
+        self.preview_waveform_strip.clear()
+
+        preview_momentary_inline = self._build_meter_inline_stat("Momentary Max", self.preview_inline_momentary_max_value, "LUFS")
+        preview_momentary_inline.setObjectName("PreviewMomentaryInline")
+        preview_momentary_inline.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+
+        loudness_group_layout.addWidget(preview_summary_widget, 0)
+        loudness_group_layout.addWidget(self.preview_waveform_strip, 1)
+        loudness_group_layout.addWidget(preview_momentary_inline, 0)
         self.set_preview_transport_state("idle", has_target=False, can_replay=False)
+        self.clear_recent_preview_insight()
 
         self.notes_group = QGroupBox("备注")
         notes_layout = QVBoxLayout(self.notes_group)
@@ -1226,9 +1237,7 @@ class MainWindow(QMainWindow):
 
         self._workspace_mode_pages: dict[str, QWidget] = {}
         self._workspace_mode_hosts: dict[str, QVBoxLayout] = {}
-        self._workspace_preview_hosts: dict[str, QVBoxLayout] = {}
         self._workspace_shared_surfaces: dict[str, QWidget] = {
-            "recent_preview": self.loudness_group,
             "results": self.results_center_panel,
             "validation": self.validation_workspace,
         }
@@ -1242,10 +1251,9 @@ class MainWindow(QMainWindow):
             ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
             ("results", "结果中心", "统一回看日志、构建输出和响度扫描；校验修复仍在专门工作区完成。"),
         ]:
-            page, host_layout, preview_host_layout = self._build_workspace_mode_page(mode, title, description)
+            page, host_layout = self._build_workspace_mode_page(mode, title, description)
             self._workspace_mode_pages[mode] = page
             self._workspace_mode_hosts[mode] = host_layout
-            self._workspace_preview_hosts[mode] = preview_host_layout
             self.workspace_mode_stack.addWidget(page)
         self._workspace_mode_hosts["events"].addWidget(self.events_workspace)
         self._workspace_mode_hosts["resources"].addWidget(self.resources_workspace)
@@ -1427,7 +1435,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(primary_actions)
         return bar
 
-    def _build_workspace_mode_page(self, mode: str, title: str, description: str) -> tuple[QWidget, QVBoxLayout, QVBoxLayout]:
+    def _build_workspace_mode_page(self, mode: str, title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1438,26 +1446,8 @@ class MainWindow(QMainWindow):
         host_layout.setContentsMargins(0, 0, 0, 0)
         host_layout.setSpacing(0)
 
-        preview_host = QWidget()
-        preview_host.setObjectName("WorkspacePreviewHost")
-        preview_host.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        preview_host_layout = QVBoxLayout(preview_host)
-        preview_host_layout.setContentsMargins(0, 0, 0, 0)
-        preview_host_layout.setSpacing(0)
-        preview_host_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        workspace_splitter = QSplitter()
-        workspace_splitter.setObjectName(f"WorkspaceModeSurfaceSplitter_{mode}")
-        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
-        workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.setHandleWidth(12)
-        workspace_splitter.addWidget(host)
-        workspace_splitter.addWidget(preview_host)
-        workspace_splitter.setStretchFactor(0, 6)
-        workspace_splitter.setStretchFactor(1, 2)
-
-        layout.addWidget(workspace_splitter, 1)
-        return page, host_layout, preview_host_layout
+        layout.addWidget(host, 1)
+        return page, host_layout
 
     def _build_mode_surface_card(self, title: str, description: str, *, role: str = "modeCardDescription") -> QFrame:
         card = QFrame()
@@ -2548,7 +2538,14 @@ class MainWindow(QMainWindow):
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(8)
         header_row.addWidget(activity_entry_label)
-        header_row.addWidget(self.activity_compact_summary_label, 1)
+        self.activity_preview_host = QWidget()
+        self.activity_preview_host.setObjectName("ActivityPreviewHost")
+        self.activity_preview_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        activity_preview_layout = QHBoxLayout(self.activity_preview_host)
+        activity_preview_layout.setContentsMargins(0, 0, 0, 0)
+        activity_preview_layout.setSpacing(0)
+        activity_preview_layout.addWidget(self.loudness_group, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_row.addWidget(self.activity_preview_host, 1, Qt.AlignmentFlag.AlignVCenter)
         results_button = QPushButton("结果中心")
         for compact_button in [results_button, self.activity_toggle_button]:
             compact_button.setProperty("role", "activityCompactButton")
@@ -2590,28 +2587,20 @@ class MainWindow(QMainWindow):
         return panel
 
     def _mount_workspace_surface(self, mode: str) -> None:
-        surface_mounts: list[tuple[str, dict[str, QVBoxLayout]]] = []
-        preview_host_layout = self._workspace_preview_hosts.get(mode)
-        if preview_host_layout is not None:
-            surface_mounts.append(("recent_preview", self._workspace_preview_hosts))
         surface_key = {
             "validation": "validation",
             "results": "results",
         }.get(mode)
-        if surface_key is not None:
-            surface_mounts.append((surface_key, self._workspace_mode_hosts))
-        for mounted_surface_key, host_map in surface_mounts:
-            surface = self._workspace_shared_surfaces[mounted_surface_key]
-            host_layout = host_map.get(mode)
-            if host_layout is None:
-                continue
-            if host_layout.indexOf(surface) >= 0:
-                continue
-            surface.setParent(None)
-            if mounted_surface_key == "recent_preview":
-                host_layout.addWidget(surface, 0, Qt.AlignmentFlag.AlignTop)
-                continue
-            host_layout.addWidget(surface)
+        if surface_key is None:
+            return
+        surface = self._workspace_shared_surfaces[surface_key]
+        host_layout = self._workspace_mode_hosts.get(mode)
+        if host_layout is None:
+            return
+        if host_layout.indexOf(surface) >= 0:
+            return
+        surface.setParent(None)
+        host_layout.addWidget(surface)
 
     def _reset_validation_filters(self) -> None:
         self.validation_filter_severity_combo.setCurrentIndex(0)
@@ -3841,6 +3830,8 @@ class MainWindow(QMainWindow):
         events_workspace_tab = state.get("events_workspace_tab")
         contents_tab = state.get("contents_tab")
         report_tab = state.get("report_tab")
+        if isinstance(workspace_mode, str) and workspace_mode in self._workspace_mode_pages:
+            self._activate_workspace_mode(workspace_mode)
         if isinstance(workspace_sizes, list) and len(workspace_sizes) == 2:
             self._set_workspace_splitter_sizes([int(value) for value in workspace_sizes])
         if isinstance(main_sizes, list) and len(main_sizes) == 2:
@@ -3859,8 +3850,6 @@ class MainWindow(QMainWindow):
             self._active_report_index = report_tab
             self.report_pages.setCurrentIndex(report_tab)
             self.report_tabs.setCurrentIndex(report_tab)
-        if isinstance(workspace_mode, str) and workspace_mode in self._workspace_mode_pages:
-            self._activate_workspace_mode(workspace_mode)
         self._apply_scrollable_widget_state(self._current_property_scroll_widget(), state.get("property_scroll"))
         self._apply_scrollable_widget_state(self.contents_tabs.currentWidget(), state.get("contents_scroll"))
         self._apply_scrollable_widget_state(self.log_output, state.get("log_scroll"))
@@ -4067,6 +4056,83 @@ class MainWindow(QMainWindow):
         self.preview_transport_detail_label.setText(normalized_detail)
         self.preview_transport_detail_label.setToolTip(normalized_detail)
 
+    def clear_recent_preview_insight(self) -> None:
+        self.preview_waveform_strip.clear()
+        self.preview_waveform_strip.setToolTip("最近一次试听的波形概览。")
+        self.preview_inline_momentary_max_value.setText("-Inf")
+
+    def set_recent_preview_source(self, source_path: str, clip_id: str, asset_key: str) -> None:
+        if not source_path:
+            self.clear_recent_preview_insight()
+            return
+        self.preview_waveform_strip.set_clip(source_path)
+        self.preview_waveform_strip.setToolTip(f"片段 {clip_id} | 资源 {asset_key}")
+
+    def _preview_transport_auto_expanded(self) -> bool:
+        return self._preview_transport_state in {"playing", "paused"}
+
+    def _apply_preview_transport_expanded(self, expanded: bool) -> None:
+        self._preview_transport_details_expanded = expanded
+        self.preview_transport_detail_label.setVisible(True)
+        self.preview_transport_metrics_frame.setVisible(False)
+        self.preview_transport_toggle_button.blockSignals(True)
+        self.preview_transport_toggle_button.setChecked(False)
+        self.preview_transport_toggle_button.blockSignals(False)
+        self.preview_transport_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.preview_transport_toggle_button.setToolTip("最近试听详情已改为底栏只读概览。")
+        self.preview_transport_toggle_button.setProperty("expanded", False)
+
+        self.loudness_group.setMinimumWidth(0)
+        self.loudness_group.setMaximumWidth(16777215)
+        if hasattr(self, "activity_preview_host"):
+            self.activity_preview_host.updateGeometry()
+
+        self.loudness_group.updateGeometry()
+        self._refresh_preview_transport_style()
+
+    def _tree_preview_context_actions(self, *, has_event_target: bool) -> list[tuple[str, str]]:
+        if not has_event_target:
+            return []
+        actions: list[tuple[str, str]] = [("preview", "试听事件")]
+        if self._preview_transport_state == "playing":
+            actions.append(("pause", "暂停当前试听"))
+            actions.append(("stop", "停止当前试听"))
+        elif self._preview_transport_state == "paused":
+            actions.append(("resume", "继续当前试听"))
+            actions.append(("stop", "停止当前试听"))
+        if self._preview_transport_can_replay:
+            actions.append(("restart", "从头播放最近试听"))
+        return actions
+
+    def _dispatch_tree_preview_context_action(self, action_key: str) -> None:
+        if action_key == "preview":
+            self.previewRequested.emit()
+        elif action_key == "pause":
+            self.pausePreviewRequested.emit()
+        elif action_key == "resume":
+            self.resumePreviewRequested.emit()
+        elif action_key == "restart":
+            self.restartPreviewRequested.emit()
+        elif action_key == "stop":
+            self.stopPreviewEventRequested.emit()
+
+    def _sync_preview_transport_presentation(self) -> None:
+        expanded = (
+            self._preview_transport_expansion_pinned
+            if self._preview_transport_expansion_pinned is not None
+            else self._preview_transport_auto_expanded()
+        )
+        self._apply_preview_transport_expanded(expanded)
+
+    def _toggle_preview_transport_details(self, expanded: bool) -> None:
+        adaptive_expanded = self._preview_transport_auto_expanded()
+        self._preview_transport_expansion_pinned = None if expanded == adaptive_expanded else expanded
+        self._apply_preview_transport_expanded(expanded)
+
+    def _set_preview_metric_context(self, label: QLabel, text: str) -> None:
+        label.setText(text)
+        label.setToolTip(text)
+
     def _refresh_preview_transport_style(self) -> None:
         for widget in [
             self.preview_transport_header,
@@ -4074,6 +4140,7 @@ class MainWindow(QMainWindow):
             self.preview_transport_metrics_frame,
             self.preview_transport_title_label,
             self.preview_transport_status_chip,
+            self.preview_transport_toggle_button,
             self.preview_transport_detail_label,
             self.preview_transport_play_button,
             self.preview_transport_pause_button,
@@ -4123,7 +4190,7 @@ class MainWindow(QMainWindow):
         )
         self.preview_transport_stop_button.setProperty("transportState", "available" if has_playback else "idle")
         self.open_loudness_view_button.setProperty("transportState", "idle")
-        self._refresh_preview_transport_style()
+        self._sync_preview_transport_presentation()
 
     def set_active_contents_category(self, category: str) -> None:
         if category == "生成":
@@ -4522,45 +4589,52 @@ class MainWindow(QMainWindow):
     ) -> QWidget:
         column = QFrame()
         column.setObjectName("PreviewMetricColumn")
-        column.setMinimumWidth(172)
+        column.setMinimumWidth(0)
         column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout = QVBoxLayout(column)
+        layout = QHBoxLayout(column)
         layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
 
         heading_label = QLabel(heading)
         heading_label.setProperty("role", "previewMetricHeading")
         context_label.setProperty("role", "previewMetricContext")
-        context_label.setWordWrap(True)
-        context_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        integrated_caption = QLabel("Integrated")
-        integrated_caption.setProperty("role", "previewMetricCaption")
-        integrated_label.setProperty("role", "previewMetricValue")
-        integrated_label.setMinimumWidth(56)
-        integrated_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        true_peak_caption = QLabel("True Peak")
-        true_peak_caption.setProperty("role", "previewMetricCaption")
-        true_peak_label.setProperty("role", "previewMetricValue")
-        true_peak_label.setMinimumWidth(56)
-        true_peak_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        context_label.setWordWrap(False)
+        context_label.setMinimumWidth(0)
+        context_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
-        layout.addWidget(heading_label)
-        layout.addWidget(context_label)
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+        text_layout.addWidget(heading_label)
+        text_layout.addWidget(context_label)
 
-        integrated_row = QHBoxLayout()
-        integrated_row.setContentsMargins(0, 0, 0, 0)
-        integrated_row.addWidget(integrated_caption)
-        integrated_row.addStretch(1)
-        integrated_row.addWidget(integrated_label)
-        layout.addLayout(integrated_row)
+        stats_layout = QHBoxLayout()
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+        stats_layout.setSpacing(6)
+        stats_layout.addWidget(self._build_preview_metric_stat("Integrated", integrated_label))
+        stats_layout.addWidget(self._build_preview_metric_stat("True Peak", true_peak_label))
 
-        true_peak_row = QHBoxLayout()
-        true_peak_row.setContentsMargins(0, 0, 0, 0)
-        true_peak_row.addWidget(true_peak_caption)
-        true_peak_row.addStretch(1)
-        true_peak_row.addWidget(true_peak_label)
-        layout.addLayout(true_peak_row)
+        layout.addLayout(text_layout, 1)
+        layout.addLayout(stats_layout)
         return column
+
+    def _build_preview_metric_stat(self, title: str, value_label: QLabel) -> QWidget:
+        card = QFrame()
+        card.setObjectName("PreviewMetricStat")
+        card.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
+
+        caption_label = QLabel(title)
+        caption_label.setProperty("role", "previewMetricCaption")
+        value_label.setProperty("role", "previewMetricValue")
+        value_label.setMinimumWidth(56)
+        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(caption_label, 0, Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignRight)
+        return card
 
     def _build_channel_meter(self, channel_name: str, meter_bar: QProgressBar, peak_label: QLabel, rms_label: QLabel) -> QWidget:
         container = QFrame()
@@ -6073,13 +6147,14 @@ class MainWindow(QMainWindow):
         self.audio_meter_context_label.setText(f"片段 {clip_id} | 资源 {asset_key}")
         self.audio_meter_summary_source_context_label.setText(f"片段 {clip_id}")
         self.audio_meter_summary_context_label.setText(f"片段 {clip_id}")
-        self.preview_metric_source_context_label.setText(f"片段 {clip_id}")
-        self.preview_metric_context_label.setText(f"片段 {clip_id}")
+        self._set_preview_metric_context(self.preview_metric_source_context_label, f"片段 {clip_id}")
+        self._set_preview_metric_context(self.preview_metric_context_label, f"片段 {clip_id}")
         self.audio_meter_short_term_value.setText(self._format_meter_value(processed.short_term_lufs))
         self.audio_meter_short_term_max_value.setText(self._format_meter_value(processed.short_term_max_lufs))
         self.audio_meter_integrated_value.setText(self._format_meter_value(processed.integrated_lufs))
         self.audio_meter_momentary_value.setText(self._format_meter_value(processed.momentary_lufs))
         self.audio_meter_momentary_max_value.setText(self._format_meter_value(processed.momentary_max_lufs))
+        self.preview_inline_momentary_max_value.setText(self._format_meter_value(processed.momentary_max_lufs))
         self.audio_meter_lra_value.setText(f"{processed.loudness_range_lu:.1f}")
         self.audio_meter_true_peak_value.setText(self._format_meter_value(true_peak_db))
         self.audio_meter_summary_source_integrated_value.setText(self._format_meter_value(source.integrated_lufs))
@@ -6106,8 +6181,8 @@ class MainWindow(QMainWindow):
         self.audio_meter_context_label.setText(reason)
         self.audio_meter_summary_source_context_label.setText(reason)
         self.audio_meter_summary_context_label.setText(reason)
-        self.preview_metric_source_context_label.setText(reason)
-        self.preview_metric_context_label.setText(reason)
+        self._set_preview_metric_context(self.preview_metric_source_context_label, reason)
+        self._set_preview_metric_context(self.preview_metric_context_label, reason)
         for label in [
             self.audio_meter_short_term_value,
             self.audio_meter_short_term_max_value,
@@ -6129,6 +6204,7 @@ class MainWindow(QMainWindow):
         self.preview_metric_source_true_peak_value.setText("-Inf")
         self.preview_metric_integrated_value.setText("-Inf")
         self.preview_metric_true_peak_value.setText("-Inf")
+        self.preview_inline_momentary_max_value.setText("-Inf")
         self.audio_meter_lra_value.setText("0.0")
         self.audio_meter_left_bar.setValue(0)
         self.audio_meter_right_bar.setValue(0)
@@ -6222,6 +6298,7 @@ class MainWindow(QMainWindow):
         self.validation_revalidate_button.clicked.connect(self.validate_button.click)
         self.validation_locate_button.clicked.connect(self._locate_selected_validation_issue)
         self.open_loudness_view_button.clicked.connect(self.show_loudness_view)
+        self.preview_transport_toggle_button.toggled.connect(self._toggle_preview_transport_details)
         self.preview_transport_play_button.clicked.connect(self.previewTransportPlayRequested.emit)
         self.preview_transport_pause_button.clicked.connect(self._toggle_preview_transport_pause)
         self.preview_transport_restart_button.clicked.connect(self.restartPreviewRequested.emit)
@@ -6435,6 +6512,7 @@ class MainWindow(QMainWindow):
         if item is None:
             item = self.tree.currentItem()
         selected_event_ids = self.selected_tree_event_ids()
+        has_event_target = bool(selected_event_ids)
         menu = QMenu(self)
         new_folder_action = menu.addAction("新建文件夹")
         new_event_action = menu.addAction("新建事件")
@@ -6445,17 +6523,22 @@ class MainWindow(QMainWindow):
         delete_action = menu.addAction("删除")
         copy_id_action = menu.addAction("复制对象标识")
         property_action = menu.addAction("打开属性编辑器")
-        preview_action = menu.addAction("试听事件")
         contents_action = menu.addAction("打开内容编辑器")
         report_action = menu.addAction("打开问题中心")
-        preview_action.setEnabled(False)
         contents_action.setEnabled(False)
         bulk_bus_action.setEnabled(bool(selected_event_ids))
         if item is not None:
             payload = item.data(0, Qt.ItemDataRole.UserRole)
             if payload is not None and payload[0] == "event":
-                preview_action.setEnabled(True)
+                has_event_target = True
                 contents_action.setEnabled(True)
+        preview_actions: dict[QAction, str] = {}
+        preview_specs = self._tree_preview_context_actions(has_event_target=has_event_target)
+        if preview_specs:
+            menu.addSeparator()
+            for action_key, label in preview_specs:
+                preview_action = menu.addAction(label)
+                preview_actions[preview_action] = action_key
         action = menu.exec(self.tree.viewport().mapToGlobal(position))
         if action is None:
             return
@@ -6495,12 +6578,12 @@ class MainWindow(QMainWindow):
                 self.set_active_property_category("事件")
             else:
                 self.set_active_property_category("工程")
-        elif action == preview_action:
-            self.previewRequested.emit()
         elif action == contents_action:
             self.set_active_contents_category("片段")
         elif action == report_action:
             self.show_report_tab(1)
+        elif action in preview_actions:
+            self._dispatch_tree_preview_context_action(preview_actions[action])
 
     def _show_clip_context_menu(self, position) -> None:
         menu = QMenu(self)
@@ -6771,16 +6854,14 @@ class MainWindow(QMainWindow):
         tab_padding_h = int(14 * scale)
         object_type_size = int(11 * scale)
         object_title_size = int(16 * scale)
-        preview_host_min_width = max(360, int(380 * scale))
+        self._preview_transport_compact_min_width = max(236, int(248 * scale))
+        self._preview_transport_compact_max_width = max(self._preview_transport_compact_min_width + 40, int(320 * scale))
+        self._preview_transport_expanded_min_width = max(300, int(312 * scale))
+        self._preview_transport_expanded_max_width = max(self._preview_transport_expanded_min_width + 40, int(420 * scale))
         transport_button_size = max(34, int(38 * scale))
         transport_button_radius = transport_button_size // 2
         transport_strip_radius = max(10, int(12 * scale))
-        for preview_host_layout in self._workspace_preview_hosts.values():
-            preview_host = preview_host_layout.parentWidget()
-            if preview_host is None:
-                continue
-            preview_host.setMinimumWidth(preview_host_min_width)
-            preview_host.setMaximumWidth(16777215)
+        transport_toggle_size = max(22, int(24 * scale))
         self.setStyleSheet(
             f"""
             QMainWindow, QWidget {{
@@ -6840,6 +6921,11 @@ class MainWindow(QMainWindow):
                 border: 1px solid #3f4d5c;
                 border-radius: {group_radius}px;
             }}
+            #PreviewMetricStat {{
+                background-color: #262d35;
+                border: 1px solid #394554;
+                border-radius: {radius}px;
+            }}
             QToolButton[role="previewTransportButton"] {{
                 padding: 0px;
                 min-width: {transport_button_size}px;
@@ -6885,6 +6971,24 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: 1px solid transparent;
                 color: #708094;
+            }}
+            QToolButton[role="previewTransportToggle"] {{
+                padding: 0px;
+                min-width: {transport_toggle_size}px;
+                max-width: {transport_toggle_size}px;
+                min-height: {transport_toggle_size}px;
+                max-height: {transport_toggle_size}px;
+                border-radius: {radius}px;
+                background-color: #20262d;
+                border: 1px solid #445160;
+            }}
+            QToolButton[role="previewTransportToggle"]:hover {{
+                background-color: #28323d;
+                border-color: #6e8296;
+            }}
+            QToolButton[role="previewTransportToggle"][expanded="true"] {{
+                background-color: #2a3948;
+                border-color: #7da3c8;
             }}
             QSpinBox[role="clipCompactSpin"], QLineEdit[role="clipCompactField"] {{
                 min-height: 22px;
@@ -7198,6 +7302,7 @@ class MainWindow(QMainWindow):
             }}
             QLabel[role="topStatusChip"] {{
                 background-color: #24303b;
+        self._sync_preview_transport_presentation()
                 border: 1px solid #55677a;
                 border-radius: {radius}px;
                 color: #e4eef8;
@@ -7389,11 +7494,28 @@ class MainWindow(QMainWindow):
                 padding-top: 0px;
                 background-color: transparent;
             }}
+            QGroupBox[role="inlineRecentPreview"] {{
+                border: none;
+                border-radius: 0px;
+                margin-top: 0px;
+                padding-top: 0px;
+                background-color: transparent;
+            }}
             QGroupBox[role="contentCardInner"]::title {{
                 color: transparent;
                 left: 0px;
                 padding: 0px;
                 margin: 0px;
+            }}
+            QGroupBox[role="inlineRecentPreview"]::title {{
+                color: transparent;
+                left: 0px;
+                padding: 0px;
+                margin: 0px;
+            }}
+            #ActivityPreviewHost {{
+                background: transparent;
+                border: none;
             }}
             QFrame[role="contentCardInnerFrame"] {{
                 background-color: transparent;
