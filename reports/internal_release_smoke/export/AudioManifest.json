@@ -8,10 +8,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 6597680,
       "Hash": "93b88edfc88361c8124248a48c73f47d87abbb16c20042270da170884c8e4154",
+      "BuildFingerprint": "a60884faf810cf0ac146d483e94e6731ac13249d8c3e9f6b8d208ee10b9744e6",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Bubble_Stumble_B00M_CUDS"
       ]
@@ -24,10 +27,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 9988610,
       "Hash": "3e7a4908f1dbe83adfc4fd4f56cd8b9c4a82b3dbfc4585c0bf8ba9523a535454",
+      "BuildFingerprint": "58b20db169c0bdec5ee3c90709297bf8180a494d4514a4263956340dbff83f26",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Charm_B00M_CUDS"
       ]
@@ -40,10 +46,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 7417514,
       "Hash": "5fdf6bb17f149e6f26d7d9356124f3e9a88a2f0c751dee723afd64dac20e812c",
+      "BuildFingerprint": "5c49a2c038e71746243201e2700523535aaca11c50fa5ff1b10b0c706c83630f",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Chaser_B00M_CUDS"
       ]
@@ -56,10 +65,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 7655780,
       "Hash": "aa929ac0fb8a2900c2148b788fe355d1b6e154445706a377a8a6528ca4445e08",
+      "BuildFingerprint": "60835dc3a61fb1fe388aaba807caeb46e1232c29761b133a7da429aaf27b5cfe",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Fizzflip_B00M_CUDS"
       ]
@@ -72,10 +84,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 8729516,
       "Hash": "8ce58168294dc045074d4f5211ddbe7a1a05448b3bf9ab9a4104bce5b70a779f",
+      "BuildFingerprint": "87f09afad1d321b667f6095740c064e225f2dac423a1a8cad28d972718a3a367",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Fizzleburst_B00M_CUDS"
       ]
@@ -88,10 +103,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 12872808,
       "Hash": "0c59b3e11aba157d244593dd8e0fb6dd1dc797827180a2704f0cd517a3a304f3",
+      "BuildFingerprint": "48eab95cf6f9951ac1d5aaa06c62d71b5c83124b84205b97f8ac3b8779746e9b",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Mystery_Box_B00M_CUDS"
       ]
@@ -104,10 +122,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 7159718,
       "Hash": "a65eb11762598c760964d66670c5b7561432cfc430ad9de1d1523a081dbf273a",
+      "BuildFingerprint": "14943dc14726118937741fbfb64805f886f3c81e7f0814828511f5384b374fd0",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Nerfed_B00M_CUDS"
       ]
@@ -120,10 +141,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 9726040,
       "Hash": "dea662b5f34b664537eb8a10314b00ccb849df566d6737e196c35b011880dcf9",
+      "BuildFingerprint": "86d1eb8a926b075339fe7ced77d31ab46558f94a7b13b486bb80f2fa15218dfd",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Neutral_Zap_B00M_CUDS"
       ]
@@ -136,10 +160,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 8335262,
       "Hash": "61aca4ed9ab4f35891256d90f15f1ca4be1adcd4ab49142ac84399fb2c6bb8c2",
+      "BuildFingerprint": "90edd8bbc6f5204a7a2a006e12ded65053375ceb1609503a31bb806ce088b15c",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Pop_Rocket_B00M_CUDS"
       ]
@@ -152,10 +179,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 10439042,
       "Hash": "c94145b2d1c1dc80fc207889fd732694238476fd1399037fe7bb7051ebe61041",
+      "BuildFingerprint": "e1c52bd0bbc212ce1e57839410176b443cecfb5a8a7e07516ee6b3b46b4410a2",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Power_Puff_B00M_CUDS"
       ]
@@ -168,10 +198,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 7485638,
       "Hash": "c12cdad74134c0b7d5b96002b33c85a43b3f987cfc9ff0bf564dffc5f9a34343",
+      "BuildFingerprint": "62ecac421b3b3d893d70218c8afe9fe0ddbff38c676ed9f1e043a37923881a5c",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Puffwhirl_B00M_CUDS"
       ]
@@ -184,10 +217,13 @@
       "RuntimeFormat": "wav",
       "TrimStartMs": 0,
       "TrimEndMs": 0,
+      "FadeInMs": 0,
+      "FadeOutMs": 0,
       "LoopStartMs": 0,
       "LoopEndMs": 0,
       "FileSize": 7573716,
       "Hash": "50fb196ee861893c7172dfd20714f8ac1e7cc5982aa4c92402ba052d06731a04",
+      "BuildFingerprint": "d034b5051a448d9c43ce0242502c27c323b0d744adddfe967e054af83a9c24d4",
       "ReferencedByEvents": [
         "MAGPoof_POOF_Smoke_Stack_B00M_CUDS"
       ]

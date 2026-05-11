@@ -12,6 +12,7 @@ from audioforge.app.services.recovery_service import RecoveryService
 from audioforge.app.utils.constants import WWISE_BUS_VIEW_LABEL, WWISE_MASTER_MIXER_TITLE
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QPushButton
 from PySide6.QtWidgets import QToolButton
 
 
@@ -285,6 +286,91 @@ def test_workspace_mode_switch_keeps_main_editor_width(monkeypatch) -> None:
         assert controller.window.workspace_mode_stack.width() == expected_main_sizes[1]
         assert controller.window.workspace_mode_stack.currentWidget() is not None
         assert controller.window.workspace_mode_stack.currentWidget().width() == expected_main_sizes[1]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_activity_panel_defaults_to_compact_and_can_expand(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.resize(1440, 900)
+    controller.window.show()
+    QApplication.processEvents()
+
+    compact_height = controller.window.workspace_splitter.sizes()[1]
+    assert compact_height == controller.window._minimum_report_panel_height
+    assert not controller.window.activity_detail_container.isVisible()
+    assert controller.window.activity_toggle_button.text() == "展开"
+
+    controller.window.activity_toggle_button.click()
+    QApplication.processEvents()
+
+    expanded_height = controller.window.workspace_splitter.sizes()[1]
+    assert expanded_height >= controller.window._expanded_report_panel_min_height
+    assert controller.window.activity_detail_container.isVisible()
+    assert controller.window.activity_toggle_button.text() == "收起"
+
+    controller.window.activity_toggle_button.click()
+    QApplication.processEvents()
+
+    assert controller.window.workspace_splitter.sizes()[1] == controller.window._minimum_report_panel_height
+    assert not controller.window.activity_detail_container.isVisible()
+    assert controller.window.activity_toggle_button.text() == "展开"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_home_page_keeps_direct_workspace_entry_actions(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window._activate_workspace_mode("home")
+    QApplication.processEvents()
+
+    home_page = controller.window.workspace_mode_stack.currentWidget()
+    buttons = {
+        button.text(): button
+        for button in home_page.findChildren(QPushButton)
+        if button.text() in {"新建工程", "打开工程", "进入事件设计", "查看结果中心", "事件设计", "资源整理", WWISE_MASTER_MIXER_TITLE, "结果中心"}
+    }
+
+    assert "新建工程" in buttons
+    assert "打开工程" in buttons
+    assert "进入事件设计" in buttons
+    assert "查看结果中心" in buttons
+    assert "事件设计" in buttons
+    assert "资源整理" in buttons
+    assert WWISE_MASTER_MIXER_TITLE in buttons
+    assert "结果中心" in buttons
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_focus_panel_log_expands_activity_panel_and_restore_default_layout_compacts_it(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.resize(1440, 900)
+    controller.window.show()
+    QApplication.processEvents()
+
+    assert controller.window.workspace_splitter.sizes()[1] == controller.window._minimum_report_panel_height
+
+    controller.window.focus_panel("log")
+    QApplication.processEvents()
+
+    assert controller.window.workspace_splitter.sizes()[1] >= controller.window._expanded_report_panel_min_height
+    assert controller.window.activity_detail_container.isVisible()
+
+    controller.window.restore_default_layout()
+    QApplication.processEvents()
+
+    assert controller.window.workspace_splitter.sizes()[1] == controller.window._minimum_report_panel_height
+    assert not controller.window.activity_detail_container.isVisible()
 
     controller.is_dirty = False
     controller.window.close()

@@ -8,11 +8,32 @@
 - 每个版本至少记录：新增能力、行为变化、修复项、验证结果。
 - Git 提交负责记录实现细节；本文件负责回答“这一版具体给用户带来了什么变化”。
 
-当前已补录的版本范围：0.03 - 0.06.0，并使用 `Unreleased` 记录尚未单独发版的维护更新。
+当前已补录的版本范围：0.03 - 0.06.1，并使用 `Unreleased` 记录尚未单独发版的维护更新。
 
 ## [Unreleased]
 
 - 暂无。
+
+## [0.06.1] - 2026-05-11
+
+### Changed
+
+- 欢迎页进一步收敛为任务型首页，保留新建工程、打开工程以及直达事件设计、资源整理、Bus 混音台和结果中心的快捷入口。
+- 底部结果坞改为默认紧凑、按需展开；展开后再显示诊断、日志、校验、构建和响度详情，完整回看仍统一进入结果中心。
+- 工作区 overview card、note card 和状态条继续去重，重复说明和重复状态不再并排占用主工作流空间。
+- README、开发文档、Unity 对接文档、空项目验证说明和内部上线执行表已按最新 smoke 结果刷新。
+
+### Fixed
+
+- 修复 `focus_panel("log")` 与 `restore_default_layout()` 在结果坞展开态上的配合不稳定问题。
+- 修复欢迎页和工作区信息收口后，底部结果坞仍可能因默认展开而长期挤占主编辑空间的问题。
+
+### Validation
+
+- `pytest`：76 项通过。
+- `python tools/run_internal_release_validation.py --source-dir "E:\sfx\116 Casual UI\Casual UI\Casual UI DS"`：PASS。
+- `python tools/run_full_chain_check.py --export-dir reports/internal_release_smoke/export --report-dir reports/internal_release_smoke/checks`：4/4 通过。
+- `python audioforge/main.py`：主入口启动烟雾通过，无即时异常。
 
 ## [0.06.0] - 2026-05-11
 

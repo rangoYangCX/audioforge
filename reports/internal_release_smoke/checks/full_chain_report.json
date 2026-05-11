@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-30T10:17:20Z",
+  "generated_at": "2026-05-11T03:38:26Z",
   "workspace": "C:\\Users\\EDY\\wwise",
   "export_dir": "C:\\Users\\EDY\\wwise\\reports\\internal_release_smoke\\export",
   "unity_package_dir": "C:\\Users\\EDY\\wwise\\unity_package",
@@ -21,18 +21,18 @@
         "platform win32 -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0",
         "rootdir: C:\\Users\\EDY\\wwise",
         "configfile: pyproject.toml",
-        "collected 65 items",
+        "collected 76 items",
         "tests\\unit\\test_developer_handoff_sample.py .                            [  1%]",
-        "tests\\unit\\test_exporter.py ......                                       [ 10%]",
+        "tests\\unit\\test_exporter.py .......                                      [ 10%]",
         "tests\\unit\\test_full_chain_check.py ..                                   [ 13%]",
-        "tests\\unit\\test_main_controller_full_flow.py .......                     [ 24%]",
-        "tests\\unit\\test_main_controller_layout.py .............................. [ 70%]",
-        ".....                                                                    [ 78%]",
-        "tests\\unit\\test_preview_bus_mixer.py ..                                  [ 81%]",
-        "tests\\unit\\test_project_serializer.py .                                  [ 83%]",
-        "tests\\unit\\test_recovery_service.py .                                    [ 84%]",
+        "tests\\unit\\test_main_controller_full_flow.py ........                    [ 23%]",
+        "tests\\unit\\test_main_controller_layout.py .............................. [ 63%]",
+        "..............                                                           [ 81%]",
+        "tests\\unit\\test_preview_bus_mixer.py ..                                  [ 84%]",
+        "tests\\unit\\test_project_serializer.py .                                  [ 85%]",
+        "tests\\unit\\test_recovery_service.py .                                    [ 86%]",
         "tests\\unit\\test_validator.py ..........                                  [100%]",
-        "============================= 65 passed in 25.45s ============================="
+        "============================= 76 passed in 15.62s ============================="
       ]
     },
     {

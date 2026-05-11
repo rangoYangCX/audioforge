@@ -185,12 +185,17 @@ class MainWindow(QMainWindow):
         self._loading_event = False
         self._close_handler = None
         self._ui_scale = 1.0
-        self._default_workspace_splitter_sizes = [980, 220]
+        self._compact_report_panel_height = 56
+        self._expanded_report_panel_min_height = 140
+        self._default_expanded_report_panel_height = 220
+        self._default_workspace_splitter_sizes = [1144, self._compact_report_panel_height]
         self._default_main_splitter_sizes = [286, 1414]
         self._default_content_top_splitter_sizes = [700, 360]
         self._default_focus_content_splitter_sizes = [760, 320]
-        self._minimum_report_panel_height = 96
+        self._minimum_report_panel_height = self._compact_report_panel_height
         self._last_docked_main_splitter_sizes = list(self._default_main_splitter_sizes)
+        self._activity_panel_expanded = False
+        self._last_expanded_report_panel_height = self._default_expanded_report_panel_height
         self._pending_workspace_splitter_sizes: list[int] | None = None
         self._pending_main_splitter_sizes: list[int] | None = None
         self._pending_content_top_splitter_sizes: list[int] | None = None
@@ -628,13 +633,15 @@ class MainWindow(QMainWindow):
         self.global_search_button = QToolButton()
         self.task_sidebar = TaskSidebar()
         self.workspace_mode_stack = CurrentPageStack()
-        self.activity_summary_label = QLabel("欢迎使用新的 AppShell。先从欢迎页进入具体工作模式。")
-        self.activity_hint_label = QLabel("这里会持续显示最近的结果入口与当前工作状态。")
+        self.activity_summary_label = QLabel("结果坞默认保持紧凑；需要更多细节时再展开。")
+        self.activity_hint_label = QLabel("底部只保留最近结果摘要；完整回看统一进入结果中心。")
         self.activity_log_summary_label = QLabel("最近日志：等待运行输出。")
         self.activity_validation_summary_label = QLabel(self.validation_summary_label.text())
         self.activity_build_summary_label = QLabel(self.build_summary_label.text())
         self.activity_loudness_summary_label = QLabel(self.loudness_summary_label.text())
         self.activity_diagnostic_summary_label = QLabel(self.diagnostic_summary_label.text())
+        self.activity_compact_summary_label = QLabel("等待新的日志、校验、构建或响度结果。")
+        self.activity_toggle_button = QPushButton("展开")
         self.events_workspace_status_label = QLabel("等待选择事件。")
         self.event_overview_hint_label = QLabel("从左侧概览快速切到参数、资源或结果页。")
         self.resources_workspace_status_label = QLabel("等待导入或选择片段。")
@@ -1156,15 +1163,11 @@ class MainWindow(QMainWindow):
         self.workspace_status_bar = QFrame()
         self.workspace_status_bar.setObjectName("WorkspaceStatusBar")
         self.status_label = QLabel(self.status_label.text(), self.workspace_status_bar)
-        self.workspace_report_focus_label = QLabel(self.workspace_report_focus_label.text(), self.workspace_status_bar)
-        self.workspace_dirty_label = QLabel(self.workspace_dirty_label.text(), self.workspace_status_bar)
         workspace_status_layout = QHBoxLayout(self.workspace_status_bar)
         workspace_status_layout.setContentsMargins(12, 8, 12, 8)
         workspace_status_layout.setSpacing(10)
         workspace_status_layout.addWidget(self.status_label)
         workspace_status_layout.addStretch(1)
-        workspace_status_layout.addWidget(self.workspace_report_focus_label)
-        workspace_status_layout.addWidget(self.workspace_dirty_label)
 
         self.main_splitter = QSplitter()
         self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -1303,27 +1306,12 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        intro_card = QFrame()
-        intro_card.setObjectName("ModeIntroCard")
-        intro_layout = QVBoxLayout(intro_card)
-        intro_layout.setContentsMargins(16, 14, 16, 14)
-        intro_layout.setSpacing(4)
-        title_label = QLabel(title)
-        title_label.setProperty("role", "modeCardTitle")
-        description_label = QLabel(description)
-        description_label.setWordWrap(True)
-        description_label.setProperty("role", "modeCardDescription")
-        intro_layout.addWidget(title_label)
-        intro_layout.addWidget(description_label)
+        layout.setSpacing(0)
 
         host = QWidget()
         host_layout = QVBoxLayout(host)
         host_layout.setContentsMargins(0, 0, 0, 0)
         host_layout.setSpacing(0)
-
-        layout.addWidget(intro_card)
         layout.addWidget(host, 1)
         return page, host_layout
 
@@ -1331,13 +1319,15 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("ModeIntroCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
         title_label = QLabel(title)
         title_label.setProperty("role", "modeCardTitle")
-        description_label = QLabel(description)
+        normalized_description = " ".join(description.split())
+        description_label = QLabel(normalized_description)
         description_label.setWordWrap(True)
         description_label.setProperty("role", role)
+        description_label.setToolTip(normalized_description)
         layout.addWidget(title_label)
         layout.addWidget(description_label)
         return card
@@ -1508,8 +1498,8 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("WorkspaceOverviewCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
         summary_label.setProperty("role", "workspaceSectionSummary")
         summary_label.setWordWrap(True)
         layout.addWidget(self._build_card_title_row(title))
@@ -1522,13 +1512,23 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("WorkspaceOverviewCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
         layout.addWidget(self._build_card_title_row(title))
+        normalized_lines: list[str] = []
+        seen_lines: set[str] = set()
         for line in lines:
+            normalized = " ".join(str(line).split())
+            if not normalized or normalized in seen_lines:
+                continue
+            normalized_lines.append(normalized)
+            seen_lines.add(normalized)
+        card.setToolTip("\n".join(normalized_lines))
+        for line in normalized_lines:
             label = QLabel(line)
             label.setWordWrap(True)
             label.setProperty("role", "workspaceChecklistLine")
+            label.setToolTip(line)
             layout.addWidget(label)
         return card
 
@@ -1696,15 +1696,6 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(
-            self._build_workspace_note_card(
-                "整理建议",
-                [
-                    "片段编排负责单片段精修，批处理只做成组修改。",
-                    "生成预览显示当前导出差异镜像，正式交付在构建页完成。",
-                ],
-            )
-        )
         layout.addWidget(self._build_resources_batch_feedback_card())
         layout.addStretch(1)
         return panel
@@ -1820,13 +1811,6 @@ class MainWindow(QMainWindow):
 
     def _build_build_workspace(self) -> QWidget:
         overview_panel = self._build_build_overview_panel()
-        delivery_followup = self._build_workspace_note_card(
-            "交付回看",
-            [
-                "生成预览显示完整导出文本，便于在构建前核对差异。",
-                "构建完成后直接切到构建结果页查看摘要与问题定位。",
-            ],
-        )
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -1839,7 +1823,6 @@ class MainWindow(QMainWindow):
         build_execute_row.addWidget(self.build_execute_button)
         build_execute_row.addStretch(1)
         right_layout.addLayout(build_execute_row)
-        right_layout.addWidget(delivery_followup)
 
         workspace_splitter = QSplitter()
         workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -1887,15 +1870,6 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(filter_card)
         layout.addWidget(self.validation_filter_status_label)
-        layout.addWidget(
-            self._build_workspace_note_card(
-                "修复原则",
-                [
-                    "先处理错误，再看警告；信息级问题只在需要时回看。",
-                    "这里负责聚焦和跳转，不继续堆复杂修复逻辑。",
-                ],
-            )
-        )
         layout.addStretch(1)
         return panel
 
@@ -1925,7 +1899,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(workspace)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        layout.addWidget(self._build_mode_surface_card("校验修复工作流", "把筛选、定位和结果细节拆分成左右双栏，减少来回切页。"))
         layout.addWidget(workspace_splitter, 1)
         return workspace
 
@@ -1936,16 +1909,16 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
         hero = QFrame()
         hero.setObjectName("WelcomeHero")
         hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(22, 20, 22, 20)
-        hero_layout.setSpacing(8)
+        hero_layout.setContentsMargins(20, 18, 20, 18)
+        hero_layout.setSpacing(6)
         title = QLabel("欢迎进入新的 AudioForge AppShell")
         title.setProperty("role", "welcomeTitle")
-        subtitle = QLabel("现在的首屏不再直接把所有工具堆在一起，而是把入口、流程和结果收口到清晰的页面层。")
+        subtitle = QLabel("先新建或打开工程，再直接进入事件、资源、Bus 或结果工作流。")
         subtitle.setWordWrap(True)
         subtitle.setProperty("role", "welcomeDescription")
         action_row = QHBoxLayout()
@@ -1969,73 +1942,42 @@ class MainWindow(QMainWindow):
         hero_layout.addLayout(action_row)
 
         project_snapshot = QFrame()
-        project_snapshot.setObjectName("ModeIntroCard")
+        project_snapshot.setObjectName("WorkspaceOverviewCard")
         project_snapshot_layout = QVBoxLayout(project_snapshot)
-        project_snapshot_layout.setContentsMargins(16, 14, 16, 14)
+        project_snapshot_layout.setContentsMargins(12, 10, 12, 10)
         project_snapshot_layout.setSpacing(6)
-        snapshot_title = QLabel("当前工程")
-        snapshot_title.setProperty("role", "modeCardTitle")
-        project_snapshot_layout.addWidget(snapshot_title)
-        project_snapshot_layout.addWidget(self.welcome_project_title_label)
+        project_snapshot_layout.addWidget(self._build_card_title_row("当前工程", "app"))
+        snapshot_header = QHBoxLayout()
+        snapshot_header.setContentsMargins(0, 0, 0, 0)
+        snapshot_header.setSpacing(8)
+        self.welcome_dirty_label.setProperty("role", "busHeaderChip")
+        snapshot_header.addWidget(self.welcome_project_title_label, 1)
+        snapshot_header.addWidget(self.welcome_dirty_label)
+        project_snapshot_layout.addLayout(snapshot_header)
         project_snapshot_layout.addWidget(self.welcome_project_path_label)
-        project_snapshot_layout.addWidget(self.welcome_dirty_label)
-
-        quick_start = self._build_workspace_note_card(
-            "快速进入",
+        quick_entry_summary = QLabel("直接进入核心工作区，不再从首页层层钻取。")
+        quick_entry = self._build_workspace_overview_card(
+            "首屏快捷跳转",
+            quick_entry_summary,
             [
-                "资源整理：先批量导入、清洗资源键，再切到事件设计。",
-                f"{WWISE_MASTER_MIXER_TITLE}：集中看 {WWISE_OUTPUT_BUS_LABEL}、{WWISE_PARENT_BUS_LABEL} 路由和 {WWISE_MASTER_AUDIO_BUS_TITLE}。",
-                "结果中心：所有日志、校验、构建和响度结果都统一收口到这里。",
+                ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 0, 0),
+                ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 0, 1),
+                (WWISE_MASTER_MIXER_TITLE, lambda: self._activate_workspace_mode("buses"), "bus", 1, 0),
+                ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 1, 1),
             ],
         )
-        first_run_card = self._build_empty_state_card(
-            "从空白工程开始也没关系",
-            "如果你还没有最近工程，可以直接新建一个模板工程，然后按“资源整理 -> 事件设计 -> 构建交付”的顺序完成第一次闭环。",
-        )
-        mode_map = self._build_workspace_note_card(
-            "工作区地图",
+        first_run_note = self._build_workspace_note_card(
+            "首次闭环",
             [
-                "事件设计负责对象参数与响度校准。",
-                "资源整理负责片段编排、批处理和预览镜像。",
-                "构建交付负责真实导出与交付回看。",
+                "资源整理 -> 事件设计 -> 构建交付。",
+                "结果中心负责回看；编辑动作仍在各工作区完成。",
             ],
         )
-        welcome_splitter = QSplitter()
-        welcome_splitter.setOrientation(Qt.Orientation.Horizontal)
-        welcome_splitter.setChildrenCollapsible(False)
-        left_column = QWidget()
-        left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(12)
-        left_layout.addWidget(project_snapshot)
-        left_layout.addWidget(first_run_card)
-        left_layout.addWidget(mode_map)
-        left_layout.addStretch(1)
-        right_column = QWidget()
-        right_layout = QVBoxLayout(right_column)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(12)
-        right_layout.addWidget(quick_start)
-        right_layout.addWidget(
-            self._build_workspace_overview_card(
-                "首屏快捷跳转",
-                QLabel("直接进入核心工作区，避免从首页层层钻取。"),
-                [
-                    ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 0, 0),
-                    ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 0, 1),
-                    (WWISE_MASTER_MIXER_TITLE, lambda: self._activate_workspace_mode("buses"), "bus", 1, 0),
-                    ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 1, 1),
-                ],
-            )
-        )
-        right_layout.addStretch(1)
-        welcome_splitter.addWidget(left_column)
-        welcome_splitter.addWidget(right_column)
-        welcome_splitter.setStretchFactor(0, 2)
-        welcome_splitter.setStretchFactor(1, 3)
 
         layout.addWidget(hero)
-        layout.addWidget(welcome_splitter, 1)
+        layout.addWidget(project_snapshot)
+        layout.addWidget(quick_entry)
+        layout.addWidget(first_run_note)
         layout.addStretch(1)
         return self._wrap_scrollable_page(page)
 
@@ -2202,15 +2144,6 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(
-            self._build_workspace_note_card(
-                "收尾建议",
-                [
-                    "先看校验和构建，再确认响度结果，最后回日志追踪链路。",
-                    "结果页用于收尾与回看，不再承担编辑动作本身。",
-                ],
-            )
-        )
         layout.addStretch(1)
         return panel
 
@@ -2255,6 +2188,50 @@ class MainWindow(QMainWindow):
         label.setText(display)
         label.setToolTip(normalized)
 
+    def _build_activity_compact_summary(self) -> str:
+        for text, fallback in [
+            (self.activity_validation_summary_label.toolTip(), "等待校验。"),
+            (self.activity_build_summary_label.toolTip(), "等待构建或差异预览。"),
+            (self.activity_log_summary_label.toolTip(), "最近日志：等待运行输出。"),
+            (self.activity_loudness_summary_label.toolTip(), "等待响度扫描。"),
+        ]:
+            normalized = " ".join(str(text).split()) if text else ""
+            if normalized and normalized != fallback:
+                return normalized
+        return "等待新的日志、校验、构建或响度结果。"
+
+    def _refresh_activity_compact_summary(self) -> None:
+        if not hasattr(self, "activity_compact_summary_label"):
+            return
+        summary = self._build_activity_compact_summary()
+        display = summary if len(summary) <= 96 else f"{summary[:93]}..."
+        self.activity_compact_summary_label.setText(display)
+        self.activity_compact_summary_label.setToolTip(summary)
+
+    def _apply_activity_panel_presentation(self) -> None:
+        if not hasattr(self, "activity_panel"):
+            return
+        expanded = self._activity_panel_expanded
+        if hasattr(self, "activity_detail_container"):
+            self.activity_detail_container.setVisible(expanded)
+        if hasattr(self, "activity_toggle_button"):
+            self.activity_toggle_button.setText("收起" if expanded else "展开")
+            self.activity_toggle_button.setToolTip("收起结果坞摘要" if expanded else "展开结果坞摘要")
+        self.activity_panel.setMinimumHeight(self._expanded_report_panel_min_height if expanded else self._minimum_report_panel_height)
+
+    def _toggle_activity_panel(self) -> None:
+        current_sizes = self.workspace_splitter.sizes() if hasattr(self, "workspace_splitter") else list(self._default_workspace_splitter_sizes)
+        current_bottom = current_sizes[1] if len(current_sizes) == 2 else self._default_expanded_report_panel_height
+        total = max(sum(current_sizes), sum(self._default_workspace_splitter_sizes))
+        if self._activity_panel_expanded:
+            if current_bottom > self._minimum_report_panel_height + 24:
+                self._last_expanded_report_panel_height = current_bottom
+            target_bottom = self._minimum_report_panel_height
+        else:
+            remembered_bottom = max(self._expanded_report_panel_min_height, self._last_expanded_report_panel_height)
+            target_bottom = min(remembered_bottom, max(self._expanded_report_panel_min_height, int(total * 0.38)))
+        self._set_workspace_splitter_sizes([max(0, total - target_bottom), target_bottom])
+
     def _first_report_item_detail(self, list_widget: QListWidget) -> str:
         item = list_widget.item(0)
         if item is None:
@@ -2283,6 +2260,7 @@ class MainWindow(QMainWindow):
             self.loudness_summary_label.text(),
             fallback="等待响度扫描。",
         )
+        self._refresh_activity_compact_summary()
 
     def _update_diagnostic_snapshot_labels(self) -> None:
         snapshot = self._diagnostic_snapshot_data
@@ -2321,6 +2299,7 @@ class MainWindow(QMainWindow):
             str(snapshot.get("summary", "")),
             fallback="诊断概览：统一回看最近日志、校验、构建、响度和 Bus 状态。",
         )
+        self._refresh_activity_compact_summary()
 
     def _update_snapshot_report_panel(
         self,
@@ -2384,34 +2363,33 @@ class MainWindow(QMainWindow):
 
         activity_entry_label = QLabel("结果坞")
         activity_entry_label.setProperty("role", "busHeaderChip")
-        self.activity_hint_label.setText("底部常驻结果坞只保留高优先级摘要；完整回看统一进入结果中心。")
+        self.activity_hint_label.setText("默认保持紧凑；出现新结果时展开查看，完整回看仍进入结果中心。")
+        self.activity_compact_summary_label.setProperty("role", "modeCardDescription")
+        self.activity_compact_summary_label.setWordWrap(False)
 
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(8)
         header_row.addWidget(activity_entry_label)
-        header_text = QVBoxLayout()
-        header_text.setContentsMargins(0, 0, 0, 0)
-        header_text.setSpacing(2)
-        header_text.addWidget(self.activity_summary_label)
-        header_text.addWidget(self.activity_hint_label)
-        header_row.addLayout(header_text, 1)
-        header_row.addWidget(self.activity_report_focus_label)
-        header_row.addWidget(self.activity_dirty_label)
-
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(6)
+        header_row.addWidget(self.activity_compact_summary_label, 1)
         results_button = QPushButton("结果中心")
-        for compact_button in [results_button]:
+        for compact_button in [results_button, self.activity_toggle_button]:
             compact_button.setProperty("role", "activityCompactButton")
         results_button.clicked.connect(lambda: self._activate_workspace_mode("results"))
-        action_row.addWidget(results_button)
-        action_row.addStretch(1)
+        self.activity_toggle_button.clicked.connect(self._toggle_activity_panel)
+        header_row.addWidget(results_button)
+        header_row.addWidget(self.activity_toggle_button)
 
         dock_note = QLabel("结果坞保持常驻，不改变导出契约；需要完整回看时仍可切到结果中心。")
         dock_note.setWordWrap(True)
         dock_note.setProperty("role", "modeCardDescription")
+
+        self.activity_detail_container = QWidget()
+        details_layout = QVBoxLayout(self.activity_detail_container)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(8)
+        self.activity_diagnostic_summary_label.setProperty("role", "workspaceSectionSummary")
+        self.activity_diagnostic_summary_label.setWordWrap(True)
 
         summary_grid = QGridLayout()
         summary_grid.setContentsMargins(0, 0, 0, 0)
@@ -2424,11 +2402,14 @@ class MainWindow(QMainWindow):
         summary_grid.addWidget(self._build_activity_summary_card("构建", self.activity_build_summary_label), 1, 0)
         summary_grid.addWidget(self._build_activity_summary_card("响度", self.activity_loudness_summary_label), 1, 1)
         body_layout.addLayout(header_row)
-        body_layout.addLayout(action_row)
-        body_layout.addLayout(summary_grid)
-        body_layout.addWidget(dock_note)
+        details_layout.addWidget(self.activity_diagnostic_summary_label)
+        details_layout.addLayout(summary_grid)
+        details_layout.addWidget(dock_note)
+        body_layout.addWidget(self.activity_detail_container)
         layout.addWidget(body)
         self.log_panel = panel
+        self._refresh_activity_compact_summary()
+        self._apply_activity_panel_presentation()
         return panel
 
     def _mount_workspace_surface(self, mode: str) -> None:
@@ -3158,10 +3139,9 @@ class MainWindow(QMainWindow):
     def _flush_pending_layout_sizes(self) -> None:
         self._pending_layout_flush = False
         if self._pending_workspace_splitter_sizes is not None:
-            sizes = [int(value) for value in self._pending_workspace_splitter_sizes]
-            if len(sizes) < 2:
-                sizes = [sizes[0] if sizes else self._default_workspace_splitter_sizes[0], self._minimum_report_panel_height]
-            self.workspace_splitter.setSizes([max(0, sizes[0]), max(self._minimum_report_panel_height, sizes[1])])
+            sizes = self._normalize_workspace_splitter_sizes(self._pending_workspace_splitter_sizes)
+            self._apply_activity_panel_presentation()
+            self.workspace_splitter.setSizes(sizes)
             self._pending_workspace_splitter_sizes = None
         if self._pending_main_splitter_sizes is not None and not self._explorer_detached:
             sizes = [int(value) for value in self._pending_main_splitter_sizes]
@@ -3172,15 +3152,25 @@ class MainWindow(QMainWindow):
             self.content_top_splitter.setSizes(sizes)
             self._pending_content_top_splitter_sizes = None
 
-    def _set_workspace_splitter_sizes(self, sizes: list[int]) -> None:
+    def _normalize_workspace_splitter_sizes(self, sizes: list[int]) -> list[int]:
         normalized = [int(value) for value in sizes]
+        total = max(sum(normalized), sum(self._default_workspace_splitter_sizes)) if normalized else sum(self._default_workspace_splitter_sizes)
         if len(normalized) < 2:
-            total = normalized[0] if normalized else sum(self._default_workspace_splitter_sizes)
             normalized = [max(0, total - self._minimum_report_panel_height), self._minimum_report_panel_height]
-        if normalized[1] <= 0:
-            total = max(sum(normalized), sum(self._default_workspace_splitter_sizes))
-            normalized = [max(0, total - self._minimum_report_panel_height), self._minimum_report_panel_height]
+        expanded = normalized[1] > self._minimum_report_panel_height + 24
+        minimum_height = self._expanded_report_panel_min_height if expanded else self._minimum_report_panel_height
+        bottom = max(minimum_height, normalized[1])
+        bottom = min(bottom, total)
+        top = max(0, total - bottom)
+        self._activity_panel_expanded = expanded
+        if expanded:
+            self._last_expanded_report_panel_height = bottom
+        return [top, bottom]
+
+    def _set_workspace_splitter_sizes(self, sizes: list[int]) -> None:
+        normalized = self._normalize_workspace_splitter_sizes(sizes)
         self._pending_workspace_splitter_sizes = normalized
+        self._apply_activity_panel_presentation()
         if self.isVisible():
             self._schedule_layout_flush()
 

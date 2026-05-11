@@ -1,6 +1,6 @@
 {
   "SchemaVersion": 1,
-  "GeneratedAt": "2026-04-27T09:03:50Z",
+  "GeneratedAt": "2026-05-11T03:37:48Z",
   "ProjectName": "InternalReleaseSmoke",
   "RuntimeAudioFormat": "wav",
   "Buses": [
@@ -60,6 +60,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -90,6 +92,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -120,6 +124,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -150,6 +156,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -180,6 +188,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -210,6 +220,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -240,6 +252,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -270,6 +284,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -300,6 +316,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -330,6 +348,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -360,6 +380,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }
@@ -390,6 +412,8 @@
           "Weight": 1,
           "TrimStartMs": 0,
           "TrimEndMs": 0,
+          "FadeInMs": 0,
+          "FadeOutMs": 0,
           "LoopStartMs": 0,
           "LoopEndMs": 0
         }

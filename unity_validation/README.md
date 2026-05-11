@@ -3,14 +3,14 @@
 > 本文档只负责说明 Unity 空项目验证步骤。
 > SDK 对接边界、运行时契约、字段语义、接入建议与验收标准，统一以 `docs/UnitySDK对接规范.md` 为准；后续不在本文档中维护并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-05-08。
+> 当前文档同步日期：2026-05-11。
 
 ## 当前验证状态
 
-- 当前仓库内最近一次基线验证结果：`pytest` 67 项通过。
+- 当前仓库内最近一次基线验证结果：`pytest` 76 项通过。
 - 真实 WAV 烟雾工程验证结果：PASS。
 - 最近一次全链路检查结果：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 集成包完整性。
-- 2026-05-08 的构建稳定性热修复额外通过 8 条聚焦回归；该修复只影响桌面工具导出稳定性和日志，不改变 Unity 运行时代码镜像。
+- 最新机器报告位于 `reports/internal_release_smoke/checks/full_chain_report.md`，最新签收摘要位于 `reports/internal_release_smoke/release_signoff.md`。
 
 这些结果说明当前仓库已经具备“工具端可导出、契约可检查、验证包可交接”的最低交付基线，但不代表已经完成正式项目内的最终联调。
 
@@ -69,10 +69,11 @@ unity_validation/
 3. 最小 Runtime 能按事件名触发播放。
 4. Random、Sequence、Combo、Cooldown、MaxInstances 这些行为至少在空项目里能走通基础链路。
 
-建议在开始 Unity 联调前，先完成仓库内这两条本地验证命令：
+建议在开始 Unity 联调前，先完成仓库内这三条本地验证命令：
 
 1. `python -m pytest`
 2. `python tools/run_internal_release_validation.py --source-dir "E:\sfx\116 Casual UI\Casual UI\Casual UI DS"`
+3. `python tools/run_full_chain_check.py --export-dir reports/internal_release_smoke/export --report-dir reports/internal_release_smoke/checks`
 
 ## 准备导出物
 

@@ -1,15 +1,11 @@
 # AudioForge Internal Release Sign-off
 
-Current Baseline Snapshot: 2026-04-30
-
 - Result: PASS
 - Smoke Project: C:\Users\EDY\wwise\reports\internal_release_smoke\internal_release_smoke.afproj
 - Export Root: C:\Users\EDY\wwise\reports\internal_release_smoke\export
 - Check Reports: C:\Users\EDY\wwise\reports\internal_release_smoke\checks
 - Selected WAV Files: 12
 - Validation Warnings: 0
-- Pytest Baseline: 62 passed
-- Full-Chain Baseline: 4/4 PASS
 
 ## Residual Risks
 

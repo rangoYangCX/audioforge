@@ -1,8 +1,8 @@
 # AudioForge 概述
 
-当前文档同步日期：2026-05-08
+当前文档同步日期：2026-05-11
 
-当前仓库级完整验证基线：`pytest` 67 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过。2026-05-08 的构建稳定性热修复额外通过 8 条聚焦回归。
+当前仓库级完整验证基线：`pytest` 76 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过。最新机器报告见 `reports/internal_release_smoke/checks/full_chain_report.md`。
 
 ## 这套方案在 Unity 侧怎么理解
 
