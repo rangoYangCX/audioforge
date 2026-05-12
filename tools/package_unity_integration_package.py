@@ -35,7 +35,9 @@ def add_release_docs(workspace: Path, release_root: Path) -> None:
     docs_targets = {
         workspace / "CHANGELOG.md": release_root / "Docs" / "Canonical" / "CHANGELOG.md",
         workspace / "docs" / "UnitySDK对接规范.md": release_root / "Docs" / "Canonical" / "UnitySDK对接规范.md",
+        workspace / "docs" / "UnitySDK一期到当前变化总览.md": release_root / "Docs" / "Canonical" / "UnitySDK一期到当前变化总览.md",
         workspace / "docs" / "Unity场景联调清单.md": release_root / "Docs" / "Canonical" / "Unity场景联调清单.md",
+        workspace / "docs" / "releases" / f"v{APP_VERSION}-github-release.md": release_root / "Docs" / "Canonical" / "GitHubRelease.md",
         workspace / "unity_validation" / "README.md": release_root / "Docs" / "Canonical" / "UnityValidationREADME.md",
     }
     for source_path, target_path in docs_targets.items():

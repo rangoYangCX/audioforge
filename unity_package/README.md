@@ -2,7 +2,7 @@
 
 这个目录是 Unity 侧运行时资源的独立维护包，也是仓库内的唯一源码真源。
 
-当前文档同步日期：2026-05-11
+当前文档同步日期：2026-05-12
 
 ## 目录定位
 
@@ -26,23 +26,29 @@
 
 - `Assets/AudioForgeRuntime/`：运行时代码、Editor 工具和 `.meta` 文件。
 - `Docs/README.md`、`Docs/QuickStart.md`：包内对接入口和最短接入说明。
-- `Docs/Canonical/`：从仓库主文档同步进包内的对接规范、联调清单、版本记录与空项目验证说明。
+- `Docs/Canonical/`：从仓库主文档同步进包内的对接规范、一期对比总览、联调清单、版本记录、当前 release note 与空项目验证说明。
 - `Examples/`：带注释的示范代码文件，不会自动进入 Unity 工程，需要按需手工复制。
 - `Verification/`：最近一次机器验证报告与内部签收摘要。
 - `README.md`：包根总说明。
 
-## 2026-05-11 版本说明
+## 和第一期相比，这包现在多了什么
 
-- 0.06.2 这轮发布主要更新了桌面工具侧的最近试听卡片、transport 可视化和相关交付文档，没有修改 `unity_package/Assets/AudioForgeRuntime` 下的 Unity 运行时代码。
-- 因此已经生成好的 Unity SDK 包不会被动变化；只有重新执行 `python tools/package_unity_integration_package.py` 或完整发版流程时，包内文档副本、验证材料和示例导出物才会刷新。
-- 如果你只是把 SDK 代码交给 Unity 开发同学，这次版本不要求重新拷贝 `AudioForgeRuntime`；如果你还要同步新的文档、副本验证结果或新的导出样例，则需要重新打包。
+- 包内文档新增 `Docs/一期对比变化总览.md`，Unity 同学拿到包后可以先用一页文档看清楚“一期到当前”的真实差异。
+- 对接规范已经把 `PlayMode = OneShot`、有效 Clip 集合和 editor-only 边界写清楚，不需要再从编辑器实现里反推 Unity 端应该怎么理解。
+- 包内验证材料会随重新打包一起刷新，交接时可以同时给目录包、zip 和签收摘要，而不是只给一份运行时代码目录。
+
+## 2026-05-12 版本说明
+
+- 0.07.0 这轮发布的重点是 phase2 编辑器交付收口和 Unity 对接文档刷新，其中运行时代码目录本身不要求大改，但建议重新打包，以便把 `OneShot` 对接说明、一期对比总览和最新签收材料一起交给 Unity 同学。
+- 当前参考运行时代码仍位于 `unity_package/Assets/AudioForgeRuntime`，并能继续消费新版导出结果；这轮主要新增的是文档解释和交付材料，而不是第二套 SDK 代码树。
+- 如果你只看代码目录，容易误以为这次没有变化；真正需要同步给 Unity 的，是“同样的运行时代码边界下，哪些语义已经更新、哪些 editor-only 内容仍然不进入契约”。
 
 ## 打包产物
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.06.2/`
-- `AudioForgeUnityPackage-0.06.2.zip`
+- `AudioForgeUnityPackage-0.07.0/`
+- `AudioForgeUnityPackage-0.07.0.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 

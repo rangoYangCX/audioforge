@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from audioforge.app.utils.constants import DEFAULT_BUSES, DEFAULT_PROJECT_NAME, PROJECT_VERSION
 
-PlayMode = Literal["Random", "Sequence", "Combo"]
+PlayMode = Literal["OneShot", "Random", "Sequence", "Combo"]
 StealPolicy = Literal["RejectNew", "StopOldest", "StopQuietest"]
 LoadPolicy = Literal["OnDemand", "Preload", "Stream"]
 Severity = Literal["Error", "Warning", "Info"]
@@ -44,6 +44,8 @@ class ClipModel:
     source_path: str
     export_path: str
     asset_key: str
+    enabled: bool = True
+    active: bool = False
     weight: int = 1
     trim_start_ms: int = 0
     trim_end_ms: int = 0
@@ -102,6 +104,42 @@ class EventModel:
         payload = asdict(self)
         payload["clips"] = [clip.to_dict() for clip in self.clips]
         return payload
+
+
+def normalize_event_binding_states(event: EventModel) -> None:
+    if not event.clips:
+        return
+
+    for clip in event.clips:
+        clip.enabled = bool(clip.enabled)
+
+    enabled_clips = [clip for clip in event.clips if bool(clip.enabled)]
+    if not enabled_clips:
+        for clip in event.clips:
+            clip.active = False
+        return
+
+    if event.play_mode == "OneShot":
+        active_clip = next((clip for clip in enabled_clips if bool(clip.active)), None)
+        if active_clip is None:
+            active_clip = enabled_clips[0]
+
+        for clip in event.clips:
+            clip.active = bool(clip.enabled and clip is active_clip)
+        return
+
+    has_any_active = any(bool(clip.active) for clip in enabled_clips)
+    for clip in event.clips:
+        clip.active = bool(clip.enabled and (clip.active or not has_any_active))
+
+
+def effective_event_clips(event: EventModel) -> list[ClipModel]:
+    normalize_event_binding_states(event)
+    active_clips = [clip for clip in event.clips if bool(clip.enabled and clip.active)]
+    if event.play_mode == "OneShot":
+        active_clip = next((clip for clip in active_clips if bool(clip.active)), None)
+        return [active_clip] if active_clip is not None else []
+    return active_clips
 
 
 @dataclass(slots=True)
@@ -185,6 +223,7 @@ def normalize_bus_configs(bus_configs: list[BusConfig] | None, fallback_bus_name
 @dataclass(slots=True)
 class ProjectSettings:
     default_bus: str = "SFX"
+    auto_assign_bus_by_name: bool = True
     supported_formats: list[str] = field(default_factory=lambda: ["wav", "ogg"])
     export_root: str = "./Export"
     buses: list[str] = field(default_factory=lambda: list(DEFAULT_BUSES))
@@ -201,6 +240,7 @@ class ProjectSettings:
     def to_dict(self) -> dict[str, Any]:
         return {
             "DefaultBus": self.default_bus,
+            "AutoAssignBusByName": self.auto_assign_bus_by_name,
             "SupportedFormats": list(self.supported_formats),
             "ExportRoot": self.export_root,
             "Buses": list(self.buses),
@@ -251,6 +291,7 @@ class AudioProject:
             self.touch()
 
     def add_event(self, folder_id: str, event: EventModel) -> None:
+        normalize_event_binding_states(event)
         self.events[event.id] = event
         self.folders[folder_id].child_event_ids.append(event.id)
         for clip in event.clips:
@@ -372,12 +413,16 @@ class AudioProject:
         self.touch()
 
     def add_clip_to_event(self, event_id: str, clip: ClipModel) -> None:
+        if self.events[event_id].play_mode != "OneShot" and clip.enabled:
+            clip.active = True
         self.events[event_id].clips.append(clip)
+        normalize_event_binding_states(self.events[event_id])
         self.register_source_asset(clip.source_path)
         self.touch()
 
     def sync_asset_registry(self) -> None:
         for event in self.events.values():
+            normalize_event_binding_states(event)
             for clip in event.clips:
                 normalized = str(clip.source_path).strip()
                 if normalized and normalized not in self.asset_registry:
@@ -386,6 +431,7 @@ class AudioProject:
     def remove_clip_from_event(self, event_id: str, clip_id: str) -> None:
         event = self.events[event_id]
         event.clips = [clip for clip in event.clips if clip.id != clip_id]
+        normalize_event_binding_states(event)
         self.touch()
 
     def find_event_folder_id(self, event_id: str) -> str | None:
@@ -447,6 +493,7 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
         updated_at=payload.get("UpdatedAt", utc_now_iso()),
         settings=ProjectSettings(
             default_bus=settings_payload.get("DefaultBus", "SFX"),
+            auto_assign_bus_by_name=bool(settings_payload.get("AutoAssignBusByName", True)),
             supported_formats=settings_payload.get("SupportedFormats", ["wav", "ogg"]),
             export_root=settings_payload.get("ExportRoot", "./Export"),
             buses=settings_payload.get("Buses", list(DEFAULT_BUSES)),
@@ -482,7 +529,7 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
     event_payloads = payload.get("Events", {})
     for event_id, event_data in event_payloads.items():
         clips = [ClipModel(**clip_payload) for clip_payload in event_data.get("clips", [])]
-        project.events[event_id] = EventModel(
+        event = EventModel(
             id=event_id,
             display_name=event_data.get("display_name", ""),
             bus=event_data.get("bus", "SFX"),
@@ -504,6 +551,8 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
             clips=clips,
             notes=event_data.get("notes", ""),
         )
+        normalize_event_binding_states(event)
+        project.events[event_id] = event
 
     if not project.root_folder_ids and not project.folders:
         default_folder = FolderModel(id=new_id("folder"), name="Default Work Unit")

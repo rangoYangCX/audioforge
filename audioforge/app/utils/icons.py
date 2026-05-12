@@ -18,6 +18,13 @@ def _resolve_icon_root() -> Path:
 
 ICON_ROOT = _resolve_icon_root()
 
+EVENT_ICON_NAMES = {
+    "OneShot": "event_one_shot",
+    "Random": "event_random",
+    "Sequence": "event_sequence",
+    "Combo": "event_combo",
+}
+
 
 @lru_cache(maxsize=None)
 def load_app_icon(name: str) -> QIcon:
@@ -25,3 +32,7 @@ def load_app_icon(name: str) -> QIcon:
     if not file_path.exists():
         return QIcon()
     return QIcon(str(file_path))
+
+
+def load_event_icon(play_mode: str | None) -> QIcon:
+    return load_app_icon(EVENT_ICON_NAMES.get(str(play_mode), "event"))

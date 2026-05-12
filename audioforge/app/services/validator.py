@@ -9,7 +9,7 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
-from audioforge.app.models.audio_project import AudioProject, MASTER_BUS_NAME, ValidationIssue
+from audioforge.app.models.audio_project import AudioProject, MASTER_BUS_NAME, ValidationIssue, effective_event_clips
 from audioforge.app.utils.constants import (
     MAX_CLIP_TIME_MS,
     MAX_CLIP_WEIGHT,
@@ -143,6 +143,7 @@ class ProjectValidator:
                     )
 
         for event_id, event in project.events.items():
+            runtime_clips = effective_event_clips(event)
             if not event_id:
                 issues.append(ValidationIssue("Error", "EVENT_ID_EMPTY", "Event ID is required.", event_id))
                 continue
@@ -186,6 +187,8 @@ class ProjectValidator:
                 )
             if not event.clips:
                 issues.append(ValidationIssue("Error", "EVENT_NO_CLIPS", "Event has no clips.", event_id))
+            elif not runtime_clips:
+                issues.append(ValidationIssue("Error", "EVENT_NO_ENABLED_CLIPS", "Event has no effective active clips.", event_id))
             if not MIN_VOLUME_DB <= event.volume_db <= MAX_VOLUME_DB:
                 issues.append(
                     ValidationIssue(
@@ -304,7 +307,7 @@ class ProjectValidator:
                             event_id,
                         )
                     )
-            if len(event.clips) == 1 and event.avoid_immediate_repeat:
+            if len(runtime_clips) == 1 and event.avoid_immediate_repeat:
                 issues.append(
                     ValidationIssue(
                         "Warning",
@@ -313,7 +316,7 @@ class ProjectValidator:
                         event_id,
                     )
                 )
-            if event.play_mode == "Sequence" and len(event.clips) == 1:
+            if event.play_mode == "Sequence" and len(runtime_clips) == 1:
                 issues.append(
                     ValidationIssue(
                         "Warning",

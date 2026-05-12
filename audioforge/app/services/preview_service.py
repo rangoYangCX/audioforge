@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from audioforge.app.models.audio_project import ClipModel, EventModel
+from audioforge.app.models.audio_project import ClipModel, EventModel, effective_event_clips
 
 
 @dataclass(slots=True)
@@ -62,8 +62,9 @@ class PreviewService:
         state = self._states.setdefault(event.id, PreviewEventState())
         self._cleanup_expired(state, trigger_time)
         stolen_oldest = False
+        runtime_clips = effective_event_clips(event)
 
-        if not event.clips:
+        if not runtime_clips:
             return PreviewResult(accepted=False, reason="No clips configured.")
 
         if event.cooldown_seconds > 0 and state.last_trigger_time is not None:
@@ -87,7 +88,7 @@ class PreviewService:
             state.active_until_times.pop(0)
             stolen_oldest = True
 
-        clip = self._select_clip(event, state)
+        clip = self._select_clip(event, state, runtime_clips)
         if clip is None:
             return PreviewResult(accepted=False, reason="No clip was selected.")
         clip_source_path = str(clip.source_path or "").strip()
@@ -145,13 +146,15 @@ class PreviewService:
             state.combo_step = min(state.combo_step, event.combo_max_step)
         return state.combo_step
 
-    def _select_clip(self, event: EventModel, state: PreviewEventState) -> ClipModel | None:
+    def _select_clip(self, event: EventModel, state: PreviewEventState, runtime_clips: list[ClipModel]) -> ClipModel | None:
+        if event.play_mode == "OneShot":
+            return runtime_clips[0] if runtime_clips else None
         if event.play_mode == "Sequence":
-            clip = event.clips[state.sequence_index % len(event.clips)]
-            state.sequence_index = (state.sequence_index + 1) % len(event.clips)
+            clip = runtime_clips[state.sequence_index % len(runtime_clips)]
+            state.sequence_index = (state.sequence_index + 1) % len(runtime_clips)
             return clip
 
-        candidates = list(event.clips)
+        candidates = list(runtime_clips)
         if event.avoid_immediate_repeat and state.last_clip_id is not None and len(candidates) > 1:
             filtered = [clip for clip in candidates if clip.id != state.last_clip_id]
             if filtered:

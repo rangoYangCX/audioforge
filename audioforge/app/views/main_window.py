@@ -7,11 +7,13 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
-from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QCloseEvent, QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QByteArray, QItemSelectionModel, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractButton,
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -35,6 +37,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QPlainTextEdit,
     QProgressBar,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -51,7 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from audioforge.app.models.audio_project import BusConfig, EventModel, ProjectSettings, ValidationIssue
+from audioforge.app.models.audio_project import BusConfig, ClipModel, EventModel, ProjectSettings, ValidationIssue
 from audioforge.app.services.audio_meter_service import AudioMeterSnapshot, LoudnessReading
 from audioforge.app.utils.icons import load_app_icon
 from audioforge.app.utils.constants import (
@@ -94,8 +97,9 @@ from audioforge.app.utils.constants import (
 )
 from audioforge.app.widgets.clip_table import ClipTableWidget
 from audioforge.app.widgets.clip_waveform_editor import ClipWaveformEditor
-from audioforge.app.widgets.event_tree import EventTreeWidget
+from audioforge.app.widgets.event_tree import EventTreeWidget, decode_source_binding_token
 from audioforge.app.widgets.loudness_history_plot import LoudnessHistoryPlot
+from audioforge.app.widgets.source_tree import SOURCE_ASSET_MIME_TYPE, SourceTreeWidget
 from audioforge.app.views.shell_components import AppShell, CompatibilityTabWidget, DetachedToolWindow, TaskSidebar
 
 
@@ -136,6 +140,411 @@ class CurrentPageStack(QStackedWidget):
         return QSize(hint.width(), 0)
 
 
+class EventSourceBindingDropZone(QFrame):
+    sourceAssetsDropped = Signal(list)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setObjectName("EventSourceBindingDropZone")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
+        self.setMinimumHeight(92)
+        self.setProperty("dragActive", False)
+        self.setStyleSheet(
+            "QFrame#EventSourceBindingDropZone {"
+            "border: 1px dashed rgba(159, 184, 205, 0.55);"
+            "border-radius: 10px;"
+            "background-color: rgba(159, 184, 205, 0.05);"
+            "}"
+            "QFrame#EventSourceBindingDropZone[dragActive=\"true\"] {"
+            "border: 2px solid rgba(214, 145, 59, 0.95);"
+            "background-color: rgba(214, 145, 59, 0.12);"
+            "}"
+        )
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self.isEnabled() and self._extract_source_paths(event.mimeData()):
+            self._set_drag_active(True)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self.isEnabled() and self._extract_source_paths(event.mimeData()):
+            self._set_drag_active(True)
+            event.acceptProposedAction()
+            return
+        self._set_drag_active(False)
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_drag_active(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        source_paths = self._extract_source_paths(event.mimeData())
+        self._set_drag_active(False)
+        if not self.isEnabled() or not source_paths:
+            event.ignore()
+            return
+        self.sourceAssetsDropped.emit(source_paths)
+        event.acceptProposedAction()
+
+    def _set_drag_active(self, active: bool) -> None:
+        self.setProperty("dragActive", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def _extract_source_paths(self, mime_data) -> list[str]:
+        if mime_data is None or not mime_data.hasFormat(SOURCE_ASSET_MIME_TYPE):
+            return []
+        raw_payload = bytes(mime_data.data(SOURCE_ASSET_MIME_TYPE)).decode("utf-8", errors="ignore")
+        source_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for line in raw_payload.splitlines():
+            source_path = line.strip()
+            if not source_path or source_path in seen_paths:
+                continue
+            source_paths.append(source_path)
+            seen_paths.add(source_path)
+        return source_paths
+
+
+def _is_single_active_mode(play_mode: str) -> bool:
+    return str(play_mode) == "OneShot"
+
+
+def _binding_state_key(play_mode: str, clip: ClipModel) -> str:
+    if not bool(clip.enabled):
+        return "disabled"
+    if bool(clip.active):
+        return "active"
+    return "inactive"
+
+
+def _binding_state_label(play_mode: str, clip: ClipModel) -> str:
+    state_key = _binding_state_key(play_mode, clip)
+    if state_key == "disabled":
+        return "已停用"
+    if state_key == "active":
+        return "已激活"
+    if _is_single_active_mode(play_mode):
+        return "候选未激活"
+    return "未激活"
+
+
+def _binding_rollup_text(play_mode: str, clips: list[ClipModel]) -> str:
+    total_count = len(clips)
+    effective_count = sum(1 for clip in clips if bool(clip.enabled) and bool(clip.active))
+    inactive_count = sum(1 for clip in clips if bool(clip.enabled) and not bool(clip.active))
+    disabled_count = sum(1 for clip in clips if not bool(clip.enabled))
+    fragments = [f"当前挂载 {total_count} 条 Source Binding", f"生效 {effective_count} 条"]
+    if inactive_count:
+        inactive_label = "候选未激活" if _is_single_active_mode(play_mode) else "未激活"
+        fragments.append(f"{inactive_label} {inactive_count} 条")
+    if disabled_count:
+        fragments.append(f"已停用 {disabled_count} 条")
+    return " | ".join(fragments)
+
+
+def _binding_state_palette(state_key: str) -> dict[str, str]:
+    palette = {
+        "active": {
+            "background": "rgba(54, 118, 98, 0.16)",
+            "border": "rgba(81, 191, 154, 0.88)",
+            "accent": "rgba(112, 227, 187, 0.98)",
+            "title": "#f1fff9",
+            "meta": "#d7efe5",
+            "path": "#add6c6",
+            "chip_text": "#ecfff7",
+            "chip_background": "rgba(93, 211, 170, 0.22)",
+        },
+        "inactive": {
+            "background": "rgba(118, 132, 145, 0.09)",
+            "border": "rgba(152, 167, 181, 0.64)",
+            "accent": "rgba(190, 202, 214, 0.84)",
+            "title": "#f1f5f8",
+            "meta": "#d7dfe6",
+            "path": "#aebbc7",
+            "chip_text": "#edf2f6",
+            "chip_background": "rgba(179, 191, 203, 0.18)",
+        },
+        "disabled": {
+            "background": "rgba(131, 79, 79, 0.08)",
+            "border": "rgba(198, 118, 118, 0.66)",
+            "accent": "rgba(223, 136, 136, 0.9)",
+            "title": "#fff1f1",
+            "meta": "#ebcece",
+            "path": "#d6b2b2",
+            "chip_text": "#fff5f5",
+            "chip_background": "rgba(214, 133, 133, 0.2)",
+        },
+    }
+    return palette.get(state_key, palette["inactive"])
+
+
+def _apply_binding_card_style(
+    card: QFrame,
+    chip: QLabel,
+    title_label: QLabel,
+    meta_labels: list[QLabel],
+    path_label: QLabel,
+    state_key: str,
+) -> None:
+    palette = _binding_state_palette(state_key)
+    card.setStyleSheet(
+        "QFrame {"
+        f"border: 1px solid {palette['border']};"
+        f"border-left: 4px solid {palette['accent']};"
+        "border-radius: 12px;"
+        f"background-color: {palette['background']};"
+        "}"
+    )
+    chip.setStyleSheet(
+        "QLabel {"
+        f"color: {palette['chip_text']};"
+        f"background-color: {palette['chip_background']};"
+        "border-radius: 10px;"
+        "padding: 3px 8px;"
+        "font-weight: 600;"
+        "}"
+    )
+    title_label.setStyleSheet(f"color: {palette['title']}; font-weight: 700;")
+    for label in meta_labels:
+        label.setStyleSheet(f"color: {palette['meta']};")
+    path_label.setStyleSheet(f"color: {palette['path']};")
+
+
+class EventBindingsPopup(QDialog):
+    sourceAssetsDropped = Signal(str, list)
+    bindingEnabledChanged = Signal(str, str, bool)
+    bindingActiveChanged = Signal(str, str, bool)
+    locateSourceRequested = Signal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._event_id = ""
+        self._play_mode = "Random"
+        self._binding_group: QButtonGroup | None = QButtonGroup(self)
+        self._binding_group.setExclusive(True)
+
+        self.setWindowTitle("源音频绑定")
+        self.setWindowFlag(Qt.WindowType.Popup, True)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setMinimumWidth(460)
+        self.setMaximumWidth(560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        self.title_label = QLabel("源音频绑定")
+        self.title_label.setProperty("role", "workspaceSectionTitle")
+        self.detail_label = QLabel("拖拽左侧源音频到这里，或直接调整当前事件的 Active / Enabled。")
+        self.detail_label.setProperty("role", "workspaceSectionSummary")
+        self.detail_label.setWordWrap(True)
+
+        self.status_label = QLabel("")
+        self.status_label.setProperty("role", "workspaceSectionSummary")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet(
+            "QLabel {"
+            "border: 1px solid rgba(214, 145, 59, 0.35);"
+            "border-radius: 8px;"
+            "padding: 6px 10px;"
+            "background-color: rgba(214, 145, 59, 0.1);"
+            "color: #f4ddc0;"
+            "}"
+        )
+        self.status_label.hide()
+
+        self.drop_zone = EventSourceBindingDropZone(self)
+        drop_layout = QVBoxLayout(self.drop_zone)
+        drop_layout.setContentsMargins(12, 10, 12, 10)
+        drop_layout.setSpacing(4)
+        self.drop_title_label = QLabel("拖拽源音频到这里")
+        self.drop_title_label.setProperty("role", "workspaceSectionTitle")
+        self.drop_detail_label = QLabel("支持从左侧源音频树单选或多选后直接拖入；重复绑定会自动跳过。")
+        self.drop_detail_label.setWordWrap(True)
+        drop_layout.addWidget(self.drop_title_label)
+        drop_layout.addWidget(self.drop_detail_label)
+
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setMinimumHeight(180)
+        self.scroll_area.setMaximumHeight(360)
+        self.bindings_container = QWidget(self.scroll_area)
+        self.bindings_layout = QVBoxLayout(self.bindings_container)
+        self.bindings_layout.setContentsMargins(0, 0, 0, 0)
+        self.bindings_layout.setSpacing(8)
+        self.scroll_area.setWidget(self.bindings_container)
+
+        self.empty_state_label = QLabel("当前事件还没有绑定源音频。直接从左侧源音频树拖进来即可。")
+        self.empty_state_label.setProperty("role", "workspaceSectionSummary")
+        self.empty_state_label.setWordWrap(True)
+
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.detail_label)
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.drop_zone)
+        layout.addWidget(self.empty_state_label)
+        layout.addWidget(self.scroll_area)
+
+        self.drop_zone.sourceAssetsDropped.connect(self._emit_source_asset_drop)
+
+    def event_id(self) -> str:
+        return self._event_id
+
+    def set_event(self, event: EventModel, status_message: str = "") -> None:
+        self._event_id = event.id
+        self._play_mode = str(event.play_mode)
+        label = event.display_name or event.id
+        play_mode_label = {"OneShot": "单次播放"}.get(str(event.play_mode), str(event.play_mode))
+        if _is_single_active_mode(self._play_mode):
+            mode_hint = "OneShot 下只能保留一个 Active；切换时会自动取消其他绑定的 Active。"
+        else:
+            mode_hint = "当前模式允许多个 Active；新追加的已启用绑定默认都会进入 Active。"
+        self.title_label.setText(f"事件 {label} 的源音频绑定")
+        self.detail_label.setText(
+            f"模式 {play_mode_label} | {_binding_rollup_text(self._play_mode, list(event.clips))}。{mode_hint}"
+        )
+        self.drop_title_label.setText(f"拖入即可追加到事件 {event.id}")
+        self.drop_detail_label.setText("支持从左侧源音频树单选或多选后直接拖入；重复绑定会自动跳过。")
+        self.set_status_message(status_message)
+        self._clear_binding_cards()
+        if _is_single_active_mode(self._play_mode):
+            self._binding_group = QButtonGroup(self)
+            self._binding_group.setExclusive(True)
+        else:
+            self._binding_group = None
+
+        has_bindings = bool(event.clips)
+        self.empty_state_label.setVisible(not has_bindings)
+        self.scroll_area.setVisible(has_bindings)
+        if not has_bindings:
+            return
+
+        for clip in event.clips:
+            self.bindings_layout.addWidget(self._build_binding_card(clip))
+        self.bindings_layout.addStretch(1)
+
+    def set_status_message(self, message: str) -> None:
+        normalized = str(message).strip()
+        self.status_label.setVisible(bool(normalized))
+        self.status_label.setText(normalized)
+        self.status_label.setToolTip(normalized)
+
+    def show_at(self, global_pos: QPoint) -> None:
+        self.adjustSize()
+        target = QPoint(global_pos)
+        popup_size = self.sizeHint()
+        screen = QApplication.screenAt(global_pos)
+        if screen is not None:
+            available = screen.availableGeometry()
+            target.setX(max(available.left(), min(target.x(), available.right() - popup_size.width())))
+            target.setY(max(available.top(), min(target.y(), available.bottom() - popup_size.height())))
+        self.move(target)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _emit_source_asset_drop(self, source_paths: list[str]) -> None:
+        if self._event_id and source_paths:
+            self.sourceAssetsDropped.emit(self._event_id, list(source_paths))
+
+    def _clear_binding_cards(self) -> None:
+        while self.bindings_layout.count():
+            item = self.bindings_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _build_binding_card(self, clip: ClipModel) -> QFrame:
+        source_name = os.path.basename(clip.source_path) or clip.asset_key or clip.id
+        state_key = _binding_state_key(self._play_mode, clip)
+        state_label = _binding_state_label(self._play_mode, clip)
+
+        card = QFrame(self.bindings_container)
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        card.setFrameShadow(QFrame.Shadow.Raised)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+        card_layout.setSpacing(6)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+        name_label = QLabel(source_name)
+        name_label.setProperty("role", "workspaceSectionTitle")
+        state_chip = QLabel(state_label)
+        locate_button = QToolButton(card)
+        locate_button.setText("定位")
+        locate_icon = load_app_icon("open_project")
+        if not locate_icon.isNull():
+            locate_button.setIcon(locate_icon)
+        locate_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        locate_button.setAutoRaise(True)
+        locate_button.setToolTip("在源音频树中定位该源文件")
+        locate_button.clicked.connect(lambda _checked=False, path=clip.source_path: self.locateSourceRequested.emit(path))
+        header_row.addWidget(name_label, 1)
+        header_row.addWidget(state_chip)
+        header_row.addWidget(locate_button)
+
+        state_detail_label = QLabel(f"Enabled {'开' if bool(clip.enabled) else '关'} | Active {'是' if bool(clip.active) else '否'}")
+        state_detail_label.setWordWrap(True)
+        meta_label = QLabel(f"Clip ID {clip.id} | 资源键 {clip.asset_key or '-'}")
+        meta_label.setWordWrap(True)
+        path_label = QLabel(clip.source_path or "未记录源路径")
+        path_label.setWordWrap(True)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        _apply_binding_card_style(card, state_chip, name_label, [state_detail_label, meta_label], path_label, state_key)
+
+        control_row = QHBoxLayout()
+        control_row.setContentsMargins(0, 0, 0, 0)
+        control_row.setSpacing(12)
+        enabled_check = QCheckBox("Enabled", card)
+        enabled_check.setChecked(bool(clip.enabled))
+        if _is_single_active_mode(self._play_mode):
+            active_control: QAbstractButton = QRadioButton("Active", card)
+            if self._binding_group is not None:
+                self._binding_group.addButton(active_control)
+        else:
+            active_control = QCheckBox("Active", card)
+        active_control.setChecked(bool(clip.active))
+        enabled_check.toggled.connect(
+            lambda checked, clip_id=clip.id: self.bindingEnabledChanged.emit(self._event_id, clip_id, bool(checked))
+        )
+        active_control.toggled.connect(
+            lambda checked, clip_id=clip.id, checkbox=enabled_check: self._handle_active_toggled(clip_id, bool(checked), checkbox)
+        )
+        control_row.addWidget(enabled_check)
+        control_row.addWidget(active_control)
+        control_row.addStretch(1)
+
+        card_layout.addLayout(header_row)
+        card_layout.addWidget(state_detail_label)
+        card_layout.addWidget(meta_label)
+        card_layout.addWidget(path_label)
+        card_layout.addLayout(control_row)
+        return card
+
+    def _handle_active_toggled(self, clip_id: str, checked: bool, enabled_check: QCheckBox) -> None:
+        if not self._event_id:
+            return
+
+        if checked and not enabled_check.isChecked():
+            enabled_check.setChecked(True)
+
+        if _is_single_active_mode(self._play_mode) and not checked:
+            return
+
+        self.bindingActiveChanged.emit(self._event_id, clip_id, bool(checked))
+
+
 class MainWindow(QMainWindow):
     eventPropertiesChanged = Signal()
     projectSettingsChanged = Signal()
@@ -162,6 +571,10 @@ class MainWindow(QMainWindow):
     stopPreviewBusRequested = Signal()
     importClipsRequested = Signal(list)
     removeClipsRequested = Signal(list)
+    assignSourceAssetsToCurrentEventRequested = Signal(list, bool)
+    assignSourceAssetsToEventRequested = Signal(str, list, bool)
+    sourceBindingEnabledChangedRequested = Signal(str, str, bool)
+    sourceBindingActiveChangedRequested = Signal(str, str, bool)
     bulkWeightRequested = Signal(int)
     batchRenameRequested = Signal(str, int)
     bulkClipPropertiesRequested = Signal(dict)
@@ -184,6 +597,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(load_app_icon("app"))
+        self._event_bindings_popup: EventBindingsPopup | None = None
+        self._event_source_binding_feedback_event_id = ""
+        self._event_source_binding_feedback_message = ""
         self.resize(*DEFAULT_WINDOW_SIZE)
         self.setMinimumSize(1180, 760)
         self._loading_event = False
@@ -231,10 +647,13 @@ class MainWindow(QMainWindow):
             "asset_prefix": "",
             "tags": [],
         }
+        self._source_browser_entries: list[dict[str, object]] = []
+        self._current_event_source_paths: list[str] = []
 
         self.tree = EventTreeWidget()
         self.tree_filter_edit = QLineEdit()
-        self.tree_filter_edit.setPlaceholderText("搜索事件与文件夹")
+        self.tree_filter_edit.setPlaceholderText("搜索当前浏览页")
+        self.explorer_tabs = QTabWidget()
         self.object_type_label = QLabel("Event")
         self.object_name_label = QLabel("未选择对象")
         self.object_scope_label = QLabel("Project / Root")
@@ -260,7 +679,8 @@ class MainWindow(QMainWindow):
         self.bus_combo = QComboBox()
         self.bus_combo.addItems(DEFAULT_BUSES)
         self.play_mode_combo = QComboBox()
-        self.play_mode_combo.addItems(["Random", "Sequence", "Combo"])
+        for label, value in [("单次播放", "OneShot"), ("Random", "Random"), ("Sequence", "Sequence"), ("Combo", "Combo")]:
+            self.play_mode_combo.addItem(label, value)
         self.steal_policy_combo = QComboBox()
         self.steal_policy_combo.addItems(["RejectNew", "StopOldest"])
         self.steal_policy_combo.setToolTip("当前只实现 RejectNew 和 StopOldest；StopQuietest 已从一期界面移除。")
@@ -274,6 +694,8 @@ class MainWindow(QMainWindow):
         self.runtime_audio_format_combo.addItems(["ogg", "wav"])
         self.default_bus_combo = QComboBox()
         self.default_bus_combo.addItems(DEFAULT_BUSES)
+        self.auto_assign_bus_by_name_check = QCheckBox("根据事件命名智能分配总线")
+        self.auto_assign_bus_by_name_check.setToolTip("开启后，新建事件和拖拽导入事件会按事件名中的 UI / BGM 等关键词优先匹配总线。")
         self.inline_bus_new_button = QPushButton("新建并分配")
         self.inline_bus_set_default_button = QPushButton(f"设为 {WWISE_DEFAULT_BUS_LABEL}")
         self.inline_bus_to_master_button = QPushButton(f"挂回 {WWISE_MASTER_AUDIO_BUS_TITLE}")
@@ -284,8 +706,21 @@ class MainWindow(QMainWindow):
         self.inline_bus_default_chip = QLabel(f"{WWISE_DEFAULT_BUS_LABEL} -")
         self.inline_bus_export_chip = QLabel("导出 -")
         self.project_bus_list = ProjectBusTreeWidget()
+        self.source_tree = SourceTreeWidget()
+        self.source_browser_filter_combo = QComboBox()
+        self.source_browser_filter_combo.addItem("全部状态", "all")
+        self.source_browser_filter_combo.addItem("文件缺失", "missing")
+        self.source_browser_filter_combo.addItem("未被引用", "unreferenced")
+        self.source_browser_filter_combo.addItem("多事件复用", "reused")
+        self.source_browser_filter_combo.addItem("当前事件已绑定", "current_event")
+        self.source_browser_filter_combo.addItem("当前事件未绑定", "not_current_event")
         self.project_bus_add_button = QPushButton("新建 Bus")
         self.project_bus_remove_button = QPushButton("删除 Bus")
+        self.source_browser_locate_button = QPushButton("定位源文件")
+        self.source_browser_copy_button = QPushButton("复制源路径")
+        self.source_browser_locate_event_button = QPushButton("定位引用事件")
+        self.source_browser_add_to_event_button = QPushButton("追加到当前事件")
+        self.project_bus_browser_button = QPushButton("切到总线树")
         self.project_bus_name_edit = QLineEdit()
         self.project_bus_name_edit.setPlaceholderText("Music")
         self.project_bus_parent_combo = QComboBox()
@@ -306,6 +741,28 @@ class MainWindow(QMainWindow):
         self.project_bus_effective_bar.setRange(0, 100)
         self.project_bus_summary_label = QLabel("在左侧选择 Bus 后，可在属性编辑器中直接编辑当前 Bus。")
         self.project_bus_summary_label.setWordWrap(True)
+        self.source_browser_summary_label = QLabel("源音频树会按路径展示工程中的源文件，并标记引用、缺失和未引用状态。")
+        self.source_browser_summary_label.setWordWrap(True)
+        self.source_browser_status_label = QLabel("当前没有源音频。")
+        self.source_browser_status_label.setWordWrap(True)
+        self.event_source_binding_summary_label = QLabel("当前事件还没有绑定源音频。")
+        self.event_source_binding_summary_label.setWordWrap(True)
+        self.event_source_binding_detail_label = QLabel("这里现在只展示当前事件的绑定摘要。需要追加源音频或切换 Active / Enabled，请在事件树中展开当前事件打开绑定弹窗。")
+        self.event_source_binding_detail_label.setProperty("role", "workspaceSectionSummary")
+        self.event_source_binding_detail_label.setWordWrap(True)
+        self.event_source_binding_overview_scroll = QScrollArea()
+        self.event_source_binding_overview_scroll.setWidgetResizable(True)
+        self.event_source_binding_overview_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.event_source_binding_overview_scroll.setMinimumHeight(180)
+        self.event_source_binding_overview_scroll.setMaximumHeight(320)
+        self.event_source_binding_overview_container = QWidget(self.event_source_binding_overview_scroll)
+        self.event_source_binding_overview_layout = QVBoxLayout(self.event_source_binding_overview_container)
+        self.event_source_binding_overview_layout.setContentsMargins(0, 0, 0, 0)
+        self.event_source_binding_overview_layout.setSpacing(8)
+        self.event_source_binding_overview_scroll.setWidget(self.event_source_binding_overview_container)
+        self.event_source_binding_empty_label = QLabel("当前事件还没有绑定源音频。")
+        self.event_source_binding_empty_label.setProperty("role", "workspaceSectionSummary")
+        self.event_source_binding_empty_label.setWordWrap(True)
         self.project_bus_focus_audio_button = QPushButton("在属性编辑器中编辑当前 Bus")
         self.project_master_summary_label = QLabel("Master")
         self.project_master_volume_spin = QDoubleSpinBox()
@@ -870,6 +1327,14 @@ class MainWindow(QMainWindow):
         notes_layout = QVBoxLayout(self.notes_group)
         notes_layout.addWidget(self.notes_edit)
 
+        self.event_source_binding_group = QGroupBox("源音频绑定")
+        event_source_binding_layout = QVBoxLayout(self.event_source_binding_group)
+        event_source_binding_layout.setSpacing(8)
+        event_source_binding_layout.addWidget(self.event_source_binding_summary_label)
+        event_source_binding_layout.addWidget(self.event_source_binding_detail_label)
+        event_source_binding_layout.addWidget(self.event_source_binding_empty_label)
+        event_source_binding_layout.addWidget(self.event_source_binding_overview_scroll)
+
         self.inline_bus_group = QGroupBox(WWISE_PROPERTY_EDITOR_TITLE)
         inline_bus_layout = QVBoxLayout(self.inline_bus_group)
         self.inline_bus_header.setObjectName("InlineBusHeader")
@@ -980,6 +1445,7 @@ class MainWindow(QMainWindow):
         self.project_settings_group = QGroupBox("工程总览")
         project_settings_layout = QFormLayout(self.project_settings_group)
         project_settings_layout.addRow(WWISE_DEFAULT_BUS_LABEL, self.default_bus_combo)
+        project_settings_layout.addRow("导入命名策略", self.auto_assign_bus_by_name_check)
         project_settings_layout.addRow("总线概况", self.project_bus_count_label)
         project_settings_layout.addRow("批量操作", self.apply_default_bus_button)
 
@@ -991,6 +1457,20 @@ class MainWindow(QMainWindow):
         bus_browser_layout.addLayout(bus_browser_actions)
         bus_browser_layout.addWidget(self.project_bus_list)
         bus_browser_layout.addWidget(self.project_bus_default_label)
+
+        self.source_browser_group = QGroupBox("源音频树")
+        source_browser_layout = QVBoxLayout(self.source_browser_group)
+        source_browser_actions = QHBoxLayout()
+        source_browser_actions.addWidget(self.source_browser_filter_combo)
+        source_browser_actions.addWidget(self.source_browser_locate_button)
+        source_browser_actions.addWidget(self.source_browser_copy_button)
+        source_browser_actions.addWidget(self.source_browser_locate_event_button)
+        source_browser_actions.addWidget(self.source_browser_add_to_event_button)
+        source_browser_actions.addStretch(1)
+        source_browser_layout.addLayout(source_browser_actions)
+        source_browser_layout.addWidget(self.source_tree)
+        source_browser_layout.addWidget(self.source_browser_summary_label)
+        source_browser_layout.addWidget(self.source_browser_status_label)
 
         self.master_bus_group = QGroupBox(WWISE_MASTER_AUDIO_BUS_TITLE)
         master_bus_layout = QFormLayout(self.master_bus_group)
@@ -1006,6 +1486,14 @@ class MainWindow(QMainWindow):
         project_bus_overview_layout.addWidget(self.project_bus_summary_label)
         project_bus_overview_layout.addWidget(self.project_bus_focus_audio_button)
 
+        self.project_bus_browser_hint_group = QGroupBox("对象浏览器")
+        project_bus_browser_hint_layout = QVBoxLayout(self.project_bus_browser_hint_group)
+        project_bus_browser_hint_label = QLabel("总线树已并入左侧对象浏览器；在浏览器中选中 Bus 后，这里只保留属性与总览。")
+        project_bus_browser_hint_label.setWordWrap(True)
+        project_bus_browser_hint_layout.addWidget(project_bus_browser_hint_label)
+        project_bus_browser_hint_layout.addWidget(self.project_bus_browser_button)
+        project_bus_browser_hint_layout.addStretch(1)
+
         project_right_panel = QWidget()
         project_right_layout = QVBoxLayout(project_right_panel)
         project_right_layout.setContentsMargins(0, 0, 0, 0)
@@ -1018,7 +1506,7 @@ class MainWindow(QMainWindow):
         self.project_splitter.setObjectName("ProjectSplitter")
         self.project_splitter.setOrientation(Qt.Orientation.Horizontal)
         self.project_splitter.setChildrenCollapsible(False)
-        self.project_splitter.addWidget(self.bus_browser_group)
+        self.project_splitter.addWidget(self.project_bus_browser_hint_group)
         self.project_splitter.addWidget(project_right_panel)
         self.project_splitter.setStretchFactor(1, 1)
 
@@ -1283,7 +1771,15 @@ class MainWindow(QMainWindow):
         tree_filter_row.addWidget(self.tree_filter_edit, 1)
         tree_filter_row.addWidget(self.tree_search_button)
         left_layout.addLayout(tree_filter_row)
-        left_layout.addWidget(self.tree)
+        event_browser_page = QWidget()
+        event_browser_layout = QVBoxLayout(event_browser_page)
+        event_browser_layout.setContentsMargins(0, 0, 0, 0)
+        event_browser_layout.addWidget(self.tree)
+        self.explorer_tabs.addTab(self.bus_browser_group, load_app_icon("bus"), "总线树")
+        self.explorer_tabs.addTab(self.source_browser_group, load_app_icon("audio"), "源音频树")
+        self.explorer_tabs.addTab(event_browser_page, load_app_icon("event"), "事件树")
+        left_layout.addWidget(self.explorer_tabs)
+        self._sync_explorer_browser_state()
         self.explorer_placeholder = self._build_detached_explorer_placeholder()
         self.explorer_window = DetachedToolWindow()
         self.explorer_window.setWindowTitle(f"{APP_NAME} - 工程浏览器")
@@ -1755,23 +2251,13 @@ class MainWindow(QMainWindow):
     def _build_events_workspace(self) -> QWidget:
         self.events_workspace_tabs = QTabWidget()
         design_page = self._build_two_column_page(
-            [self.event_general_group, self.event_behavior_group, self.notes_group],
-            [self.modulation_group, self.combo_group],
+            [self.event_general_group, self.event_behavior_group, self.event_source_binding_group],
+            [self.modulation_group, self.combo_group, self.notes_group],
             splitter_name="EventDesignPageSplitter",
         )
         self.event_design_scroll = self._wrap_scrollable_page(design_page)
         self.events_workspace_tabs.addTab(self.event_design_scroll, load_app_icon("event"), "事件参数")
         self.events_workspace_tabs.addTab(self.loudness_view, load_app_icon("audio"), "响度监视器")
-
-        overview_panel = self._build_event_overview_panel()
-        event_splitter = QSplitter()
-        event_splitter.setObjectName("EventsWorkspaceSplitter")
-        event_splitter.setOrientation(Qt.Orientation.Horizontal)
-        event_splitter.setChildrenCollapsible(False)
-        event_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
-        event_splitter.addWidget(self.events_workspace_tabs)
-        event_splitter.setStretchFactor(0, 2)
-        event_splitter.setStretchFactor(1, 5)
 
         workspace = QWidget()
         layout = QVBoxLayout(workspace)
@@ -1788,7 +2274,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(event_splitter, 1)
+        layout.addWidget(self.events_workspace_tabs, 1)
         return workspace
 
     def _build_event_overview_panel(self) -> QWidget:
@@ -1837,16 +2323,6 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_resources_workspace(self) -> QWidget:
-        overview_panel = self._build_resources_overview_panel()
-        workspace_splitter = QSplitter()
-        workspace_splitter.setObjectName("ResourcesWorkspaceSplitter")
-        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
-        workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
-        workspace_splitter.addWidget(self.contents_tabs)
-        workspace_splitter.setStretchFactor(0, 2)
-        workspace_splitter.setStretchFactor(1, 5)
-
         workspace = QWidget()
         layout = QVBoxLayout(workspace)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1862,7 +2338,8 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(workspace_splitter, 1)
+        layout.addWidget(self._build_resources_batch_feedback_card())
+        layout.addWidget(self.contents_tabs, 1)
         return workspace
 
     def _build_buses_overview_panel(self) -> QWidget:
@@ -1888,7 +2365,6 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_buses_workspace(self) -> QWidget:
-        overview_panel = self._build_buses_overview_panel()
         bus_surface = QSplitter()
         bus_surface.setObjectName("BusesSurfaceSplitter")
         bus_surface.setOrientation(Qt.Orientation.Vertical)
@@ -1897,15 +2373,6 @@ class MainWindow(QMainWindow):
         bus_surface.addWidget(self.project_splitter)
         bus_surface.setStretchFactor(0, 2)
         bus_surface.setStretchFactor(1, 3)
-
-        workspace_splitter = QSplitter()
-        workspace_splitter.setObjectName("BusesWorkspaceSplitter")
-        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
-        workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
-        workspace_splitter.addWidget(bus_surface)
-        workspace_splitter.setStretchFactor(0, 2)
-        workspace_splitter.setStretchFactor(1, 5)
 
         workspace = QWidget()
         layout = QVBoxLayout(workspace)
@@ -1922,7 +2389,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(workspace_splitter, 1)
+        layout.addWidget(bus_surface, 1)
         return workspace
 
     def _build_build_overview_panel(self) -> QWidget:
@@ -1949,7 +2416,6 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_build_workspace(self) -> QWidget:
-        overview_panel = self._build_build_overview_panel()
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -1962,15 +2428,6 @@ class MainWindow(QMainWindow):
         build_execute_row.addWidget(self.build_execute_button)
         build_execute_row.addStretch(1)
         right_layout.addLayout(build_execute_row)
-
-        workspace_splitter = QSplitter()
-        workspace_splitter.setObjectName("BuildWorkspaceSplitter")
-        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
-        workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(self._wrap_overview_scroll(overview_panel))
-        workspace_splitter.addWidget(right_panel)
-        workspace_splitter.setStretchFactor(0, 2)
-        workspace_splitter.setStretchFactor(1, 5)
 
         workspace = QWidget()
         layout = QVBoxLayout(workspace)
@@ -1987,7 +2444,14 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(workspace_splitter, 1)
+        layout.addWidget(
+            self._build_two_column_page(
+                [self.generation_settings_group],
+                [self.build_overview_group],
+                splitter_name="BuildControlsSplitter",
+            )
+        )
+        layout.addWidget(right_panel, 1)
         return workspace
 
     def _build_validation_overview_panel(self, filter_card: QWidget) -> QWidget:
@@ -2027,27 +2491,21 @@ class MainWindow(QMainWindow):
         filter_layout.addWidget(self.validation_revalidate_button)
         filter_layout.addWidget(self.validation_locate_button)
 
-        workspace_splitter = QSplitter()
-        workspace_splitter.setObjectName("ValidationWorkspaceSplitter")
-        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
-        workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.addWidget(self._wrap_overview_scroll(self._build_validation_overview_panel(filter_card)))
-        workspace_splitter.addWidget(
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(filter_card)
+        layout.addWidget(self.validation_filter_status_label)
+        layout.addWidget(
             self._build_report_center_page(
                 self.validation_summary_label,
                 self.validation_issue_list,
                 self.validation_report_output,
                 splitter_name="ValidationReportCenterSplitter",
-            )
+            ),
+            1,
         )
-        workspace_splitter.setStretchFactor(0, 2)
-        workspace_splitter.setStretchFactor(1, 5)
-
-        workspace = QWidget()
-        layout = QVBoxLayout(workspace)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        layout.addWidget(workspace_splitter, 1)
         return workspace
 
     def _current_property_scroll_widget(self) -> QWidget | None:
@@ -2319,21 +2777,8 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self._build_panel_header("结果中心", "log"))
-        workspace_splitter = QSplitter()
-        workspace_splitter.setObjectName("ResultsCenterSplitter")
-        workspace_splitter.setOrientation(Qt.Orientation.Horizontal)
-        workspace_splitter.setChildrenCollapsible(False)
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-        right_layout.addWidget(self.report_header)
-        right_layout.addWidget(self.report_pages, 1)
-        workspace_splitter.addWidget(self._wrap_overview_scroll(self._build_results_overview_panel()))
-        workspace_splitter.addWidget(right_panel)
-        workspace_splitter.setStretchFactor(0, 2)
-        workspace_splitter.setStretchFactor(1, 5)
-        layout.addWidget(workspace_splitter, 1)
+        layout.addWidget(self.report_header)
+        layout.addWidget(self.report_pages, 1)
         return panel
 
     def _build_activity_summary_card(self, title: str, summary_label: QLabel) -> QFrame:
@@ -3478,6 +3923,7 @@ class MainWindow(QMainWindow):
             self.avoid_repeat_check.setChecked(False)
             self.notes_edit.clear()
             self.clip_table.setRowCount(0)
+            self._current_event_source_paths = []
             self.set_object_context(
                 object_type="Folder",
                 object_name="未选择对象",
@@ -3497,6 +3943,8 @@ class MainWindow(QMainWindow):
                 has_parent=False,
             )
             self._set_selected_clip_details(None)
+            self._refresh_event_source_binding_state()
+            self._refresh_source_browser_tree()
             self.property_group.setEnabled(False)
             self.import_clips_button.setEnabled(False)
             self.remove_clips_button.setEnabled(False)
@@ -3523,7 +3971,7 @@ class MainWindow(QMainWindow):
             object_name=event.display_name or event.id,
             breadcrumb=f"Project / Event / {event.id}",
             stats_text=f"片段 {len(event.clips)} | 标签 {len(event_tags)}",
-            summary_primary=f"模式 {event.play_mode} | {WWISE_OUTPUT_BUS_LABEL} {event.bus}",
+            summary_primary=f"模式 {self._play_mode_label(event.play_mode)} | {WWISE_OUTPUT_BUS_LABEL} {event.bus}",
             summary_secondary=f"实例 {'不限' if event.max_instances == 0 else event.max_instances} | 导出 {self.runtime_audio_format_combo.currentText()}",
             can_navigate_parent=True,
         )
@@ -3533,7 +3981,7 @@ class MainWindow(QMainWindow):
         event_bus_index = self.bus_combo.findData(event.bus)
         if event_bus_index >= 0:
             self.bus_combo.setCurrentIndex(event_bus_index)
-        self.play_mode_combo.setCurrentText(event.play_mode)
+        self._set_play_mode(event.play_mode)
         self.steal_policy_combo.setCurrentText(event.steal_policy)
         self.load_policy_combo.setCurrentText(event.load_policy)
         self.volume_spin.setValue(event.volume_db)
@@ -3551,6 +3999,7 @@ class MainWindow(QMainWindow):
         self.notes_edit.setPlainText(event.notes)
         self._set_clip_rows(event)
         self._clip_lookup = {clip.id: clip for clip in event.clips}
+        self._current_event_source_paths = self._normalized_event_source_paths(event)
         self.property_group.setEnabled(True)
         self.import_clips_button.setEnabled(True)
         self.remove_clips_button.setEnabled(bool(event.clips))
@@ -3571,10 +4020,261 @@ class MainWindow(QMainWindow):
         if event.clips and not self.clip_table.selected_clip_ids():
             self.clip_table.selectRow(0)
         self._sync_clip_detail_from_table()
+        self._refresh_event_source_binding_state()
+        self._refresh_source_browser_tree()
         self._loading_event = False
 
+    def _normalized_event_source_paths(self, event: EventModel | None) -> list[str]:
+        if event is None:
+            return []
+        return sorted({str(clip.source_path).strip() for clip in event.clips if str(clip.source_path).strip()})
+
+    def _source_filter_key(self, combo: QComboBox) -> str:
+        current_data = combo.currentData()
+        return str(current_data if current_data is not None else "all")
+
+    def _source_entry_matches_query(self, entry: dict[str, object], normalized_query: str) -> bool:
+        if not normalized_query:
+            return True
+        haystacks = [
+            str(entry.get("source_path", "")).lower(),
+            *[str(value).lower() for value in entry.get("event_ids", [])],
+            *[str(value).lower() for value in entry.get("asset_keys", [])],
+        ]
+        source_name = os.path.basename(str(entry.get("source_path", ""))).lower()
+        haystacks.append(source_name)
+        return any(normalized_query in haystack for haystack in haystacks)
+
+    def _source_entry_matches_filter(self, entry: dict[str, object], filter_key: str) -> bool:
+        source_path = str(entry.get("source_path", "")).strip()
+        reference_count = int(entry.get("reference_count", 0))
+        current_event_paths = set(self._current_event_source_paths)
+        if filter_key == "missing":
+            return bool(entry.get("missing", False))
+        if filter_key == "unreferenced":
+            return bool(entry.get("unreferenced", False)) or reference_count == 0
+        if filter_key == "reused":
+            return reference_count > 1
+        if filter_key == "current_event":
+            return bool(source_path) and source_path in current_event_paths
+        if filter_key == "not_current_event":
+            return not source_path or source_path not in current_event_paths
+        return True
+
+    def _filtered_source_entries(self, query: str, filter_key: str) -> list[dict[str, object]]:
+        normalized_query = query.strip().lower()
+        return [
+            entry
+            for entry in self._source_browser_entries
+            if self._source_entry_matches_query(entry, normalized_query) and self._source_entry_matches_filter(entry, filter_key)
+        ]
+
+    def _refresh_source_browser_tree(self) -> None:
+        current_source_path = self.source_tree.current_source_path()
+        entries = self._filtered_source_entries(self.tree_filter_edit.text(), self._source_filter_key(self.source_browser_filter_combo))
+        self.source_tree.rebuild(entries)
+        if current_source_path:
+            self.source_tree.select_source_path(current_source_path)
+        self._update_source_browser_summary(entries)
+        self._update_source_browser_status()
+
+    def _update_source_browser_summary(self, visible_entries: list[dict[str, object]]) -> None:
+        total_count = len(self._source_browser_entries)
+        visible_count = len(visible_entries)
+        missing_count = sum(1 for entry in self._source_browser_entries if bool(entry.get("missing", False)))
+        unreferenced_count = sum(1 for entry in self._source_browser_entries if bool(entry.get("unreferenced", False)))
+        referenced_count = total_count - unreferenced_count
+        self.source_browser_summary_label.setText(
+            f"源音频 {total_count} 条 | 当前显示 {visible_count} | 已引用 {referenced_count} | 缺失 {missing_count} | 未引用 {unreferenced_count}"
+        )
+
+    def _clear_event_source_binding_overview(self) -> None:
+        while self.event_source_binding_overview_layout.count():
+            item = self.event_source_binding_overview_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _current_event_play_mode_value(self) -> str:
+        current_data = self.play_mode_combo.currentData()
+        if current_data is not None:
+            return str(current_data)
+        current_text = self.play_mode_combo.currentText().strip()
+        return current_text or "Random"
+
+    def _refresh_event_source_binding_overview(self, clips: list[ClipModel], play_mode: str) -> None:
+        self._clear_event_source_binding_overview()
+        has_clips = bool(clips)
+        self.event_source_binding_empty_label.setVisible(not has_clips)
+        self.event_source_binding_overview_scroll.setVisible(has_clips)
+        if not has_clips:
+            return
+
+        for clip in clips:
+            source_name = os.path.basename(clip.source_path) or clip.asset_key or clip.id
+            state_key = _binding_state_key(play_mode, clip)
+            state_label = _binding_state_label(play_mode, clip)
+
+            card = QFrame(self.event_source_binding_overview_container)
+            card.setFrameShape(QFrame.Shape.StyledPanel)
+            card.setFrameShadow(QFrame.Shadow.Raised)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 10, 12, 10)
+            card_layout.setSpacing(6)
+
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(8)
+            name_label = QLabel(source_name)
+            name_label.setProperty("role", "workspaceSectionTitle")
+            state_chip = QLabel(state_label)
+            header_row.addWidget(name_label, 1)
+            header_row.addWidget(state_chip)
+
+            state_detail_label = QLabel(f"Enabled {'开' if bool(clip.enabled) else '关'} | Active {'是' if bool(clip.active) else '否'}")
+            state_detail_label.setWordWrap(True)
+            meta_label = QLabel(f"Clip ID {clip.id} | 资源键 {clip.asset_key or '-'}")
+            meta_label.setWordWrap(True)
+            path_label = QLabel(clip.source_path or "未记录源路径")
+            path_label.setWordWrap(True)
+            path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+            _apply_binding_card_style(card, state_chip, name_label, [state_detail_label, meta_label], path_label, state_key)
+
+            card_layout.addLayout(header_row)
+            card_layout.addWidget(state_detail_label)
+            card_layout.addWidget(meta_label)
+            card_layout.addWidget(path_label)
+            self.event_source_binding_overview_layout.addWidget(card)
+
+        self.event_source_binding_overview_layout.addStretch(1)
+
+    def _refresh_event_source_binding_state(self) -> None:
+        if not self._active_event_id:
+            self.event_source_binding_summary_label.setText("当前事件还没有绑定源音频。")
+            self.event_source_binding_detail_label.setText("这里现在只展示当前事件的绑定摘要。需要追加源音频或切换 Active / Enabled，请在事件树中展开当前事件打开绑定弹窗。")
+            self._refresh_event_source_binding_overview([], "Random")
+            return
+
+        current_event_clips = list(self._clip_lookup.values())
+        play_mode = self._current_event_play_mode_value()
+        bound_paths = list(self._current_event_source_paths)
+        preview_names = [os.path.basename(path) or path for path in bound_paths[:4]]
+        preview_text = "、".join(preview_names) if preview_names else "未绑定"
+        self.event_source_binding_summary_label.setText(
+            f"当前事件 {self._active_event_id} 已绑定 {len(bound_paths)} 个源音频 | {_binding_rollup_text(play_mode, current_event_clips)}\n{preview_text}"
+        )
+        feedback_message = self._event_source_binding_feedback_for(self._active_event_id)
+        self.event_source_binding_detail_label.setText(
+            feedback_message
+            or "这里只保留当前绑定摘要。需要追加绑定、切换 Active / Enabled 或定位源音频时，请在事件树中展开当前事件打开绑定弹窗。"
+        )
+        self._refresh_event_source_binding_overview(current_event_clips, play_mode)
+
+    def _ensure_event_bindings_popup(self) -> EventBindingsPopup:
+        if self._event_bindings_popup is None:
+            popup = EventBindingsPopup(self)
+            popup.sourceAssetsDropped.connect(
+                lambda event_id, source_paths: self.assignSourceAssetsToEventRequested.emit(event_id, source_paths, False)
+            )
+            popup.bindingEnabledChanged.connect(self.sourceBindingEnabledChangedRequested.emit)
+            popup.bindingActiveChanged.connect(self.sourceBindingActiveChangedRequested.emit)
+            popup.locateSourceRequested.connect(self._show_source_in_browser)
+            self._event_bindings_popup = popup
+        return self._event_bindings_popup
+
+    def show_event_bindings_popup(self, event: EventModel, global_pos: QPoint) -> None:
+        popup = self._ensure_event_bindings_popup()
+        popup.set_event(event, self._event_source_binding_feedback_for(event.id))
+        popup.show_at(global_pos)
+
+    def refresh_event_bindings_popup(self, event: EventModel | None) -> None:
+        popup = self._event_bindings_popup
+        if popup is None or not popup.isVisible():
+            return
+        if event is None or popup.event_id() != event.id:
+            popup.close()
+            return
+        popup.set_event(event, self._event_source_binding_feedback_for(event.id))
+
+    def current_event_bindings_popup_event_id(self) -> str | None:
+        popup = self._event_bindings_popup
+        if popup is None or not popup.isVisible():
+            return None
+        event_id = popup.event_id().strip()
+        return event_id or None
+
+    def _event_source_binding_feedback_for(self, event_id: str | None) -> str:
+        normalized_event_id = str(event_id or "").strip()
+        if not normalized_event_id or normalized_event_id != self._event_source_binding_feedback_event_id:
+            return ""
+        return self._event_source_binding_feedback_message
+
+    def set_event_source_binding_feedback(self, event_id: str, message: str) -> None:
+        self._event_source_binding_feedback_event_id = str(event_id).strip()
+        self._event_source_binding_feedback_message = str(message).strip()
+        if self._active_event_id == self._event_source_binding_feedback_event_id:
+            self._refresh_event_source_binding_state()
+        popup = self._event_bindings_popup
+        if popup is not None and popup.event_id() == self._event_source_binding_feedback_event_id:
+            popup.set_status_message(self._event_source_binding_feedback_message)
+
+    def clear_event_source_binding_feedback(self, event_id: str | None = None) -> None:
+        normalized_event_id = str(event_id or "").strip()
+        if normalized_event_id and normalized_event_id != self._event_source_binding_feedback_event_id:
+            return
+        self._event_source_binding_feedback_event_id = ""
+        self._event_source_binding_feedback_message = ""
+        if self._active_event_id:
+            self._refresh_event_source_binding_state()
+        popup = self._event_bindings_popup
+        if popup is not None:
+            popup.set_status_message("")
+
+    def _show_source_in_browser(self, source_path: str) -> None:
+        normalized_source_path = str(source_path).strip()
+        if not normalized_source_path:
+            return
+        self.explorer_tabs.setCurrentIndex(1)
+        self.source_browser_filter_combo.setCurrentIndex(0)
+        if self.tree_filter_edit.text().strip():
+            self.tree_filter_edit.clear()
+        self.source_tree.select_source_path(normalized_source_path)
+        self.report_detail_label.setText(f"已在源音频树中定位：{normalized_source_path}")
+        self.report_detail_label.setToolTip(normalized_source_path)
+
+    def _append_selected_source_to_current_event(self) -> None:
+        entry = self.source_tree.current_source_entry()
+        if not entry:
+            self.report_detail_label.setText("当前没有选中的源音频。")
+            return
+        source_path = str(entry.get("source_path", "")).strip()
+        if not source_path:
+            return
+        self.assignSourceAssetsToCurrentEventRequested.emit([source_path], False)
+
+    def _locate_selected_source_reference_event(self) -> None:
+        entry = self.source_tree.current_source_entry()
+        if not entry:
+            self.report_detail_label.setText("当前没有选中的源音频。")
+            return
+        source_path = str(entry.get("source_path", "")).strip()
+        target_event_id = ""
+        if source_path and source_path in set(self._current_event_source_paths) and self._active_event_id:
+            target_event_id = self._active_event_id
+        if not target_event_id:
+            event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
+            if event_ids:
+                target_event_id = event_ids[0]
+        if not target_event_id:
+            self.report_detail_label.setText("当前源音频没有可跳转的引用事件。")
+            return
+        self.reportTargetRequested.emit("event", target_event_id)
+        self.report_detail_label.setText(f"已定位引用事件：{target_event_id}")
+        self.report_detail_label.setToolTip(target_event_id)
+
     def _sync_event_mode_ui(self) -> None:
-        is_combo_mode = self.play_mode_combo.currentText() == "Combo"
+        is_combo_mode = self._current_play_mode() == "Combo"
         has_instance_limit = self.max_instances_spin.value() > 0
         self.combo_group.setVisible(is_combo_mode)
         self.steal_policy_combo.setEnabled(has_instance_limit)
@@ -3687,11 +4387,87 @@ class MainWindow(QMainWindow):
             return None
         return str(payload[0]), str(payload[1])
 
+    def _active_explorer_page_key(self) -> str:
+        page_keys = {0: "buses", 1: "sources", 2: "events"}
+        return page_keys.get(self.explorer_tabs.currentIndex(), "events")
+
+    def _sync_explorer_browser_state(self) -> None:
+        placeholder_map = {
+            "buses": "搜索总线",
+            "sources": "搜索源音频",
+            "events": "搜索事件与文件夹",
+        }
+        self.tree_filter_edit.setPlaceholderText(placeholder_map.get(self._active_explorer_page_key(), "搜索当前浏览页"))
+        self._apply_explorer_filter(self.tree_filter_edit.text())
+
+    def _apply_explorer_filter(self, query: str) -> None:
+        self._apply_project_bus_browser_filter(query)
+        self._refresh_source_browser_tree()
+        self.tree.apply_filter(query)
+
+    def _apply_project_bus_browser_filter(self, query: str) -> None:
+        normalized = query.strip().lower()
+        for root_index in range(self.project_bus_list.topLevelItemCount()):
+            item = self.project_bus_list.topLevelItem(root_index)
+            self._apply_project_bus_item_filter(item, normalized)
+        if normalized:
+            self.project_bus_list.expandAll()
+
+    def _apply_project_bus_item_filter(self, item: QTreeWidgetItem, query: str) -> bool:
+        child_visible = False
+        for child_index in range(item.childCount()):
+            if self._apply_project_bus_item_filter(item.child(child_index), query):
+                child_visible = True
+        bus_name = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        self_match = not query or query in item.text(0).lower() or query in bus_name.lower()
+        visible = self_match or child_visible
+        item.setHidden(not visible)
+        return visible
+
     def selected_tree_payloads(self) -> list[tuple[str, str]]:
         return self.tree.selected_payloads()
 
     def selected_tree_event_ids(self) -> list[str]:
         return self.tree.selected_event_ids()
+
+    def selected_tree_source_binding_tokens(self) -> list[str]:
+        return [node_id for node_type, node_id in self.selected_tree_payloads() if node_type == "source_binding"]
+
+    def selected_tree_source_binding_clip_ids(self) -> list[str]:
+        clip_ids: list[str] = []
+        seen: set[str] = set()
+        for token in self.selected_tree_source_binding_tokens():
+            _event_id, clip_id = decode_source_binding_token(token)
+            if not clip_id or clip_id in seen:
+                continue
+            clip_ids.append(clip_id)
+            seen.add(clip_id)
+        return clip_ids
+
+    def select_clip_ids(self, clip_ids: list[str]) -> None:
+        normalized_ids = {str(value).strip() for value in clip_ids if str(value).strip()}
+        selection_model = self.clip_table.selectionModel()
+        self.clip_table.clearSelection()
+        if selection_model is None or not normalized_ids:
+            self._sync_clip_detail_from_table()
+            return
+
+        first_index = None
+        for row in range(self.clip_table.rowCount()):
+            item = self.clip_table.item(row, 0)
+            if item is None or item.text().strip() not in normalized_ids:
+                continue
+            model_index = self.clip_table.model().index(row, 0)
+            selection_model.select(
+                model_index,
+                QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+            )
+            if first_index is None:
+                first_index = model_index
+        if first_index is not None:
+            selection_model.setCurrentIndex(first_index, QItemSelectionModel.SelectionFlag.NoUpdate)
+            self.clip_table.scrollTo(first_index)
+        self._sync_clip_detail_from_table()
 
     def _current_workspace_context_text(self) -> str:
         mode_title = self.shell_mode_title_label.text()
@@ -3795,11 +4571,14 @@ class MainWindow(QMainWindow):
         if not isinstance(state, dict):
             return
         self._restore_report_list_state(list_widget, state.get("list"))
-        self._apply_scrollable_widget_state(output, state.get("output"))
+        output_state = state.get("output")
+        self._apply_scrollable_widget_state(output, output_state)
+        QTimer.singleShot(0, lambda: self._apply_scrollable_widget_state(output, output_state))
 
     def navigation_state(self) -> dict[str, object]:
         return {
             "workspace_mode": self._active_workspace_mode,
+            "explorer_tab": self.explorer_tabs.currentIndex(),
             "editor_tab": self.editor_tabs.currentIndex(),
             "property_tab": self.property_tabs.currentIndex(),
             "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
@@ -3822,6 +4601,7 @@ class MainWindow(QMainWindow):
         if not state:
             return
         workspace_mode = state.get("workspace_mode")
+        explorer_tab = state.get("explorer_tab")
         workspace_sizes = state.get("workspace_splitter_sizes")
         main_sizes = state.get("main_splitter_sizes")
         content_sizes = state.get("content_top_splitter_sizes")
@@ -3838,6 +4618,8 @@ class MainWindow(QMainWindow):
             self._set_main_splitter_sizes([int(value) for value in main_sizes])
         if isinstance(content_sizes, list) and len(content_sizes) == 2:
             self._set_content_top_splitter_sizes([int(value) for value in content_sizes])
+        if isinstance(explorer_tab, int) and 0 <= explorer_tab < self.explorer_tabs.count():
+            self.explorer_tabs.setCurrentIndex(explorer_tab)
         if isinstance(editor_tab, int) and 0 <= editor_tab < self.editor_tabs.count():
             self.editor_tabs.setCurrentIndex(editor_tab)
         if isinstance(property_tab, int) and 0 <= property_tab < self.property_tabs.count():
@@ -4842,6 +5624,7 @@ class MainWindow(QMainWindow):
             "ui_scale": self._ui_scale,
             "workspace_splitter_sizes": self.workspace_splitter.sizes(),
             "main_splitter_sizes": self._effective_main_splitter_sizes(),
+            "explorer_tab": self.explorer_tabs.currentIndex(),
             "active_editor_tab": self.editor_tabs.currentIndex(),
             "inspector_splitter_sizes": None,
             "content_top_splitter_sizes": self.content_top_splitter.sizes(),
@@ -4883,6 +5666,7 @@ class MainWindow(QMainWindow):
 
         navigation_state = {
             "workspace_mode": preferences.get("workspace_mode", self._active_workspace_mode),
+            "explorer_tab": preferences.get("explorer_tab", self.explorer_tabs.currentIndex()),
             "editor_tab": preferences.get("active_editor_tab", self.editor_tabs.currentIndex()),
             "property_tab": preferences.get("property_tab", self.property_tabs.currentIndex()),
             "events_workspace_tab": preferences.get("events_workspace_tab", self.events_workspace_tabs.currentIndex()),
@@ -4929,6 +5713,7 @@ class MainWindow(QMainWindow):
         self._set_project_bus_configs(settings.bus_configs, selected_bus_name=current_project_bus)
         self.set_bus_options(settings.buses)
         self.default_bus_combo.setCurrentText(settings.default_bus)
+        self.auto_assign_bus_by_name_check.setChecked(bool(settings.auto_assign_bus_by_name))
         self.export_root_edit.setText(settings.export_root)
         self.source_audio_format_combo.setCurrentText(settings.source_audio_format)
         self.runtime_audio_format_combo.setCurrentText(settings.runtime_audio_format)
@@ -4942,6 +5727,23 @@ class MainWindow(QMainWindow):
         if current_data is None:
             return self.bus_combo.currentText().strip()
         return str(current_data).strip()
+
+    def _current_play_mode(self) -> str:
+        current_data = self.play_mode_combo.currentData()
+        if current_data is None:
+            return self.play_mode_combo.currentText().strip()
+        return str(current_data).strip()
+
+    def _set_play_mode(self, play_mode: str) -> None:
+        target_value = str(play_mode).strip()
+        target_index = self.play_mode_combo.findData(target_value)
+        if target_index < 0:
+            target_index = self.play_mode_combo.findText(target_value)
+        if target_index >= 0:
+            self.play_mode_combo.setCurrentIndex(target_index)
+
+    def _play_mode_label(self, play_mode: str) -> str:
+        return {"OneShot": "单次播放"}.get(str(play_mode).strip(), str(play_mode).strip())
 
     def _bus_visual_label(self, bus_name: str, *, include_depth: bool) -> str:
         depth = self._project_bus_depth(bus_name)
@@ -4997,6 +5799,7 @@ class MainWindow(QMainWindow):
         buses = [config["name"] for config in bus_configs if config["name"] != "Master"]
         return {
             "default_bus": self.default_bus_combo.currentText(),
+            "auto_assign_bus_by_name": self.auto_assign_bus_by_name_check.isChecked(),
             "export_root": self.export_root_edit.text().strip() or "./Export",
             "buses": buses or list(DEFAULT_BUSES),
             "bus_configs": bus_configs,
@@ -5714,7 +6517,7 @@ class MainWindow(QMainWindow):
             "id": self.event_id_edit.text().strip(),
             "display_name": self.display_name_edit.text().strip(),
             "bus": self._current_event_bus_name(),
-            "play_mode": self.play_mode_combo.currentText(),
+            "play_mode": self._current_play_mode(),
             "steal_policy": self.steal_policy_combo.currentText(),
             "load_policy": self.load_policy_combo.currentText(),
             "source_audio_format": self.source_audio_format_combo.currentText(),
@@ -6094,20 +6897,42 @@ class MainWindow(QMainWindow):
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
             self._request_remove_clips()
             return
-        if self._focus_is_within(self.tree) or self._focus_is_within(self.tree_filter_edit):
+        if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
             self.deleteSelectedRequested.emit()
 
     def _handle_rename_shortcut(self) -> None:
-        if self._focus_is_within(self.tree) or self._focus_is_within(self.tree_filter_edit):
+        if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
+            payload = self._selected_tree_payload()
+            if payload is not None and payload[0] == "source_binding":
+                self.report_detail_label.setText("Source Binding 请在片段列表中批量重命名。")
+                return
             self.renameSelectedRequested.emit()
             return
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
             self._request_batch_rename()
 
     def _handle_open_shortcut(self) -> None:
-        if self._focus_is_within(self.tree) or self._focus_is_within(self.tree_filter_edit):
+        if self._focus_is_within(self.project_bus_list) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "buses"):
+            self._activate_workspace_mode("buses")
+            if self.current_project_bus_name() == "Master":
+                self.project_master_volume_spin.setFocus()
+            else:
+                self.project_bus_name_edit.setFocus()
+                self.project_bus_name_edit.selectAll()
+            return
+        if self._focus_is_within(self.source_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "sources"):
+            self._locate_selected_source_asset()
+            return
+        if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
             payload = self._selected_tree_payload()
             if payload is None:
+                return
+            if payload[0] == "source_binding":
+                _event_id, clip_id = decode_source_binding_token(payload[1])
+                self.set_active_contents_category("片段")
+                self.select_clip_ids([clip_id])
+                self.clip_asset_detail_edit.setFocus()
+                self.clip_asset_detail_edit.selectAll()
                 return
             if payload[0] == "event":
                 self.set_active_property_category("事件")
@@ -6127,9 +6952,28 @@ class MainWindow(QMainWindow):
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
             self._copy_selected_clip_asset_keys()
             return
-        if self._focus_is_within(self.tree) or self._focus_is_within(self.tree_filter_edit):
+        if self._focus_is_within(self.project_bus_list) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "buses"):
+            bus_name = self.current_project_bus_name()
+            if not bus_name:
+                return
+            QApplication.clipboard().setText(bus_name)
+            self.report_detail_label.setText(f"已复制总线标识：{bus_name}")
+            self.report_detail_label.setToolTip(bus_name)
+            return
+        if self._focus_is_within(self.source_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "sources"):
+            self._copy_selected_source_asset_path()
+            return
+        if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
             payload = self._selected_tree_payload()
             if payload is None:
+                return
+            if payload[0] == "source_binding":
+                clip_ids = self.selected_tree_source_binding_clip_ids()
+                if not clip_ids:
+                    return
+                QApplication.clipboard().setText("\n".join(clip_ids))
+                self.report_detail_label.setText(f"已复制 {len(clip_ids)} 个 Source Binding 标识。")
+                self.report_detail_label.setToolTip("\n".join(clip_ids[:12]))
                 return
             QApplication.clipboard().setText(payload[1])
             self.report_detail_label.setText(f"已复制对象标识：{payload[1]}")
@@ -6323,6 +7167,7 @@ class MainWindow(QMainWindow):
         self.source_audio_format_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
         self.runtime_audio_format_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
         self.default_bus_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
+        self.auto_assign_bus_by_name_check.checkStateChanged.connect(self._emit_project_settings_changed)
         self.project_bus_list.itemSelectionChanged.connect(self._handle_project_bus_selection_changed)
         self.project_bus_list.hierarchyChanged.connect(self._handle_project_bus_hierarchy_changed)
         self.project_bus_name_edit.editingFinished.connect(self._emit_project_settings_changed)
@@ -6338,6 +7183,12 @@ class MainWindow(QMainWindow):
         self.project_bus_focus_audio_button.clicked.connect(lambda: self.set_active_property_category("音频属性"))
         self.project_bus_add_button.clicked.connect(self._request_add_project_bus)
         self.project_bus_remove_button.clicked.connect(self._request_remove_project_bus)
+        self.project_bus_browser_button.clicked.connect(lambda: self.explorer_tabs.setCurrentIndex(0))
+        self.source_browser_filter_combo.currentIndexChanged.connect(lambda _index: self._refresh_source_browser_tree())
+        self.source_browser_locate_button.clicked.connect(self._locate_selected_source_asset)
+        self.source_browser_copy_button.clicked.connect(self._copy_selected_source_asset_path)
+        self.source_browser_locate_event_button.clicked.connect(self._locate_selected_source_reference_event)
+        self.source_browser_add_to_event_button.clicked.connect(self._append_selected_source_to_current_event)
         self.preview_bus_combo.currentIndexChanged.connect(self.previewBusSelectionChanged.emit)
         self.preview_bus_volume_spin.valueChanged.connect(self._emit_preview_bus_state_changed)
         self.preview_bus_mute_check.checkStateChanged.connect(self._emit_preview_bus_state_changed)
@@ -6412,6 +7263,9 @@ class MainWindow(QMainWindow):
         self.clip_table.rowsReordered.connect(self.reorderClipsRequested.emit)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+        self.source_tree.sourceSelected.connect(lambda _source_path: self._update_source_browser_status())
+        self.source_tree.sourceActivated.connect(lambda _source_path: self._locate_selected_source_asset())
+        self.source_tree.itemDoubleClicked.connect(lambda _item, _column: self._handle_open_shortcut())
         self.clip_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.clip_table.customContextMenuRequested.connect(self._show_clip_context_menu)
         self.tree.itemDoubleClicked.connect(lambda item, column: self._handle_open_shortcut())
@@ -6430,9 +7284,10 @@ class MainWindow(QMainWindow):
         self.loudness_issue_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.loudness_issue_list))
         self.diagnostic_section_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.diagnostic_section_list))
         self.build_profile_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.build_profile_list))
-        self.tree_filter_edit.textChanged.connect(self.tree.apply_filter)
-        self.tree_filter_edit.returnPressed.connect(self._search_next_tree_event)
-        self.tree_search_button.clicked.connect(self._search_next_tree_event)
+        self.explorer_tabs.currentChanged.connect(lambda _index: self._sync_explorer_browser_state())
+        self.tree_filter_edit.textChanged.connect(self._apply_explorer_filter)
+        self.tree_filter_edit.returnPressed.connect(self._advance_explorer_search)
+        self.tree_search_button.clicked.connect(self._advance_explorer_search)
         self.clip_filter_edit.textChanged.connect(self._apply_clip_filter)
         self.recent_projects_list.itemDoubleClicked.connect(lambda item: self.openRecentProjectRequested.emit(item.text()))
 
@@ -6500,6 +7355,68 @@ class MainWindow(QMainWindow):
         else:
             self.report_detail_label.setText(f"源文件不存在：{source_path}")
 
+    def set_source_browser_entries(self, entries: list[dict[str, object]]) -> None:
+        self._source_browser_entries = list(entries)
+        self._refresh_source_browser_tree()
+        self._refresh_event_source_binding_state()
+
+    def _update_source_browser_status(self) -> None:
+        entry = self.source_tree.current_source_entry()
+        if not entry:
+            self.source_browser_status_label.setText("选择一个源音频，可查看路径、引用事件和缺失状态。")
+            self.source_browser_locate_button.setEnabled(False)
+            self.source_browser_copy_button.setEnabled(False)
+            self.source_browser_locate_event_button.setEnabled(False)
+            self.source_browser_add_to_event_button.setEnabled(False)
+            return
+
+        source_path = str(entry.get("source_path", "")).strip()
+        reference_count = int(entry.get("reference_count", 0))
+        state_fragments: list[str] = []
+        if bool(entry.get("missing", False)):
+            state_fragments.append("文件缺失")
+        if bool(entry.get("unreferenced", False)):
+            state_fragments.append("当前未被事件引用")
+        if source_path and source_path in set(self._current_event_source_paths):
+            state_fragments.append("当前事件已绑定")
+        state_text = "；".join(state_fragments) if state_fragments else "状态正常"
+        event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
+        event_preview = "、".join(event_ids[:4]) if event_ids else "-"
+        self.source_browser_status_label.setText(
+            f"{source_path}\n引用事件 {reference_count} 个：{event_preview}\n{state_text}"
+        )
+        self.source_browser_locate_button.setEnabled(bool(source_path))
+        self.source_browser_copy_button.setEnabled(bool(source_path))
+        self.source_browser_locate_event_button.setEnabled(bool(event_ids) or (bool(source_path) and source_path in set(self._current_event_source_paths)))
+        self.source_browser_add_to_event_button.setEnabled(bool(source_path) and bool(self._active_event_id))
+
+    def _locate_selected_source_asset(self) -> None:
+        entry = self.source_tree.current_source_entry()
+        if not entry:
+            self.report_detail_label.setText("当前没有选中的源音频。")
+            return
+        source_path = str(entry.get("source_path", "")).strip()
+        if not source_path:
+            self.report_detail_label.setText("当前源音频没有可定位的源路径。")
+            return
+        if os.path.exists(source_path):
+            os.startfile(source_path)
+            self.report_detail_label.setText(f"已定位源文件：{source_path}")
+        else:
+            self.report_detail_label.setText(f"源文件不存在：{source_path}")
+        self.report_detail_label.setToolTip(source_path)
+
+    def _copy_selected_source_asset_path(self) -> None:
+        entry = self.source_tree.current_source_entry()
+        if not entry:
+            return
+        source_path = str(entry.get("source_path", "")).strip()
+        if not source_path:
+            return
+        QApplication.clipboard().setText(source_path)
+        self.report_detail_label.setText(f"已复制源路径：{source_path}")
+        self.report_detail_label.setToolTip(source_path)
+
     def _follow_current_event_bus(self) -> None:
         self._project_bus_selection_overridden = False
         self._sync_current_event_bus_selection(force=True)
@@ -6513,6 +7430,7 @@ class MainWindow(QMainWindow):
             item = self.tree.currentItem()
         selected_event_ids = self.selected_tree_event_ids()
         has_event_target = bool(selected_event_ids)
+        has_source_binding_target = False
         menu = QMenu(self)
         new_folder_action = menu.addAction("新建文件夹")
         new_event_action = menu.addAction("新建事件")
@@ -6532,6 +7450,10 @@ class MainWindow(QMainWindow):
             if payload is not None and payload[0] == "event":
                 has_event_target = True
                 contents_action.setEnabled(True)
+            elif payload is not None and payload[0] == "source_binding":
+                has_source_binding_target = True
+                contents_action.setEnabled(True)
+                rename_action.setEnabled(False)
         preview_actions: dict[QAction, str] = {}
         preview_specs = self._tree_preview_context_actions(has_event_target=has_event_target)
         if preview_specs:
@@ -6563,6 +7485,14 @@ class MainWindow(QMainWindow):
                         parent_payload = item.parent().data(0, Qt.ItemDataRole.UserRole)
                         if parent_payload is not None:
                             target_folder_id = parent_payload[1]
+                    elif payload[0] == "source_binding":
+                        current_item = item.parent()
+                        while current_item is not None:
+                            parent_payload = current_item.data(0, Qt.ItemDataRole.UserRole)
+                            if parent_payload is not None and parent_payload[0] == "folder":
+                                target_folder_id = parent_payload[1]
+                                break
+                            current_item = current_item.parent()
             self.importAudioAsEventsRequested.emit(file_paths, target_folder_id, template)
         elif action == bulk_bus_action:
             self._request_bulk_event_bus()
@@ -6574,12 +7504,14 @@ class MainWindow(QMainWindow):
             self._handle_copy_shortcut()
         elif action == property_action:
             payload = self._selected_tree_payload()
-            if payload is not None and payload[0] == "event":
+            if payload is not None and payload[0] in {"event", "source_binding"}:
                 self.set_active_property_category("事件")
             else:
                 self.set_active_property_category("工程")
         elif action == contents_action:
             self.set_active_contents_category("片段")
+            if has_source_binding_target:
+                self.select_clip_ids(self.selected_tree_source_binding_clip_ids())
         elif action == report_action:
             self.show_report_tab(1)
         elif action in preview_actions:
@@ -6658,6 +7590,67 @@ class MainWindow(QMainWindow):
             return
         self.report_detail_label.setText(f"已定位事件：{event_id}")
         self.report_detail_label.setToolTip(event_id)
+
+    def _advance_explorer_search(self) -> None:
+        active_page = self._active_explorer_page_key()
+        if active_page == "buses":
+            self._search_next_project_bus()
+            return
+        if active_page == "sources":
+            self._search_next_source_asset()
+            return
+        self._search_next_tree_event()
+
+    def _search_next_project_bus(self) -> None:
+        query = self.tree_filter_edit.text().strip().lower()
+        if not query:
+            self.report_detail_label.setText("先输入总线关键字，再执行搜索。")
+            return
+        matching_items = self._visible_project_bus_items(query)
+        if not matching_items:
+            self.report_detail_label.setText(f"没有找到匹配“{query}”的总线。")
+            return
+
+        current_bus_name = self.current_project_bus_name()
+        target_index = 0
+        if current_bus_name:
+            for index, item in enumerate(matching_items):
+                bus_name = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+                if bus_name == current_bus_name:
+                    target_index = (index + 1) % len(matching_items)
+                    break
+
+        target_item = matching_items[target_index]
+        self.project_bus_list.setCurrentItem(target_item)
+        bus_name = str(target_item.data(0, Qt.ItemDataRole.UserRole) or "")
+        self.report_detail_label.setText(f"已定位总线：{bus_name}")
+        self.report_detail_label.setToolTip(bus_name)
+
+    def _visible_project_bus_items(self, query: str) -> list[QTreeWidgetItem]:
+        items: list[QTreeWidgetItem] = []
+        pending = [self.project_bus_list.topLevelItem(index) for index in range(self.project_bus_list.topLevelItemCount())]
+        while pending:
+            item = pending.pop(0)
+            if item is None:
+                continue
+            bus_name = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+            if not item.isHidden() and (query in item.text(0).lower() or query in bus_name.lower()):
+                items.append(item)
+            for child_index in range(item.childCount()):
+                pending.append(item.child(child_index))
+        return items
+
+    def _search_next_source_asset(self) -> None:
+        query = self.tree_filter_edit.text().strip()
+        if not query:
+            self.report_detail_label.setText("先输入源音频关键字，再执行搜索。")
+            return
+        source_path = self.source_tree.select_next_matching_asset(query)
+        if not source_path:
+            self.report_detail_label.setText(f"没有找到匹配“{query}”的源音频。")
+            return
+        self.report_detail_label.setText(f"已定位源音频：{source_path}")
+        self.report_detail_label.setToolTip(source_path)
 
     def _request_bulk_clip_properties(self) -> None:
         self.bulkClipPropertiesRequested.emit(self.current_bulk_clip_form_data())
@@ -6752,6 +7745,11 @@ class MainWindow(QMainWindow):
             (self.apply_default_bus_button, load_app_icon("bus")),
             (self.project_bus_add_button, load_app_icon("bus")),
             (self.project_bus_remove_button, load_app_icon("delete")),
+            (self.project_bus_browser_button, load_app_icon("bus")),
+            (self.source_browser_locate_button, load_app_icon("open_project")),
+            (self.source_browser_copy_button, load_app_icon("generate")),
+            (self.source_browser_locate_event_button, load_app_icon("event")),
+            (self.source_browser_add_to_event_button, load_app_icon("content")),
             (self.object_preview_button, load_app_icon("play")),
             (self.object_contents_button, load_app_icon("content")),
             (self.object_follow_bus_button, load_app_icon("bus")),
@@ -7633,6 +8631,7 @@ class MainWindow(QMainWindow):
         self.loudness_summary_label.setProperty("role", "meterContext")
         self.tree.setProperty("role", "navigationTree")
         self.project_bus_list.setProperty("role", "navigationTree")
+        self.source_tree.setProperty("role", "navigationTree")
         self.clip_table.setProperty("role", "editorTable")
         self.validation_issue_list.setProperty("role", "resultList")
         self.build_issue_list.setProperty("role", "resultList")

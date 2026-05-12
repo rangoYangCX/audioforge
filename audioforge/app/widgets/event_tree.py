@@ -7,7 +7,22 @@ from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem
 
 from audioforge.app.models.audio_project import AudioProject
-from audioforge.app.utils.icons import load_app_icon
+from audioforge.app.utils.icons import load_app_icon, load_event_icon
+from audioforge.app.widgets.source_tree import SOURCE_ASSET_MIME_TYPE
+
+
+SOURCE_BINDING_TOKEN_SEPARATOR = "\t"
+
+
+def encode_source_binding_token(event_id: str, clip_id: str) -> str:
+    return f"{event_id}{SOURCE_BINDING_TOKEN_SEPARATOR}{clip_id}"
+
+
+def decode_source_binding_token(token: str) -> tuple[str, str]:
+    normalized = str(token)
+    if SOURCE_BINDING_TOKEN_SEPARATOR not in normalized:
+        return "", normalized
+    return tuple(normalized.split(SOURCE_BINDING_TOKEN_SEPARATOR, 1))  # type: ignore[return-value]
 
 
 class EventTreeWidget(QTreeWidget):
@@ -16,10 +31,13 @@ class EventTreeWidget(QTreeWidget):
     nodesSelectionChanged = Signal(list)
     nodeMoved = Signal(str, str, object, int)
     audioFilesDropped = Signal(list, object)
+    sourceAssetsDroppedToEvent = Signal(list, str)
+    eventBindingsPopupRequested = Signal(str, QPoint)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._analysis_status: dict[str, dict[str, str]] = {}
+        self._suppress_event_bindings_popup = False
         self.setColumnCount(3)
         self.setHeaderLabels(["名称", "类型", "内容"])
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -29,25 +47,37 @@ class EventTreeWidget(QTreeWidget):
         self.setUniformRowHeights(True)
         self.setAcceptDrops(True)
         self.itemSelectionChanged.connect(self._emit_selected_event)
+        self.itemExpanded.connect(self._handle_item_expanded)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._extract_source_asset_paths(event):
+            event.acceptProposedAction()
+            return
         if self._extract_import_paths(event):
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self._extract_source_asset_paths(event):
+            if self._resolve_drop_target_event_id(self._event_position_point(event)) is not None:
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+            return
         if self._extract_import_paths(event):
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
 
     def rebuild(self, project: AudioProject) -> None:
+        self._suppress_event_bindings_popup = True
         self.clear()
         for folder_id in project.root_folder_ids:
             folder_item = self._build_folder_item(project, folder_id, is_root=True)
             self.addTopLevelItem(folder_item)
-        self.expandAll()
+        self._expand_folder_items()
+        self._suppress_event_bindings_popup = False
 
     def set_analysis_status(self, status_map: dict[str, dict[str, str]]) -> None:
         self._analysis_status = dict(status_map)
@@ -103,7 +133,9 @@ class EventTreeWidget(QTreeWidget):
             self._apply_filter_recursive(item, normalized)
 
         if normalized:
-            self.expandAll()
+            self._suppress_event_bindings_popup = True
+            self._expand_folder_items()
+            self._suppress_event_bindings_popup = False
 
     def selected_payloads(self) -> list[tuple[str, str]]:
         payloads: list[tuple[str, str]] = []
@@ -120,7 +152,22 @@ class EventTreeWidget(QTreeWidget):
         return payloads
 
     def selected_event_ids(self) -> list[str]:
-        return [node_id for node_type, node_id in self.selected_payloads() if node_type == "event"]
+        event_ids: list[str] = []
+        seen: set[str] = set()
+        for item in self.selectedItems():
+            payload = item.data(0, Qt.ItemDataRole.UserRole)
+            if payload is None:
+                continue
+            node_type = str(payload[0])
+            if node_type == "event":
+                event_id = str(payload[1])
+            else:
+                continue
+            if not event_id or event_id in seen:
+                continue
+            seen.add(event_id)
+            event_ids.append(event_id)
+        return event_ids
 
     def select_next_matching_event(self, query: str) -> str | None:
         normalized = query.strip().lower()
@@ -157,6 +204,7 @@ class EventTreeWidget(QTreeWidget):
         item = QTreeWidgetItem([folder.name, "Work Unit" if is_root else "Folder", f"子文件夹 {len(folder.child_folder_ids)} / 事件 {len(folder.child_event_ids)}"])
         item.setData(0, Qt.ItemDataRole.UserRole, ("folder", folder.id))
         item.setIcon(0, load_app_icon("folder"))
+        self._configure_item_flags(item, "folder")
 
         for child_folder_id in folder.child_folder_ids:
             item.addChild(self._build_folder_item(project, child_folder_id))
@@ -164,10 +212,26 @@ class EventTreeWidget(QTreeWidget):
             event = project.events[event_id]
             event_item = QTreeWidgetItem([event.display_name or event_id, "Event", event_id])
             event_item.setData(0, Qt.ItemDataRole.UserRole, ("event", event_id))
-            event_item.setIcon(0, load_app_icon("event"))
+            event_item.setIcon(0, load_event_icon(event.play_mode))
+            event_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+            self._configure_item_flags(event_item, "event")
             self._apply_status_to_item(event_item, event_id)
             item.addChild(event_item)
         return item
+
+    def _handle_item_expanded(self, item: QTreeWidgetItem) -> None:
+        if self._suppress_event_bindings_popup:
+            return
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if payload is None or str(payload[0]) != "event":
+            return
+
+        self._suppress_event_bindings_popup = True
+        self.collapseItem(item)
+        self._suppress_event_bindings_popup = False
+        anchor = self.visualItemRect(item).topRight()
+        global_pos = self.viewport().mapToGlobal(anchor)
+        self.eventBindingsPopupRequested.emit(str(payload[1]), global_pos)
 
     def _apply_status_recursive(self, item: QTreeWidgetItem) -> None:
         payload = item.data(0, Qt.ItemDataRole.UserRole)
@@ -175,6 +239,17 @@ class EventTreeWidget(QTreeWidget):
             self._apply_status_to_item(item, payload[1])
         for child_index in range(item.childCount()):
             self._apply_status_recursive(item.child(child_index))
+
+    def _expand_folder_items(self) -> None:
+        for root_index in range(self.topLevelItemCount()):
+            self._expand_folder_items_recursive(self.topLevelItem(root_index))
+
+    def _expand_folder_items_recursive(self, item: QTreeWidgetItem) -> None:
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if payload is not None and payload[0] == "folder":
+            self.expandItem(item)
+        for child_index in range(item.childCount()):
+            self._expand_folder_items_recursive(item.child(child_index))
 
     def _apply_status_to_item(self, item: QTreeWidgetItem, event_id: str) -> None:
         status = self._analysis_status.get(event_id)
@@ -208,9 +283,17 @@ class EventTreeWidget(QTreeWidget):
             self.eventSelected.emit(node_id)
 
     def dropEvent(self, event: QDropEvent) -> None:
+        source_asset_paths = self._extract_source_asset_paths(event)
+        if source_asset_paths:
+            target_event_id = self._resolve_drop_target_event_id(self._event_position_point(event))
+            if target_event_id is not None:
+                self.sourceAssetsDroppedToEvent.emit(source_asset_paths, target_event_id)
+                event.acceptProposedAction()
+            return
+
         dropped_paths = self._extract_import_paths(event)
         if dropped_paths:
-            target_folder_id = self._resolve_drop_target_folder_id(event.position().toPoint())
+            target_folder_id = self._resolve_drop_target_folder_id(self._event_position_point(event))
             self.audioFilesDropped.emit(dropped_paths, target_folder_id)
             event.acceptProposedAction()
             return
@@ -221,6 +304,9 @@ class EventTreeWidget(QTreeWidget):
             return
 
         node_type, node_id = moved_item.data(0, Qt.ItemDataRole.UserRole)
+        if str(node_type) == "source_binding":
+            event.ignore()
+            return
         super().dropEvent(event)
 
         moved_item = self._find_item(node_type, node_id)
@@ -229,9 +315,39 @@ class EventTreeWidget(QTreeWidget):
 
         parent_item = moved_item.parent()
         parent_payload = parent_item.data(0, Qt.ItemDataRole.UserRole) if parent_item is not None else None
+        if parent_payload is not None and str(parent_payload[0]) != "folder":
+            return
         parent_folder_id = None if parent_payload is None else parent_payload[1]
         index = self.indexOfTopLevelItem(moved_item) if parent_item is None else parent_item.indexOfChild(moved_item)
         self.nodeMoved.emit(node_type, node_id, parent_folder_id, index)
+
+    def _configure_item_flags(self, item: QTreeWidgetItem, node_type: str) -> None:
+        flags = item.flags() | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if node_type in {"folder", "event"}:
+            flags |= Qt.ItemFlag.ItemIsDragEnabled
+        if node_type == "folder":
+            flags |= Qt.ItemFlag.ItemIsDropEnabled
+        item.setFlags(flags)
+
+    def _event_position_point(self, event) -> QPoint:
+        if hasattr(event, "position"):
+            return event.position().toPoint()
+        return event.pos()
+
+    def _extract_source_asset_paths(self, event) -> list[str]:
+        mime_data = event.mimeData()
+        if not mime_data.hasFormat(SOURCE_ASSET_MIME_TYPE):
+            return []
+        raw_payload = bytes(mime_data.data(SOURCE_ASSET_MIME_TYPE)).decode("utf-8", errors="ignore")
+        source_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for line in raw_payload.splitlines():
+            source_path = line.strip()
+            if not source_path or source_path in seen_paths:
+                continue
+            source_paths.append(source_path)
+            seen_paths.add(source_path)
+        return source_paths
 
     def _extract_import_paths(self, event) -> list[str]:
         mime_data = event.mimeData()
@@ -265,11 +381,34 @@ class EventTreeWidget(QTreeWidget):
         node_type, node_id = payload
         if node_type == "folder":
             return node_id
-        parent_item = item.parent()
-        if parent_item is None:
-            return None
-        parent_payload = parent_item.data(0, Qt.ItemDataRole.UserRole)
+        parent_payload = self._nearest_ancestor_payload(item.parent(), "folder")
         return None if parent_payload is None else parent_payload[1]
+
+    def _resolve_drop_target_event_id(self, position: QPoint) -> str | None:
+        item = self.itemAt(position)
+        if item is None:
+            current_item = self.currentItem()
+            if current_item is not None:
+                item = current_item
+        if item is None:
+            return None
+
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if payload is None:
+            return None
+        node_type, node_id = payload
+        if node_type == "event":
+            return str(node_id)
+        return None
+
+    def _nearest_ancestor_payload(self, item: QTreeWidgetItem | None, expected_type: str) -> tuple[str, str] | None:
+        current_item = item
+        while current_item is not None:
+            payload = current_item.data(0, Qt.ItemDataRole.UserRole)
+            if payload is not None and str(payload[0]) == expected_type:
+                return str(payload[0]), str(payload[1])
+            current_item = current_item.parent()
+        return None
 
     def _find_item(self, node_type: str, node_id: str) -> QTreeWidgetItem | None:
         for root_index in range(self.topLevelItemCount()):
@@ -309,7 +448,15 @@ class EventTreeWidget(QTreeWidget):
             return
         payload = item.data(0, Qt.ItemDataRole.UserRole)
         if payload is not None and payload[0] == "event":
-            if any(query in item.text(column).lower() for column in range(self.columnCount())):
+            if self._item_or_descendant_matches(item, query):
                 matches.append(item)
         for child_index in range(item.childCount()):
             self._collect_visible_matching_events(item.child(child_index), query, matches)
+
+    def _item_or_descendant_matches(self, item: QTreeWidgetItem, query: str) -> bool:
+        if any(query in item.text(column).lower() for column in range(self.columnCount())):
+            return True
+        for child_index in range(item.childCount()):
+            if self._item_or_descendant_matches(item.child(child_index), query):
+                return True
+        return False

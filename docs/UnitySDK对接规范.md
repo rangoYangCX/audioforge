@@ -3,11 +3,16 @@ AudioForge Unity 端对接开发文档（第一期）
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-05-11。
-> 当前工具版本：AudioForge 0.06.2。
+> 当前文档同步日期：2026-05-12。
+> 当前工具版本：AudioForge 0.07.0。
 
 0.1 版本增量
 
+- 2026-05-12 0.07.0 交付更新：包内文档与仓库主文档都新增了“一期到当前变化总览”，Unity 对接时可以先快速判断本次交付相对一期新增了什么。
+- 2026-05-12 0.07.0 对接补充：对象浏览器已升级为“总线树 / 源音频树 / 事件树”三分页，绑定编辑入口收口为事件树 bindings 弹窗；这些变化仍属于编辑器工作流，不新增 Unity 运行时字段。
+- 2026-05-12 0.07.0 对接补充：工程设置新增“根据事件命名智能分配总线”开关；它只影响工具端新建/导入事件时的默认总线，不要求 Unity 侧消费新字段。
+- 2026-05-12 对接补充：`PlayMode` 已正式纳入 `OneShot`；Unity 侧无需新增 editor-only 字段，只需继续消费导出后的有效 Clip 集合即可。
+- 2026-05-12 对接补充：事件树 bindings 弹窗、`Enabled` / `Active` 状态、对象浏览器三分页、拖拽追加反馈与 OneShot 图标均属于编辑器侧交互演进；当前不会新增 `AudioData.json` 字段，也不要求 Unity SDK 改代码。
 - 2026-05-11 维护更新：主窗口、分离工程浏览器、设置窗以及各工作区命名 splitter 的布局与大小已统一持久化；属于桌面工具体验增强，不影响 Unity 运行时契约。
 - AudioForge 0.06.2 优化：最近试听侧栏卡片收口为更明确的 transport card，标题、状态、控制按钮和响度摘要层级更清晰；Unity 运行时契约不变。
 - AudioForge 0.06.2 优化：最近试听按钮进一步放大，并新增播放中、暂停、可试听和可重播状态徽标；Unity 侧无需消费新增字段。
@@ -25,10 +30,17 @@ AudioForge Unity 端对接开发文档（第一期）
 - AudioForge 0.04 新增：`AudioData.json` 与 `AudioManifest.json` 会写出 `FadeInMs`、`FadeOutMs`，用于调试、审计和后续 Unity 端扩展消费。
 - AudioForge 0.04 更新：Unity 参考运行时已显式读取 `FadeInMs`、`FadeOutMs`，并在调试记录中展示 Clip 的 Trim / Fade / Loop 元数据；当前仍未将 Fade 作为独立运行时 DSP 规则再次执行。
 
+0.2 相对第一期必须关注的变化
+
+- 运行时契约层真正需要 Unity 程序关注的新增点只有一个：`PlayMode` 现在明确包含 `OneShot`，并且导出结果只保留当前有效 Clip 集合。
+- 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置，但这些都不会新增到当前 `AudioData.json` 结构里。
+- 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
+- 当前仓库附带的 Unity 参考运行时代码已经能够继续消费新版导出结果，不要求为这轮 phase2 编辑器演进额外修改 `AudioForgeRuntime.cs` 或 `AudioForgeJsonAdapter.cs`。
+
 0. 当前状态
 
 - 当前工具端适用目标：UI / SFX / BGM 为主、事件驱动为主、接受轻量 SDK 的手游休闲项目。
-- 最近一次仓库内完整验证结果：`pytest` 87 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过；smoke 报告与签收摘要已在 2026-05-11 刷新。
+- 最近一次仓库内完整验证结果：`pytest` 112 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过；smoke 报告与签收摘要已在 2026-05-12 刷新。
 - 当前参考运行时定位：开发参考实现，可直接用于空项目联调与生产版 SDK 的起步实现，不等于最终生产版音频系统。
 
 1. 文档定位
@@ -65,7 +77,7 @@ AudioForge Unity 端对接开发文档（第一期）
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
 
-2026-05-11 版本说明：当前这轮 0.06.2 发布不会自动改动已经生成好的 Unity SDK 包。只有在你需要同步新版文档副本、验证材料或重新导出的样例时，才需要重新执行打包流程生成 `dist/AudioForgeUnityPackage-0.06.2/`；若不重新打包，现有 SDK 包结构、接口和运行时代码保持不变。
+2026-05-12 版本说明：当前这轮 0.07.0 发布建议重新生成 Unity SDK 包。主要原因不是运行时代码目录结构大改，而是需要同步 `PlayMode = OneShot` 的最新文档解释、一期对比总览、最新验证材料和签收摘要。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.07.0/`。
 
 自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
 
@@ -117,7 +129,7 @@ AudioForgeUnityPackage-<version>/
 
 如果你只是要拿仓库里的最新机器验证样例做联调，优先使用 `reports/internal_release_smoke/export/` 下的导出物，而不是把仓库根目录 `Export/` 误当成唯一基线来源。
 
-如果 Unity 同学已经拿到了之前生成的包，可以直接继续对接；0.06.2 主要改善的是桌面工具最近试听卡片、transport 可视化和侧栏布局表现，而不是 Unity SDK 接口。
+如果 Unity 同学已经拿到了之前生成的包，旧代码通常仍可继续对接；但建议至少同步阅读 0.07.0 的对接文档和一期对比总览，确认 `OneShot` 语义、有效 Clip 集合和 editor-only 边界理解一致。
 
 3. 工具端与 Unity 端边界
 
@@ -227,12 +239,12 @@ AudioForgeUnityPackage-<version>/
 
 7.1 Event 字段
 
-对多数休闲游戏项目，建议默认只使用 `BGM`、`SFX`、`UI` 三条子总线，事件默认走 `Random` 播放模式；`Sequence` 和 `Combo` 作为按需启用的进阶玩法即可。
+对多数休闲游戏项目，建议默认只使用 `BGM`、`SFX`、`UI` 三条子总线；单源、一次性触发的短音效可以直接使用 `OneShot`，多变体音效默认仍建议走 `Random`，`Sequence` 和 `Combo` 作为按需启用的进阶玩法即可。
 
 - `Id`：事件唯一标识，Unity 端主索引键。
 - `DisplayName`：仅编辑器展示，不参与运行时查找。
 - `Bus`：所属总线。
-- `PlayMode`：`Random`、`Sequence`、`Combo`。
+- `PlayMode`：`OneShot`、`Random`、`Sequence`、`Combo`。
 - `AvoidImmediateRepeat`：若候选 Clip 大于 1，优先排除上次命中的 Clip。
 - `VolumeDb`：基础音量，单位 dB。
 - `VolumeRandMinDb`、`VolumeRandMaxDb`：随机音量范围。
@@ -270,6 +282,12 @@ AudioForgeUnityPackage-<version>/
 - 若 `AudioData.json` 中同时存在 `Buses` 与 `BusConfigs`，Unity 端应优先采用 `BusConfigs` 作为初始化总线状态，再将 `Buses` 视为兼容性保底字段。
 
 8. 行为语义要求
+
+8.0 OneShot
+
+- `OneShot` 表示当前事件在导出后只保留 1 个有效 Clip；Unity 侧按普通单 Clip 事件播放即可，不需要额外分支字段。
+- 当前工具端会在导出前完成 `Enabled` / `Active` 过滤；Unity 运行时收到的是已经收敛后的有效 Clip 集合，而不是 editor-only 绑定状态。
+- 若 `PlayMode = OneShot` 且 `Clips` 只包含 1 项，参考运行时沿用现有随机选片路径即可得到确定结果，因此当前 SDK 代码无需为 `OneShot` 再新增独立调度器。
 
 8.1 Random
 
@@ -389,7 +407,7 @@ AudioForgeUnityPackage-<version>/
 1. 能读取 `AudioData.json`。
 2. 能按 `eventId` 找到事件。
 3. 能根据 `AssetKey` 加载导出音频。
-4. 能完成 `Random`、`Sequence`、`Combo`、`Cooldown`、`MaxInstances` 基础行为。
+4. 能完成 `OneShot`、`Random`、`Sequence`、`Combo`、`Cooldown`、`MaxInstances` 基础行为。
 5. 能处理总线静音与音量。
 
 Combo 联调时请额外确认以下边界：
@@ -431,7 +449,7 @@ Combo 联调时请额外确认以下边界：
 
 - 能在 Unity 空项目中成功初始化。
 - 能根据事件 ID 播放导出音频。
-- `Random`、`Sequence`、`Combo`、`Cooldown`、`MaxInstances` 行为与工具定义一致。
+- `OneShot`、`Random`、`Sequence`、`Combo`、`Cooldown`、`MaxInstances` 行为与工具定义一致。
 - 总线音量和静音控制生效。
 - 资源丢失和事件缺失时有可读日志。
 - 能通过 `unity_validation/README.md` 中的基础验证流程。
@@ -440,8 +458,14 @@ Combo 联调时请额外确认以下边界：
 
 - 当前接入的资源提供方式（StreamingAssets / Addressables / AssetBundle）
 - 是否启用保时长变调参考路径
-- `Random` / `Sequence` / `Combo` / `Cooldown` / `MaxInstances` 的抽查结果
+- `OneShot` / `Random` / `Sequence` / `Combo` / `Cooldown` / `MaxInstances` 的抽查结果
 - 当前未覆盖的能力边界
+
+14.1 二期改动与 SDK 影响标注
+
+- 需要同步 SDK 文档但当前无需改 SDK 代码的内容：`OneShot` 播放模式、导出前有效 binding 过滤语义、事件树 OneShot 图标。
+- 当前明确不进入 SDK 契约的二期内容：对象浏览器三分页、bindings 弹窗、`Enabled` / `Active` 原始状态、拖拽追加反馈、设计页绑定摘要区。
+- 只有当未来决定把 `Enabled` / `Active`、ShuffleBag、Loop 或其他 editor-only 状态直接写入 `AudioData.json` 时，才需要升级 SchemaVersion 并同步修改 Unity SDK 解析与运行时行为。
 
 补充说明：若 Unity 端本阶段仍采用原生 `AudioSource.pitch` 执行音高变化，则“音高变化是否保时长”不计入第一期最小验收失败项，但需在联调记录中明确标注。
 

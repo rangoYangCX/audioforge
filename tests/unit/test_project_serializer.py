@@ -11,6 +11,7 @@ from tests.helpers import build_sample_project
 
 def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: Path) -> None:
     project, wav_path = build_sample_project(tmp_path, bus_volume_db=2.5, event_volume_db=-1.0)
+    project.settings.auto_assign_bus_by_name = False
     serializer = ProjectSerializer()
     project_path = tmp_path / "sample.afproj"
 
@@ -21,6 +22,7 @@ def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: P
     assert loaded.events["UiClick"].clips[0].source_path == str(wav_path)
     assert loaded.events["UiClick"].clips[0].asset_key == "ui/click_primary"
     assert loaded.settings.default_bus == "UI"
+    assert loaded.settings.auto_assign_bus_by_name is False
     assert loaded.settings.bus_configs[-1].name == "UI"
     assert loaded.settings.bus_configs[-1].parent_bus == "SFX"
     assert loaded.settings.bus_configs[-1].volume_db == 2.5

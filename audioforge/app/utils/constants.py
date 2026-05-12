@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_NAME = "AudioForge"
-APP_VERSION = "0.06.2"
+APP_VERSION = "0.07.0"
 PROJECT_EXTENSION = ".afproj"
 SCHEMA_VERSION = 1
 PROJECT_VERSION = 1

@@ -60,6 +60,50 @@ def test_runtime_exporter_is_stable_across_repeated_exports(tmp_path: Path) -> N
     assert _sha256(first_result.assets_dir / "ui" / "click_primary.wav") == _sha256(second_result.assets_dir / "ui" / "click_primary.wav")
 
 
+def test_runtime_exporter_only_writes_active_binding_for_one_shot(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    alternate_wav = write_wav_fixture(tmp_path / "fixtures" / "ui_click_alt.wav", frequency_hz=660.0)
+    event = project.events["UiClick"]
+    event.play_mode = "OneShot"
+    event.clips[0].active = False
+    event.clips.append(ClipModel.from_path(alternate_wav, "ui/click_alternate"))
+    event.clips[1].active = True
+    project.touch()
+
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+    result = RuntimeExporter().export(project, export_root, issues)
+
+    payload = json.loads(result.data_file.read_text(encoding="utf-8"))
+    manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
+
+    assert payload["Events"]["UiClick"]["PlayMode"] == "OneShot"
+    assert [clip["AssetKey"] for clip in payload["Events"]["UiClick"]["Clips"]] == ["ui/click_alternate"]
+    assert {asset["AssetKey"] for asset in manifest["Assets"]} == {"ui/click_alternate"}
+
+
+def test_runtime_exporter_only_writes_active_bindings_for_random_mode(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    alternate_wav = write_wav_fixture(tmp_path / "fixtures" / "ui_click_random_alt.wav", frequency_hz=660.0)
+    event = project.events["UiClick"]
+    event.play_mode = "Random"
+    event.clips[0].active = True
+    event.clips.append(ClipModel.from_path(alternate_wav, "ui/click_random_alt"))
+    event.clips[1].active = False
+    project.touch()
+
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+    result = RuntimeExporter().export(project, export_root, issues)
+
+    payload = json.loads(result.data_file.read_text(encoding="utf-8"))
+    manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
+
+    assert payload["Events"]["UiClick"]["PlayMode"] == "Random"
+    assert [clip["AssetKey"] for clip in payload["Events"]["UiClick"]["Clips"]] == ["ui/click_primary"]
+    assert {asset["AssetKey"] for asset in manifest["Assets"]} == {"ui/click_primary"}
+
+
 def test_runtime_exporter_overwrites_existing_bundle_atomically(tmp_path: Path) -> None:
     project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
     export_root = tmp_path / "Export"

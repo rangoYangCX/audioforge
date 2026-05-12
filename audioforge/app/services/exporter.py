@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from audioforge.app.models.audio_project import AudioProject, ClipModel, ValidationIssue
+from audioforge.app.models.audio_project import AudioProject, ClipModel, ValidationIssue, effective_event_clips
 from audioforge.app.services.audio_processor import AudioProcessor
 from audioforge.app.utils.constants import (
     DEFAULT_AUDIO_MANIFEST_FILENAME,
@@ -328,6 +328,7 @@ class RuntimeExporter:
         events: dict[str, object] = {}
         for event_id in sorted(project.events):
             event = project.events[event_id]
+            runtime_clips = effective_event_clips(event)
             payload: dict[str, object] = {
                 "Bus": event.bus,
                 "PlayMode": event.play_mode,
@@ -352,7 +353,7 @@ class RuntimeExporter:
                         "LoopStartMs": clip.loop_start_ms,
                         "LoopEndMs": clip.loop_end_ms,
                     }
-                    for clip in event.clips
+                    for clip in runtime_clips
                 ],
             }
             if event.play_mode == "Combo":
@@ -411,7 +412,7 @@ class RuntimeExporter:
             "ProjectVersion": project.project_version,
             "SchemaVersion": SCHEMA_VERSION,
             "EventCount": len(project.events),
-            "ClipCount": sum(len(event.clips) for event in project.events.values()),
+            "ClipCount": sum(len(effective_event_clips(event)) for event in project.events.values()),
             "ErrorCount": sum(1 for issue in issues if issue.severity == "Error"),
             "WarningCount": sum(1 for issue in issues if issue.severity == "Warning"),
             "ExportedFiles": [path.name for path in exported_files],
@@ -427,7 +428,7 @@ class RuntimeExporter:
         clip_by_asset_key: dict[str, ClipModel] = {}
 
         for event_id, event in project.events.items():
-            for clip in event.clips:
+            for clip in effective_event_clips(event):
                 asset_key = clip.asset_key
                 owners.setdefault(asset_key, set()).add(event_id)
                 source_path = Path(clip.source_path) if clip.source_path else None

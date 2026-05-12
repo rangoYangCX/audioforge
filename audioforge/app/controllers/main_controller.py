@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, ValidationIssue, new_id
+from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, ValidationIssue, new_id, normalize_event_binding_states
 from audioforge.app.services.audio_meter_service import AudioMeterService
 from audioforge.app.services.command_history import CommandHistory, EditorSnapshot
 from audioforge.app.services.exporter import ExportPlan, ExportRequest, RuntimeExporter
@@ -35,6 +35,7 @@ from audioforge.app.utils.constants import (
 )
 from audioforge.app.utils.runtime_logging import get_runtime_log_config
 from audioforge.app.views.main_window import MainWindow
+from audioforge.app.widgets.event_tree import decode_source_binding_token, encode_source_binding_token
 
 
 LOUDNESS_SCAN_THRESHOLDS = {
@@ -264,6 +265,7 @@ class MainController(QObject):
         self.selected_event_id: str | None = None
         self.selected_event_ids: list[str] = []
         self.selected_folder_id: str | None = None
+        self.selected_source_binding_tokens: list[str] = []
         self.is_dirty = False
         self._analysis_status: dict[str, dict[str, str]] = {}
         self._diagnostic_snapshot = DiagnosticSnapshot()
@@ -314,14 +316,17 @@ class MainController(QObject):
     ) -> EventModel:
         buses = list(available_buses or self.project.settings.buses)
         fallback_bus = default_bus or (buses[0] if buses else "SFX")
-        resolved_bus = self._suggest_bus_for_event_name(display_name or event_id, fallback_bus, buses)
+        resolved_bus = fallback_bus
+        current_settings = getattr(getattr(self, "project", None), "settings", None)
+        if current_settings is None or bool(current_settings.auto_assign_bus_by_name):
+            resolved_bus = self._suggest_bus_for_event_name(display_name or event_id, fallback_bus, buses)
         if suggested_bus in buses:
             resolved_bus = str(suggested_bus)
         event = EventModel(
             id=event_id,
             display_name=display_name or event_id.replace("_", " "),
             bus=resolved_bus,
-            play_mode="Random",
+            play_mode="OneShot",
             avoid_immediate_repeat=False,
             max_instances=0,
             cooldown_seconds=0.0,
@@ -355,6 +360,8 @@ class MainController(QObject):
         self.window.tree.nodesSelectionChanged.connect(self.select_nodes)
         self.window.tree.nodeMoved.connect(self.handle_tree_move)
         self.window.tree.audioFilesDropped.connect(self.import_audio_files_as_events)
+        self.window.tree.sourceAssetsDroppedToEvent.connect(lambda source_paths, event_id: self.assign_source_assets_to_event(event_id, source_paths, replace_existing=False))
+        self.window.tree.eventBindingsPopupRequested.connect(self.open_event_bindings_popup)
         self.window.eventPropertiesChanged.connect(self.update_current_event_from_form)
         self.window.projectSettingsChanged.connect(self.update_project_settings_from_form)
         self.window.previewBusSelectionChanged.connect(self.sync_preview_bus_editor)
@@ -377,6 +384,10 @@ class MainController(QObject):
         self.window.importClipsRequested.connect(self.import_clips)
         self.window.importAudioAsEventsRequested.connect(self.import_audio_files_as_events)
         self.window.removeClipsRequested.connect(self.remove_selected_clips)
+        self.window.assignSourceAssetsToCurrentEventRequested.connect(self.assign_source_assets_to_current_event)
+        self.window.assignSourceAssetsToEventRequested.connect(self.assign_source_assets_to_event)
+        self.window.sourceBindingEnabledChangedRequested.connect(self.update_source_binding_enabled)
+        self.window.sourceBindingActiveChangedRequested.connect(self.update_source_binding_active)
         self.window.bulkWeightRequested.connect(self.apply_bulk_weight)
         self.window.batchRenameRequested.connect(self.batch_rename_clips)
         self.window.bulkClipPropertiesRequested.connect(self.apply_bulk_clip_properties)
@@ -401,6 +412,12 @@ class MainController(QObject):
         if self._audition_session is not None and self._audition_session.event_id not in {None, *self.project.events.keys()}:
             self._audition_session = None
         self.selected_event_ids = [event_id for event_id in self.selected_event_ids if event_id in self.project.events]
+        resolved_binding_pairs = self._resolved_source_binding_pairs()
+        self.selected_source_binding_tokens = [encode_source_binding_token(event_id, clip_id) for event_id, clip_id in resolved_binding_pairs]
+        binding_event_ids = [event_id for event_id, _clip_id in resolved_binding_pairs if event_id in self.project.events]
+        for event_id in binding_event_ids:
+            if event_id not in self.selected_event_ids:
+                self.selected_event_ids.append(event_id)
         if self.selected_event_id not in self.project.events:
             self.selected_event_id = self.selected_event_ids[0] if self.selected_event_ids else next(iter(self.project.events), None)
         if self.selected_event_id is not None and self.selected_event_id not in self.selected_event_ids:
@@ -409,7 +426,12 @@ class MainController(QObject):
             self.selected_folder_id = next(iter(self.project.root_folder_ids), None)
         self.window.tree.rebuild(self.project)
         self.window.tree.set_analysis_status(self._analysis_status)
-        if self.selected_event_ids:
+        if binding_event_ids:
+            self.window.tree.select_nodes(
+                [("event", event_id) for event_id in binding_event_ids],
+                current_node=("event", self.selected_event_id) if self.selected_event_id in binding_event_ids else ("event", binding_event_ids[0]),
+            )
+        elif self.selected_event_ids:
             self.window.tree.select_nodes(
                 [("event", event_id) for event_id in self.selected_event_ids],
                 current_node=("event", self.selected_event_id) if self.selected_event_id is not None else None,
@@ -418,10 +440,14 @@ class MainController(QObject):
             self.window.tree.select_node("event", self.selected_event_id)
         elif self.selected_folder_id is not None:
             self.window.tree.select_node("folder", self.selected_folder_id)
+        self.window.set_source_browser_entries(self._build_source_browser_entries())
         self.window.set_project_settings(self.project.settings)
         self._sync_preview_bus_mixer()
         self.sync_preview_bus_editor()
         self.window.set_event_details(self.current_event)
+        popup_event_id = self.window.current_event_bindings_popup_event_id()
+        self.window.refresh_event_bindings_popup(self.project.events.get(popup_event_id) if popup_event_id else None)
+        self._sync_source_binding_selection_to_clip_table()
         self._sync_preview_transport_state()
         self.window.set_project_title(self.project.name, self.project.file_path)
         self.window.set_history_actions_enabled(self.history.can_undo(), self.history.can_redo())
@@ -430,6 +456,49 @@ class MainController(QObject):
         self._sync_build_selection_context()
         self.window.apply_navigation_state(navigation_state)
         self._publish_diagnostic_snapshot()
+
+    def _build_source_browser_entries(self) -> list[dict[str, object]]:
+        references_by_source: dict[str, dict[str, set[str]]] = {}
+        for event in self.project.events.values():
+            for clip in event.clips:
+                source_path = str(clip.source_path).strip()
+                if not source_path:
+                    continue
+                bucket = references_by_source.setdefault(
+                    source_path,
+                    {
+                        "event_ids": set(),
+                        "asset_keys": set(),
+                    },
+                )
+                bucket["event_ids"].add(event.id)
+                if clip.asset_key:
+                    bucket["asset_keys"].add(str(clip.asset_key))
+
+        all_sources = sorted({*self.project.asset_registry.keys(), *references_by_source.keys()}, key=lambda value: value.casefold())
+        entries: list[dict[str, object]] = []
+        for source_path in all_sources:
+            source_text = str(source_path).strip()
+            if not source_text:
+                continue
+            reference_bucket = references_by_source.get(source_text, {"event_ids": set(), "asset_keys": set()})
+            try:
+                is_missing = not Path(source_text).exists()
+            except OSError:
+                is_missing = True
+            event_ids = sorted(reference_bucket["event_ids"])
+            asset_keys = sorted(reference_bucket["asset_keys"])
+            entries.append(
+                {
+                    "source_path": source_text,
+                    "event_ids": event_ids,
+                    "asset_keys": asset_keys,
+                    "reference_count": len(event_ids),
+                    "missing": is_missing,
+                    "unreferenced": len(event_ids) == 0,
+                }
+            )
+        return entries
 
     def _reset_diagnostic_snapshot(self) -> None:
         self._diagnostic_snapshot = DiagnosticSnapshot()
@@ -701,6 +770,29 @@ class MainController(QObject):
     def current_events(self) -> list[EventModel]:
         return [self.project.events[event_id] for event_id in self.selected_event_ids if event_id in self.project.events]
 
+    def _resolved_source_binding_pairs(self, tokens: list[str] | None = None) -> list[tuple[str, str]]:
+        resolved_pairs: list[tuple[str, str]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        for token in tokens or self.selected_source_binding_tokens:
+            event_id, clip_id = decode_source_binding_token(token)
+            if event_id not in self.project.events or not clip_id:
+                continue
+            if not any(clip.id == clip_id for clip in self.project.events[event_id].clips):
+                continue
+            pair = (event_id, clip_id)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            resolved_pairs.append(pair)
+        return resolved_pairs
+
+    def _sync_source_binding_selection_to_clip_table(self) -> None:
+        if len(self.selected_event_ids) != 1 or self.selected_event_id is None:
+            return
+        clip_ids = [clip_id for event_id, clip_id in self._resolved_source_binding_pairs() if event_id == self.selected_event_id]
+        if clip_ids:
+            self.window.select_clip_ids(clip_ids)
+
     def show(self) -> None:
         self.window.show()
 
@@ -812,15 +904,26 @@ class MainController(QObject):
 
     def select_node(self, node_type: str, node_id: str) -> None:
         navigation_state = self.window.navigation_state()
-        if node_type == "event":
+        if node_type == "source_binding":
+            event_id, clip_id = decode_source_binding_token(node_id)
+            if event_id not in self.project.events or not any(clip.id == clip_id for clip in self.project.events[event_id].clips):
+                return
+            self.selected_event_id = event_id
+            self.selected_event_ids = [event_id]
+            self.selected_folder_id = self.project.find_event_folder_id(event_id)
+            self.selected_source_binding_tokens = [encode_source_binding_token(event_id, clip_id)]
+        elif node_type == "event":
             self.selected_event_id = node_id
             self.selected_event_ids = [node_id]
             self.selected_folder_id = self.project.find_event_folder_id(node_id)
+            self.selected_source_binding_tokens = []
         else:
             self.selected_folder_id = node_id
             self.selected_event_id = None
             self.selected_event_ids = []
+            self.selected_source_binding_tokens = []
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
+        self._sync_source_binding_selection_to_clip_table()
         self._sync_multi_selection_affordances()
         self._update_object_context()
         self._sync_build_selection_context()
@@ -828,19 +931,27 @@ class MainController(QObject):
 
     def select_nodes(self, nodes: list[tuple[str, str]]) -> None:
         event_ids = [node_id for node_type, node_id in nodes if node_type == "event" and node_id in self.project.events]
+        binding_pairs = self._resolved_source_binding_pairs([node_id for node_type, node_id in nodes if node_type == "source_binding"])
+        binding_event_ids = [event_id for event_id, _clip_id in binding_pairs]
+        for event_id in binding_event_ids:
+            if event_id not in event_ids:
+                event_ids.append(event_id)
         if event_ids:
             self.selected_event_ids = event_ids
             current_event = self.current_event
             current_event_id = current_event.id if current_event is not None else None
             self.selected_event_id = current_event_id if current_event_id in event_ids else event_ids[0]
             self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id)
+            self.selected_source_binding_tokens = [encode_source_binding_token(event_id, clip_id) for event_id, clip_id in binding_pairs]
         elif nodes:
             folder_ids = [node_id for node_type, node_id in nodes if node_type == "folder" and node_id in self.project.folders]
             self.selected_event_ids = []
             self.selected_event_id = None
+            self.selected_source_binding_tokens = []
             if folder_ids:
                 self.selected_folder_id = folder_ids[0]
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
+        self._sync_source_binding_selection_to_clip_table()
         self._sync_multi_selection_affordances()
         self._update_object_context()
         self._sync_build_selection_context()
@@ -877,6 +988,7 @@ class MainController(QObject):
             current_event = self.current_event
             if current_event is None:
                 return False
+            previous_play_mode = current_event.play_mode
 
             new_id_value = str(form_data["id"])
             if new_id_value and new_id_value != current_event.id:
@@ -906,6 +1018,11 @@ class MainController(QObject):
             for clip in current_event.clips:
                 clip.tags = list(event_tags)
             current_event.notes = str(form_data["notes"])
+            if previous_play_mode == "OneShot" and current_event.play_mode != "OneShot":
+                for clip in current_event.clips:
+                    if clip.enabled:
+                        clip.active = True
+            normalize_event_binding_states(current_event)
             self.project.touch()
             return True
 
@@ -932,6 +1049,7 @@ class MainController(QObject):
         form_data = self.window.current_project_settings_form_data()
         source_audio_format = str(form_data["source_audio_format"])
         runtime_audio_format = str(form_data["runtime_audio_format"])
+        auto_assign_bus_by_name = bool(form_data.get("auto_assign_bus_by_name", True))
         buses = [str(bus) for bus in form_data["buses"]]
         rename_map = {
             str(bus_config["original_name"]): str(bus_config["name"])
@@ -965,6 +1083,9 @@ class MainController(QObject):
                 changed = True
             if self.project.settings.runtime_audio_format != runtime_audio_format:
                 self.project.settings.runtime_audio_format = runtime_audio_format
+                changed = True
+            if self.project.settings.auto_assign_bus_by_name != auto_assign_bus_by_name:
+                self.project.settings.auto_assign_bus_by_name = auto_assign_bus_by_name
                 changed = True
             if self.project.settings.export_root != export_root:
                 self.project.settings.export_root = export_root
@@ -1087,6 +1208,25 @@ class MainController(QObject):
             self._refresh_ui()
 
     def rename_selected(self) -> None:
+        binding_pairs = self._resolved_source_binding_pairs()
+        if binding_pairs:
+            affected_event_ids = list(dict.fromkeys(event_id for event_id, _clip_id in binding_pairs))
+            if len(affected_event_ids) != 1:
+                self.window.append_log("跨事件 Source Binding 暂不支持批量重命名。")
+                return
+            event_id = affected_event_ids[0]
+            self.selected_event_id = event_id
+            self.selected_event_ids = [event_id]
+            self.selected_folder_id = self.project.find_event_folder_id(event_id)
+            self.selected_source_binding_tokens = [encode_source_binding_token(bound_event_id, clip_id) for bound_event_id, clip_id in binding_pairs]
+            self.window.set_event_details(self.current_event)
+            self._sync_source_binding_selection_to_clip_table()
+            result = self.window.ask_batch_rename()
+            if result is None:
+                return
+            self.batch_rename_clips(result[0], result[1])
+            return
+
         if len(self.selected_event_ids) > 1:
             result = self.window.ask_batch_event_rename()
             if result is None:
@@ -1134,6 +1274,32 @@ class MainController(QObject):
                 self._refresh_ui()
 
     def delete_selected(self) -> None:
+        binding_pairs = self._resolved_source_binding_pairs()
+        if binding_pairs:
+            label = f"确认删除所选 {len(binding_pairs)} 个 Source Binding？"
+            if not self.window.confirm_delete(label):
+                return
+            remaining_event_ids = list(dict.fromkeys(event_id for event_id, _clip_id in binding_pairs))
+
+            def mutate() -> bool:
+                for event_id, clip_id in binding_pairs:
+                    self.project.remove_clip_from_event(event_id, clip_id)
+                self.selected_source_binding_tokens = []
+                self.selected_event_ids = remaining_event_ids
+                self.selected_event_id = remaining_event_ids[0] if remaining_event_ids else None
+                self.selected_folder_id = (
+                    self.project.find_event_folder_id(self.selected_event_id)
+                    if self.selected_event_id is not None
+                    else next(iter(self.project.root_folder_ids), None)
+                )
+                return True
+
+            if self._apply_mutation("Delete Source Binding", mutate):
+                self.window.append_log(f"已删除 {len(binding_pairs)} 个 Source Binding。")
+                self.window.set_active_contents_category("片段")
+                self._refresh_ui()
+            return
+
         if len(self.selected_event_ids) > 1:
             label = f"确认删除所选 {len(self.selected_event_ids)} 个事件？"
             if not self.window.confirm_delete(label):
@@ -1183,8 +1349,11 @@ class MainController(QObject):
 
         supported_paths, skipped_unsupported, skipped_missing = self._classify_import_file_paths(file_paths)
         imported_clips = []
+        reserved_clip_ids = {clip.id for clip in event.clips}
         for source_path in supported_paths:
-            imported_clips.append(self._build_clip_from_path(source_path))
+            clip = self._build_clip_from_path(source_path, reserved_clip_ids)
+            reserved_clip_ids.add(clip.id)
+            imported_clips.append(clip)
 
         if not imported_clips:
             self._notify_import_skip("导入片段", skipped_unsupported, skipped_missing)
@@ -1202,6 +1371,206 @@ class MainController(QObject):
             navigation_state = self.window.navigation_state()
             self.window.set_event_details(self.project.events[event.id])
             self.window.apply_navigation_state(navigation_state)
+
+    def assign_source_assets_to_event(self, event_id: str, source_paths: list[str], replace_existing: bool) -> None:
+        event = self.project.events.get(event_id)
+        if event is None:
+            return
+
+        normalized_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for raw_path in source_paths:
+            normalized = str(raw_path).strip()
+            if not normalized:
+                continue
+            lookup_key = normalized.casefold()
+            if lookup_key in seen_paths:
+                continue
+            seen_paths.add(lookup_key)
+            normalized_paths.append(normalized)
+        if not normalized_paths:
+            return
+
+        navigation_state = self.window.navigation_state()
+        selected_tokens: list[str] = []
+        added_count = 0
+        skipped_count = 0
+        replaced_count = 0
+
+        def mutate() -> bool:
+            nonlocal added_count, skipped_count, replaced_count
+            if replace_existing:
+                existing_by_source: dict[str, list[ClipModel]] = {}
+                for clip in event.clips:
+                    existing_by_source.setdefault(str(clip.source_path).strip(), []).append(clip)
+
+                reserved_clip_ids = {clip.id for clip in event.clips}
+                rebuilt_clips: list[ClipModel] = []
+                for source_path in normalized_paths:
+                    existing_clips = existing_by_source.get(source_path, [])
+                    if existing_clips:
+                        clip = existing_clips.pop(0)
+                    else:
+                        clip = self._build_clip_from_path(Path(source_path), reserved_clip_ids)
+                    if event.play_mode != "OneShot" and clip.enabled:
+                        clip.active = True
+                    reserved_clip_ids.add(clip.id)
+                    rebuilt_clips.append(clip)
+                    selected_tokens.append(encode_source_binding_token(event.id, clip.id))
+                    self.project.register_source_asset(source_path)
+
+                before_signature = [(clip.id, clip.source_path, bool(clip.enabled), bool(clip.active)) for clip in event.clips]
+                replaced_count = len(rebuilt_clips)
+                self.selected_event_id = event.id
+                self.selected_event_ids = [event.id]
+                self.selected_folder_id = self.project.find_event_folder_id(event.id)
+                self.selected_source_binding_tokens = list(selected_tokens)
+                event.clips = rebuilt_clips
+                normalize_event_binding_states(event)
+                after_signature = [(clip.id, clip.source_path, bool(clip.enabled), bool(clip.active)) for clip in event.clips]
+                if before_signature == after_signature:
+                    return False
+                self.project.touch()
+                return True
+
+            existing_clips_by_path = {
+                str(clip.source_path).strip().casefold(): clip
+                for clip in event.clips
+                if str(clip.source_path).strip()
+            }
+            before_signature = [(clip.id, clip.source_path, bool(clip.enabled), bool(clip.active)) for clip in event.clips]
+            reserved_clip_ids = {clip.id for clip in event.clips}
+            for source_path in normalized_paths:
+                existing_clip = existing_clips_by_path.get(source_path.casefold())
+                if existing_clip is not None:
+                    selected_tokens.append(encode_source_binding_token(event.id, existing_clip.id))
+                    skipped_count += 1
+                    continue
+                clip = self._build_clip_from_path(Path(source_path), reserved_clip_ids)
+                if event.play_mode != "OneShot" and clip.enabled:
+                    clip.active = True
+                reserved_clip_ids.add(clip.id)
+                event.clips.append(clip)
+                selected_tokens.append(encode_source_binding_token(event.id, clip.id))
+                self.project.register_source_asset(source_path)
+                added_count += 1
+            self.selected_event_id = event.id
+            self.selected_event_ids = [event.id]
+            self.selected_folder_id = self.project.find_event_folder_id(event.id)
+            self.selected_source_binding_tokens = list(selected_tokens)
+            normalize_event_binding_states(event)
+            after_signature = [(clip.id, clip.source_path, bool(clip.enabled), bool(clip.active)) for clip in event.clips]
+            if before_signature == after_signature:
+                return False
+            self.project.touch()
+            return True
+
+        if self._apply_mutation("Assign Source Assets", mutate):
+            operation_label = "替换" if replace_existing else "追加"
+            self.window.append_log(f"已为事件 {event.id}{operation_label} {len(normalized_paths)} 条源音频绑定。")
+            if replace_existing:
+                feedback_message = f"已将事件 {event.id} 的源音频绑定替换为 {replaced_count} 条。"
+            else:
+                feedback_message = f"已成功向事件 {event.id} 追加 {added_count} 条源音频。"
+                if skipped_count:
+                    feedback_message += f" 已跳过 {skipped_count} 条重复项。"
+            self.window.set_event_source_binding_feedback(event.id, feedback_message)
+            self._refresh_ui()
+            self.window.apply_navigation_state(navigation_state)
+        elif self.selected_source_binding_tokens:
+            if replace_existing:
+                self.window.set_event_source_binding_feedback(event.id, f"事件 {event.id} 的源音频绑定未发生变化。")
+            else:
+                self.window.set_event_source_binding_feedback(event.id, f"事件 {event.id} 没有新增绑定；{skipped_count} 条源音频均已存在。")
+            self._refresh_ui()
+            self.window.apply_navigation_state(navigation_state)
+
+    def assign_source_assets_to_current_event(self, source_paths: list[str], replace_existing: bool) -> None:
+        event = self.current_event
+        if event is None:
+            return
+        self.assign_source_assets_to_event(event.id, source_paths, replace_existing)
+
+    def open_event_bindings_popup(self, event_id: str, anchor) -> None:
+        event = self.project.events.get(event_id)
+        if event is None:
+            return
+        self.window.show_event_bindings_popup(event, anchor)
+
+    def update_source_binding_enabled(self, event_id: str, clip_id: str, enabled: bool) -> None:
+        event = self.project.events.get(event_id)
+        if event is None:
+            return
+
+        def mutate() -> bool:
+            clip = next((item for item in event.clips if item.id == clip_id), None)
+            if clip is None:
+                return False
+            if clip.enabled == enabled and (enabled or not clip.active):
+                return False
+            clip.enabled = enabled
+            normalize_event_binding_states(event)
+            self.project.touch()
+            return True
+
+        merge_key = f"source-binding-enabled:{event_id}:{clip_id}"
+        if self._apply_mutation("Update Source Binding State", mutate, merge_key=merge_key):
+            state_label = "启用" if enabled else "停用"
+            self.window.append_log(f"已将事件 {event_id} 的绑定 {clip_id} 标记为{state_label}。")
+            self.window.set_event_source_binding_feedback(event_id, f"已将绑定 {clip_id} 标记为{state_label}。")
+            self._refresh_ui()
+
+    def set_active_source_binding(self, event_id: str, clip_id: str) -> None:
+        self.update_source_binding_active(event_id, clip_id, True)
+
+    def update_source_binding_active(self, event_id: str, clip_id: str, active: bool) -> None:
+        event = self.project.events.get(event_id)
+        if event is None:
+            return
+
+        def mutate() -> bool:
+            clip = next((item for item in event.clips if item.id == clip_id), None)
+            if clip is None:
+                return False
+            if event.play_mode == "OneShot" and not active:
+                return False
+
+            changed = False
+            if active and not clip.enabled:
+                clip.enabled = True
+                changed = True
+            if event.play_mode == "OneShot" and active:
+                for candidate in event.clips:
+                    desired_active = bool(candidate.id == clip_id and candidate.enabled)
+                    if candidate.active != desired_active:
+                        candidate.active = desired_active
+                        changed = True
+                normalize_event_binding_states(event)
+                if not changed:
+                    return False
+                self.project.touch()
+                return True
+
+            desired_active = bool(active and clip.enabled)
+            if clip.active != desired_active:
+                clip.active = desired_active
+                changed = True
+            normalize_event_binding_states(event)
+            if not changed:
+                return False
+            self.project.touch()
+            return True
+
+        merge_key = f"source-binding-active:{event_id}"
+        if self._apply_mutation("Set Active Source Binding", mutate, merge_key=merge_key):
+            if event.play_mode == "OneShot":
+                message = f"已将 Active Source Binding 切换为 {clip_id}。"
+            else:
+                state_label = "激活" if active else "取消激活"
+                message = f"已将绑定 {clip_id} 标记为{state_label}。"
+            self.window.append_log(f"已更新事件 {event_id} 的绑定状态：{message}")
+            self.window.set_event_source_binding_feedback(event_id, message)
+            self._refresh_ui()
 
     def import_audio_files_as_events(self, file_paths: list[str], target_folder_id=None, template: dict[str, object] | None = None) -> None:
         import_entries, skipped_unsupported, skipped_missing, skipped_empty_directories = self._classify_event_import_paths(file_paths)
@@ -2255,8 +2624,10 @@ class MainController(QObject):
             current_folder_id = child_folder_id
         return current_folder_id, created_folder_count
 
-    def _build_clip_from_path(self, source_path: Path) -> ClipModel:
+    def _build_clip_from_path(self, source_path: Path, reserved_clip_ids: set[str] | None = None) -> ClipModel:
         existing_clip_ids = {clip.id for clip in self.current_event.clips} if self.current_event is not None else set()
+        if reserved_clip_ids:
+            existing_clip_ids.update(reserved_clip_ids)
         base_id = source_path.stem
         clip_id = base_id
         index = 1
@@ -2288,6 +2659,7 @@ class MainController(QObject):
             asset_key=event_id,
         )
         event.clips.append(clip)
+        event.play_mode = "OneShot" if len(event.clips) == 1 else "Random"
         return event
 
     def _normalize_event_id(self, raw_name: str) -> str:
