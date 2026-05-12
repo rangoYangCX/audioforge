@@ -11,6 +11,8 @@
 - `unity_package/Examples`：带注释的示范代码文件，供 Unity 程序按需复制和改造。
 - `unity_validation/Assets/AudioForgeRuntime`：用于空项目验证的镜像副本，不再作为手工维护入口。
 
+当前对外打包形态已切到 Unity Package Manager 风格：执行 `python tools/package_unity_integration_package.py` 后，`dist/AudioForgeUnityPackage-<version>/` 根目录会生成 `package.json`、`Runtime/`、`Editor/` 和 `Documentation~/`，而不是直接把 `Assets/AudioForgeRuntime` 原样暴露为交付根目录。
+
 ## 维护规则
 
 1. 所有 Unity 侧运行时代码只在 `unity_package/Assets/AudioForgeRuntime` 修改。
@@ -24,11 +26,12 @@
 
 执行 `python tools/package_unity_integration_package.py` 后，生成的包根目录会包含：
 
-- `Assets/AudioForgeRuntime/`：运行时代码、Editor 工具和 `.meta` 文件。
-- `Docs/README.md`、`Docs/QuickStart.md`：包内对接入口和最短接入说明。
-- `Docs/Canonical/`：从仓库主文档同步进包内的对接规范、一期对比总览、联调清单、版本记录、当前 release note 与空项目验证说明。
-- `Examples/`：带注释的示范代码文件，不会自动进入 Unity 工程，需要按需手工复制。
-- `Verification/`：最近一次机器验证报告与内部签收摘要。
+- `package.json`：UPM 包清单，包名固定为 `com.audioforge.runtime`。
+- `Runtime/`：从 `unity_package/Assets/AudioForgeRuntime/Scripts` 导出的运行时代码与运行时侧资源。
+- `Editor/`：从 `unity_package/Assets/AudioForgeRuntime/Editor` 导出的编辑器工具。
+- `Documentation~/Docs/`：包内对接入口与 canonical 文档副本。
+- `Documentation~/Examples/`：带注释的示范代码文件，不会自动进入 Unity 工程，需要按需手工复制。
+- `Documentation~/Verification/`：最近一次机器验证报告与内部签收摘要。
 - `README.md`：包根总说明。
 
 ## 和第一期相比，这包现在多了什么
@@ -57,9 +60,9 @@
 
 ## 集成方式
 
-1. 将 `unity_package/Assets/AudioForgeRuntime` 整体复制到目标 Unity 项目的 `Assets` 目录。
+1. 将 `dist/AudioForgeUnityPackage-<version>/` 目录整体放到目标 Unity 项目的 `Packages/` 下，或通过本地路径方式引入该包。
 2. 将工具导出的 `AudioData.json`、`AudioManifest.json` 和 `Assets/**` 放到 `Assets/StreamingAssets/AudioForge/`。
-3. 先阅读包内 `Docs/QuickStart.md`，再按 `Docs/Canonical/UnitySDK对接规范.md` 或 `unity_validation/README.md` 完成初始化和空项目验证。
+3. 先阅读包内 `Documentation~/Docs/QuickStart.md`，再按 `Documentation~/Docs/Canonical/UnitySDK对接规范.md` 或 `unity_validation/README.md` 完成初始化和空项目验证。
 
 ## Inspector 搜索
 

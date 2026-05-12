@@ -9,8 +9,8 @@
 ## 第一步：导入运行时代码
 
 1. 打开生成后的 `AudioForgeUnityPackage-<version>/`。
-2. 把 `Assets/AudioForgeRuntime/` 整体复制到你的 Unity 项目 `Assets/` 目录。
-3. 等 Unity 完成脚本编译，确认 Console 没有红色编译错误。
+2. 将整个包目录放进 Unity 项目的 `Packages/` 下，或在 `Packages/manifest.json` 中以本地路径方式引用当前目录。
+3. 等 Unity 完成包解析与脚本编译，确认 Console 没有红色编译错误。
 
 ## 第二步：放入工具导出物
 

@@ -8,7 +8,7 @@
 
 1. `QuickStart.md`
 2. `一期对比变化总览.md`
-3. `../README.md`
+3. `../../README.md`
 4. `Canonical/UnitySDK对接规范.md`
 5. `Canonical/Unity场景联调清单.md`
 6. `../Examples/README.md`
@@ -16,10 +16,12 @@
 
 ## 生成后的交付包结构
 
-- `Assets/AudioForgeRuntime/`：SDK 运行时代码和 Editor 工具。
-- `Docs/`：包内说明入口与 canonical 文档副本。
-- `Examples/`：带注释示范代码，按需手工拷入目标项目。
-- `Verification/`：当前机器验证报告与签收摘要。
+- `package.json`：UPM 包清单，包名固定为 `com.audioforge.runtime`。
+- `Runtime/`：SDK 运行时代码与运行时侧资源。
+- `Editor/`：Inspector、自检和编辑器辅助工具。
+- `Documentation~/Docs/`：包内说明入口与 canonical 文档副本。
+- `Documentation~/Examples/`：带注释示范代码，按需手工拷入目标项目。
+- `Documentation~/Verification/`：当前机器验证报告与签收摘要。
 
 ## 交接建议
 
