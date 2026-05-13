@@ -3,7 +3,7 @@ AudioForge Unity 端对接开发文档（第一期）
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-05-12。
+> 当前文档同步日期：2026-05-13。
 > 当前工具版本：AudioForge 0.07.0。
 
 0.1 版本增量
@@ -36,6 +36,12 @@ AudioForge Unity 端对接开发文档（第一期）
 - 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置，但这些都不会新增到当前 `AudioData.json` 结构里。
 - 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
 - 当前仓库附带的 Unity 参考运行时代码已经能够继续消费新版导出结果，不要求为这轮 phase2 编辑器演进额外修改 `AudioForgeRuntime.cs` 或 `AudioForgeJsonAdapter.cs`。
+
+0.3 三期前置说明
+
+- 当前 0.07.0 / phase2 SDK 仍停留在 `SchemaVersion = 1`，运行时主契约只有 `BusConfigs` 与 `Events`，尚未包含 RTPC、State、Switch。
+- 仓库已经把 RTPC / State / Switch 规划为 phase3 正式内容，但这会是一次新的 schema 与 runtime 设计工作，而不是对当前 SDK 文档做语义偷渡。
+- 如果你正在参与 phase3 的 Unity runtime 开发，请优先阅读 `docs/UnityRuntime三期GameSync设计.md`；如果你只是接当前 0.07.0 包，请忽略 phase3 设计，继续按本文档的现有契约实现。
 
 0. 当前状态
 
@@ -466,6 +472,14 @@ Combo 联调时请额外确认以下边界：
 - 需要同步 SDK 文档但当前无需改 SDK 代码的内容：`OneShot` 播放模式、导出前有效 binding 过滤语义、事件树 OneShot 图标。
 - 当前明确不进入 SDK 契约的二期内容：对象浏览器三分页、bindings 弹窗、`Enabled` / `Active` 原始状态、拖拽追加反馈、设计页绑定摘要区。
 - 只有当未来决定把 `Enabled` / `Active`、ShuffleBag、Loop 或其他 editor-only 状态直接写入 `AudioData.json` 时，才需要升级 SchemaVersion 并同步修改 Unity SDK 解析与运行时行为。
+
+14.2 三期扩展路线（尚未进入当前 SDK）
+
+- RTPC：phase3 将其定义为连续 Game Parameter，可驱动事件音量、事件音高和 Bus 音量等属性；第一版计划同时支持全局值和 emitter 级局部值。
+- State：phase3 将其定义为全局离散模式，主要用于 Event / Bus 属性覆盖，不承担分支选片职责。
+- Switch：phase3 将其定义为按 emitter / game object 生效的离散分支选择，主要用于事件内的变体分支和容器切换。
+- phase3 的第一阶段不会要求当前项目立刻迁移到新契约；预计会通过 `SchemaVersion = 2` 与显式兼容逻辑，把 v1 与 v2 区分开处理。
+- 对当前 0.07.0 包而言，这一节只是一份路线图，不代表你现在就要在项目里实现 RTPC / State / Switch。
 
 补充说明：若 Unity 端本阶段仍采用原生 `AudioSource.pitch` 执行音高变化，则“音高变化是否保时长”不计入第一期最小验收失败项，但需在联调记录中明确标注。
 

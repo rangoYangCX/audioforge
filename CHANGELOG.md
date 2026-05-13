@@ -12,7 +12,9 @@
 
 ## [Unreleased]
 
-- 维护更新待下一次正式发版补录。
+- 新增 phase3 文档基线：`docs/internal/audioforge_第三期RTPC-State-Switch实施计划.md` 明确了 RTPC / State / Switch 适配的阶段目标、工作拆分和验收边界。
+- 新增 `docs/UnityRuntime三期GameSync设计.md`，集中定义 Schema v2、Game Sync 数据模型、runtime API、求值顺序和 emitter 作用域设计。
+- README、开发文档、Unity SDK 对接文档与 Wwise 工作台映射文档已同步补充 phase3 方向说明，明确当前 0.07.0 交付仍停留在 phase2 基线，RTPC / State / Switch 尚未进入现有 SDK 契约。
 
 ## [0.07.0] - 2026-05-12
 
