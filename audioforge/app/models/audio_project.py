@@ -12,6 +12,7 @@ PlayMode = Literal["OneShot", "Random", "Sequence", "Combo"]
 StealPolicy = Literal["RejectNew", "StopOldest", "StopQuietest"]
 LoadPolicy = Literal["OnDemand", "Preload", "Stream"]
 Severity = Literal["Error", "Warning", "Info"]
+CurveInterpolation = Literal["Linear", "Constant"]
 MASTER_BUS_NAME = "Master"
 
 
@@ -36,6 +37,150 @@ def utc_now_iso() -> str:
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:8]}"
+
+
+def normalize_named_values(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values or []:
+        value = str(raw_value).strip()
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        normalized.append(value)
+        seen.add(key)
+    return normalized
+
+
+def _coerce_curve_points(values: list[object] | None) -> list["CurvePointModel"]:
+    points: list[CurvePointModel] = []
+    for raw_value in values or []:
+        if isinstance(raw_value, CurvePointModel):
+            points.append(raw_value)
+            continue
+        if not isinstance(raw_value, dict):
+            continue
+        points.append(
+            CurvePointModel(
+                input_value=float(raw_value.get("input_value", 0.0)),
+                output_value=float(raw_value.get("output_value", 0.0)),
+                interpolation=str(raw_value.get("interpolation", "Linear")),
+            )
+        )
+    if not points:
+        points = [
+            CurvePointModel(input_value=0.0, output_value=0.0),
+            CurvePointModel(input_value=100.0, output_value=1.0),
+        ]
+    points.sort(key=lambda point: point.input_value)
+    return points
+
+
+def _coerce_string_list(values: list[object] | None) -> list[str]:
+    return normalize_named_values([str(value) for value in values or []])
+
+
+def _coerce_gamesync_effect_map(values: object) -> dict[str, "GameSyncValueEffectModel"]:
+    if not isinstance(values, dict):
+        return {}
+    normalized: dict[str, GameSyncValueEffectModel] = {}
+    for raw_name, raw_value in values.items():
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        if isinstance(raw_value, GameSyncValueEffectModel):
+            normalized[name] = raw_value
+            continue
+        if not isinstance(raw_value, dict):
+            continue
+        normalized[name] = GameSyncValueEffectModel(
+            volume_db=float(raw_value.get("volume_db", 0.0)),
+            pitch_cents=int(raw_value.get("pitch_cents", 0)),
+            is_muted=bool(raw_value.get("is_muted", False)),
+            notes=str(raw_value.get("notes", "")),
+        )
+    return normalized
+
+
+@dataclass(slots=True)
+class CurvePointModel:
+    input_value: float = 0.0
+    output_value: float = 0.0
+    interpolation: CurveInterpolation = "Linear"
+
+    def __post_init__(self) -> None:
+        self.input_value = float(self.input_value)
+        self.output_value = float(self.output_value)
+        interpolation = str(self.interpolation).strip()
+        self.interpolation = "Constant" if interpolation == "Constant" else "Linear"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class RtpcBindingModel:
+    parameter_name: str = ""
+    target: str = "EventVolumeDb"
+    scope: str = "Global"
+    curve_points: list[CurvePointModel] = field(default_factory=list)
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.parameter_name = str(self.parameter_name).strip()
+        self.target = str(self.target).strip() or "EventVolumeDb"
+        self.scope = str(self.scope).strip() or "Global"
+        self.curve_points = _coerce_curve_points(list(self.curve_points))
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "parameter_name": self.parameter_name,
+            "target": self.target,
+            "scope": self.scope,
+            "curve_points": [point.to_dict() for point in self.curve_points],
+            "notes": self.notes,
+        }
+
+
+@dataclass(slots=True)
+class StateOverrideModel:
+    group_name: str = ""
+    state_name: str = ""
+    volume_db: float = 0.0
+    pitch_cents: int = 0
+    is_muted: bool = False
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.group_name = str(self.group_name).strip()
+        self.state_name = str(self.state_name).strip()
+        self.volume_db = float(self.volume_db)
+        self.pitch_cents = int(self.pitch_cents)
+        self.is_muted = bool(self.is_muted)
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class SwitchVariantModel:
+    group_name: str = ""
+    switch_name: str = ""
+    clip_ids: list[str] = field(default_factory=list)
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.group_name = str(self.group_name).strip()
+        self.switch_name = str(self.switch_name).strip()
+        self.clip_ids = _coerce_string_list(list(self.clip_ids))
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(slots=True)
@@ -78,6 +223,113 @@ class AssetRegistryEntry:
 
 
 @dataclass(slots=True)
+class GameParameterModel:
+    name: str
+    default_value: float = 0.0
+    min_value: float = 0.0
+    max_value: float = 100.0
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name).strip()
+        self.default_value = float(self.default_value)
+        self.min_value = float(self.min_value)
+        self.max_value = float(self.max_value)
+        if self.max_value < self.min_value:
+            self.min_value, self.max_value = self.max_value, self.min_value
+        self.default_value = min(max(self.default_value, self.min_value), self.max_value)
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class GameSyncValueEffectModel:
+    volume_db: float = 0.0
+    pitch_cents: int = 0
+    is_muted: bool = False
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.volume_db = float(self.volume_db)
+        self.pitch_cents = int(self.pitch_cents)
+        self.is_muted = bool(self.is_muted)
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class StateGroupModel:
+    name: str
+    states: list[str] = field(default_factory=list)
+    default_state: str = ""
+    state_effects: dict[str, GameSyncValueEffectModel] = field(default_factory=dict)
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name).strip()
+        self.states = normalize_named_values(self.states)
+        default_state = str(self.default_state).strip()
+        if default_state and default_state.casefold() not in {state.casefold() for state in self.states}:
+            self.states.append(default_state)
+        self.default_state = default_state or (self.states[0] if self.states else "")
+        self.state_effects = _coerce_gamesync_effect_map(self.state_effects)
+        for state_name in list(self.state_effects.keys()):
+            if state_name.casefold() not in {state.casefold() for state in self.states}:
+                self.states.append(state_name)
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "states": list(self.states),
+            "default_state": self.default_state,
+            "state_effects": {name: effect.to_dict() for name, effect in self.state_effects.items()},
+            "notes": self.notes,
+        }
+
+
+@dataclass(slots=True)
+class SwitchGroupModel:
+    name: str
+    switches: list[str] = field(default_factory=list)
+    default_switch: str = ""
+    use_game_parameter: bool = False
+    mapped_game_parameter: str = ""
+    switch_effects: dict[str, GameSyncValueEffectModel] = field(default_factory=dict)
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name).strip()
+        self.switches = normalize_named_values(self.switches)
+        default_switch = str(self.default_switch).strip()
+        if default_switch and default_switch.casefold() not in {switch_value.casefold() for switch_value in self.switches}:
+            self.switches.append(default_switch)
+        self.default_switch = default_switch or (self.switches[0] if self.switches else "")
+        self.use_game_parameter = bool(self.use_game_parameter)
+        self.mapped_game_parameter = str(self.mapped_game_parameter).strip()
+        self.switch_effects = _coerce_gamesync_effect_map(self.switch_effects)
+        for switch_name in list(self.switch_effects.keys()):
+            if switch_name.casefold() not in {switch_value.casefold() for switch_value in self.switches}:
+                self.switches.append(switch_name)
+        self.notes = str(self.notes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "switches": list(self.switches),
+            "default_switch": self.default_switch,
+            "use_game_parameter": self.use_game_parameter,
+            "mapped_game_parameter": self.mapped_game_parameter,
+            "switch_effects": {name: effect.to_dict() for name, effect in self.switch_effects.items()},
+            "notes": self.notes,
+        }
+
+
+@dataclass(slots=True)
 class EventModel:
     id: str
     display_name: str = ""
@@ -98,11 +350,17 @@ class EventModel:
     combo_max_step: int = 0
     load_policy: LoadPolicy = "OnDemand"
     clips: list[ClipModel] = field(default_factory=list)
+    rtpc_bindings: list[RtpcBindingModel] = field(default_factory=list)
+    state_overrides: list[StateOverrideModel] = field(default_factory=list)
+    switch_variants: list[SwitchVariantModel] = field(default_factory=list)
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["clips"] = [clip.to_dict() for clip in self.clips]
+        payload["rtpc_bindings"] = [binding.to_dict() for binding in self.rtpc_bindings]
+        payload["state_overrides"] = [override.to_dict() for override in self.state_overrides]
+        payload["switch_variants"] = [variant.to_dict() for variant in self.switch_variants]
         return payload
 
 
@@ -159,6 +417,8 @@ class BusConfig:
     parent_bus: str = MASTER_BUS_NAME
     volume_db: float = 0.0
     is_muted: bool = False
+    rtpc_bindings: list[RtpcBindingModel] = field(default_factory=list)
+    state_overrides: list[StateOverrideModel] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +427,12 @@ class BusConfig:
             "VolumeDb": self.volume_db,
             "IsMuted": self.is_muted,
         }
+
+    def to_project_dict(self) -> dict[str, Any]:
+        payload = self.to_dict()
+        payload["RtpcBindings"] = [binding.to_dict() for binding in self.rtpc_bindings]
+        payload["StateOverrides"] = [override.to_dict() for override in self.state_overrides]
+        return payload
 
 
 def default_bus_configs() -> list[BusConfig]:
@@ -191,6 +457,8 @@ def normalize_bus_configs(bus_configs: list[BusConfig] | None, fallback_bus_name
                 parent_bus=MASTER_BUS_NAME,
                 volume_db=float(config.volume_db),
                 is_muted=bool(config.is_muted),
+                rtpc_bindings=list(getattr(config, "rtpc_bindings", [])),
+                state_overrides=list(getattr(config, "state_overrides", [])),
             )
             seen.add(key)
             continue
@@ -200,6 +468,8 @@ def normalize_bus_configs(bus_configs: list[BusConfig] | None, fallback_bus_name
                 parent_bus=str(getattr(config, "parent_bus", MASTER_BUS_NAME) or MASTER_BUS_NAME).strip() or MASTER_BUS_NAME,
                 volume_db=float(config.volume_db),
                 is_muted=bool(config.is_muted),
+                rtpc_bindings=list(getattr(config, "rtpc_bindings", [])),
+                state_overrides=list(getattr(config, "state_overrides", [])),
             )
         )
         seen.add(key)
@@ -244,7 +514,7 @@ class ProjectSettings:
             "SupportedFormats": list(self.supported_formats),
             "ExportRoot": self.export_root,
             "Buses": list(self.buses),
-            "BusConfigs": [config.to_dict() for config in self.bus_configs],
+            "BusConfigs": [config.to_project_dict() for config in self.bus_configs],
             "SourceAudioFormat": self.source_audio_format,
             "RuntimeAudioFormat": self.runtime_audio_format,
         }
@@ -268,6 +538,9 @@ class AudioProject:
     root_folder_ids: list[str] = field(default_factory=list)
     folders: dict[str, FolderModel] = field(default_factory=dict)
     events: dict[str, EventModel] = field(default_factory=dict)
+    game_parameters: list[GameParameterModel] = field(default_factory=list)
+    state_groups: list[StateGroupModel] = field(default_factory=list)
+    switch_groups: list[SwitchGroupModel] = field(default_factory=list)
     asset_registry: dict[str, AssetRegistryEntry] = field(default_factory=dict)
     file_path: str | None = None
 
@@ -468,6 +741,11 @@ class AudioProject:
                 "Folders": {folder_id: folder.to_dict() for folder_id, folder in self.folders.items()},
             },
             "Events": {event_id: event.to_dict() for event_id, event in self.events.items()},
+            "GameSync": {
+                "GameParameters": [parameter.to_dict() for parameter in self.game_parameters],
+                "StateGroups": [group.to_dict() for group in self.state_groups],
+                "SwitchGroups": [group.to_dict() for group in self.switch_groups],
+            },
             "Assets": {source_path: entry.to_dict() for source_path, entry in self.asset_registry.items()},
         }
 
@@ -475,6 +753,7 @@ class AudioProject:
 def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> AudioProject:
     settings_payload = payload.get("Settings", {})
     tree_payload = payload.get("Tree", {})
+    gamesync_payload = payload.get("GameSync", {})
     bus_config_payloads = settings_payload.get("BusConfigs", [])
     bus_configs = [
         BusConfig(
@@ -482,9 +761,67 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
             parent_bus=str(bus_payload.get("ParentBus", MASTER_BUS_NAME)).strip() or MASTER_BUS_NAME,
             volume_db=float(bus_payload.get("VolumeDb", 0.0)),
             is_muted=bool(bus_payload.get("IsMuted", False)),
+            rtpc_bindings=[
+                RtpcBindingModel(
+                    parameter_name=str(binding_payload.get("parameter_name", "")).strip(),
+                    target=str(binding_payload.get("target", "EventVolumeDb")).strip(),
+                    scope=str(binding_payload.get("scope", "Global")).strip(),
+                    curve_points=_coerce_curve_points(list(binding_payload.get("curve_points", []))),
+                    notes=str(binding_payload.get("notes", "")),
+                )
+                for binding_payload in bus_payload.get("RtpcBindings", [])
+                if isinstance(binding_payload, dict)
+            ],
+            state_overrides=[
+                StateOverrideModel(
+                    group_name=str(override_payload.get("group_name", "")).strip(),
+                    state_name=str(override_payload.get("state_name", "")).strip(),
+                    volume_db=float(override_payload.get("volume_db", 0.0)),
+                    pitch_cents=int(override_payload.get("pitch_cents", 0)),
+                    is_muted=bool(override_payload.get("is_muted", False)),
+                    notes=str(override_payload.get("notes", "")),
+                )
+                for override_payload in bus_payload.get("StateOverrides", [])
+                if isinstance(override_payload, dict)
+            ],
         )
         for bus_payload in bus_config_payloads
         if isinstance(bus_payload, dict)
+    ]
+    game_parameters = [
+        GameParameterModel(
+            name=str(parameter_payload.get("name", "")).strip(),
+            default_value=float(parameter_payload.get("default_value", 0.0)),
+            min_value=float(parameter_payload.get("min_value", 0.0)),
+            max_value=float(parameter_payload.get("max_value", 100.0)),
+            notes=str(parameter_payload.get("notes", "")),
+        )
+        for parameter_payload in gamesync_payload.get("GameParameters", [])
+        if isinstance(parameter_payload, dict) and str(parameter_payload.get("name", "")).strip()
+    ]
+    state_groups = [
+        StateGroupModel(
+            name=str(group_payload.get("name", "")).strip(),
+            states=[str(value) for value in group_payload.get("states", [])],
+            default_state=str(group_payload.get("default_state", "")).strip(),
+            state_effects=group_payload.get("state_effects", {}),
+            notes=str(group_payload.get("notes", "")),
+        )
+        for group_payload in gamesync_payload.get("StateGroups", [])
+        if isinstance(group_payload, dict) and str(group_payload.get("name", "")).strip()
+    ]
+    switch_groups = [
+        SwitchGroupModel(
+            name=str(group_payload.get("name", "")).strip(),
+            switches=[str(value) for value in group_payload.get("switches", [])],
+            default_switch=str(group_payload.get("default_switch", "")).strip(),
+            use_game_parameter=bool(group_payload.get("use_game_parameter", False)),
+            mapped_game_parameter=str(group_payload.get("mapped_game_parameter", "")).strip(),
+            switch_effects=group_payload.get("switch_effects", {}),
+            notes=str(group_payload.get("notes", "")),
+        )
+        for group_payload in gamesync_payload.get("SwitchGroups", [])
+        if isinstance(group_payload, dict) and str(group_payload.get("name", "")).strip()
     ]
     project = AudioProject(
         name=payload.get("ProjectName", DEFAULT_PROJECT_NAME),
@@ -502,6 +839,9 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
             runtime_audio_format=settings_payload.get("RuntimeAudioFormat", "ogg"),
         ),
         root_folder_ids=list(tree_payload.get("RootFolderIds", [])),
+        game_parameters=game_parameters,
+        state_groups=state_groups,
+        switch_groups=switch_groups,
         file_path=file_path,
     )
 
@@ -549,6 +889,39 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
             combo_max_step=event_data.get("combo_max_step", 0),
             load_policy=event_data.get("load_policy", "OnDemand"),
             clips=clips,
+            rtpc_bindings=[
+                RtpcBindingModel(
+                    parameter_name=str(binding_payload.get("parameter_name", "")).strip(),
+                    target=str(binding_payload.get("target", "EventVolumeDb")).strip(),
+                    scope=str(binding_payload.get("scope", "Global")).strip(),
+                    curve_points=_coerce_curve_points(list(binding_payload.get("curve_points", []))),
+                    notes=str(binding_payload.get("notes", "")),
+                )
+                for binding_payload in event_data.get("rtpc_bindings", [])
+                if isinstance(binding_payload, dict)
+            ],
+            state_overrides=[
+                StateOverrideModel(
+                    group_name=str(override_payload.get("group_name", "")).strip(),
+                    state_name=str(override_payload.get("state_name", "")).strip(),
+                    volume_db=float(override_payload.get("volume_db", 0.0)),
+                    pitch_cents=int(override_payload.get("pitch_cents", 0)),
+                    is_muted=bool(override_payload.get("is_muted", False)),
+                    notes=str(override_payload.get("notes", "")),
+                )
+                for override_payload in event_data.get("state_overrides", [])
+                if isinstance(override_payload, dict)
+            ],
+            switch_variants=[
+                SwitchVariantModel(
+                    group_name=str(variant_payload.get("group_name", "")).strip(),
+                    switch_name=str(variant_payload.get("switch_name", "")).strip(),
+                    clip_ids=[str(value) for value in variant_payload.get("clip_ids", [])],
+                    notes=str(variant_payload.get("notes", "")),
+                )
+                for variant_payload in event_data.get("switch_variants", [])
+                if isinstance(variant_payload, dict)
+            ],
             notes=event_data.get("notes", ""),
         )
         normalize_event_binding_states(event)

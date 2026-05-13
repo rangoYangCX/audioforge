@@ -1,4 +1,4 @@
-AudioForge Unity 端对接开发文档（第一期）
+AudioForge Unity 端对接开发文档
 
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
@@ -8,6 +8,9 @@ AudioForge Unity 端对接开发文档（第一期）
 
 0.1 版本增量
 
+- 2026-05-13 phase3 主链更新：当前仓库已落地 `SchemaVersion = 2`、项目级 `GameParameters / StateGroups / SwitchGroups`、事件与总线级 `RtpcBindings / StateOverrides`、事件级 `SwitchVariants`，以及 Unity runtime 的 emitter context 与 GameSync smoke。
+- 2026-05-13 phase3 对接补充：State / Switch 当前支持子项级 child effects，导出会写出 `StateEffects` / `SwitchEffects`，Unity runtime 与 validation 已同步消费。
+- 2026-05-13 phase3 体验补充：工具端现已提供 GameSync 工作区、试听中心 GameSync 控件和 transport 风格 RTPC 调参条；这些属于 authoring / preview 层增强，但其底层字段已经进入当前运行时契约。
 - 2026-05-12 0.07.0 交付更新：包内文档与仓库主文档都新增了“一期到当前变化总览”，Unity 对接时可以先快速判断本次交付相对一期新增了什么。
 - 2026-05-12 0.07.0 对接补充：对象浏览器已升级为“总线树 / 源音频树 / 事件树”三分页，绑定编辑入口收口为事件树 bindings 弹窗；这些变化仍属于编辑器工作流，不新增 Unity 运行时字段。
 - 2026-05-12 0.07.0 对接补充：工程设置新增“根据事件命名智能分配总线”开关；它只影响工具端新建/导入事件时的默认总线，不要求 Unity 侧消费新字段。
@@ -32,26 +35,27 @@ AudioForge Unity 端对接开发文档（第一期）
 
 0.2 相对第一期必须关注的变化
 
-- 运行时契约层真正需要 Unity 程序关注的新增点只有一个：`PlayMode` 现在明确包含 `OneShot`，并且导出结果只保留当前有效 Clip 集合。
-- 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置，但这些都不会新增到当前 `AudioData.json` 结构里。
+- 当前相对第一期，运行时层真正需要 Unity 程序关注的不再只有 `OneShot`；当前还新增了 `SchemaVersion = 2`、项目级 Game Sync 定义、事件/总线级 Game Sync 绑定、emitter context 与 child effects。
+- 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置；这些 editor-only 状态本身仍不会原样写进导出，但其过滤后的结果与 GameSync 绑定会进入当前 `AudioData.json`。
 - 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
-- 当前仓库附带的 Unity 参考运行时代码已经能够继续消费新版导出结果，不要求为这轮 phase2 编辑器演进额外修改 `AudioForgeRuntime.cs` 或 `AudioForgeJsonAdapter.cs`。
+- 当前仓库附带的 Unity 参考运行时代码已经能够消费新版导出结果；如果项目内是自研 runtime，则需要同步补齐 v2 解析、Game Sync API 与 emitter 作用域。
 
-0.3 三期前置说明
+0.3 当前 GameSync 口径
 
-- 当前 0.07.0 / phase2 SDK 仍停留在 `SchemaVersion = 1`，运行时主契约只有 `BusConfigs` 与 `Events`，尚未包含 RTPC、State、Switch。
-- 仓库已经把 RTPC / State / Switch 规划为 phase3 正式内容，但这会是一次新的 schema 与 runtime 设计工作，而不是对当前 SDK 文档做语义偷渡。
-- 如果你正在参与 phase3 的 Unity runtime 开发，请优先阅读 `docs/UnityRuntime三期GameSync设计.md`；如果你只是接当前 0.07.0 包，请忽略 phase3 设计，继续按本文档的现有契约实现。
+- 当前仓库主线已经支持 `SchemaVersion = 2`，运行时主契约不再只有 `BusConfigs` 与 `Events`，而是额外包含项目级 `GameParameters`、`StateGroups`、`SwitchGroups` 和事件/总线级 Game Sync 区块。
+- 参考 runtime 已实现 `HasGameParameter`、`HasStateGroup`、`HasSwitchGroup`、`RegisterEmitter`、`SetState`、`SetSwitch`、`SetGlobalGameParameter`、`SetGameParameter` 及对应播放求值路径。
+- 若你当前接入的仍是旧版 phase2 导出物，runtime 会继续按 `SchemaVersion = 1` 兼容初始化；若你要接当前最新包，请直接按本文档的 v2 口径实现。
 
 0. 当前状态
 
 - 当前工具端适用目标：UI / SFX / BGM 为主、事件驱动为主、接受轻量 SDK 的手游休闲项目。
-- 最近一次仓库内完整验证结果：`pytest` 112 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过；smoke 报告与签收摘要已在 2026-05-12 刷新。
+- 最近一次仓库内完整发布验证结果：`pytest` 112 项通过；真实 WAV 烟雾工程 PASS；全链路检查 4/4 通过；smoke 报告与签收摘要已在 2026-05-12 刷新。
+- 本轮 phase3 聚焦回归额外验证了 25 项 Python 测试，并完成 Unity package / validation 关键 C# 文件诊断无错误。
 - 当前参考运行时定位：开发参考实现，可直接用于空项目联调与生产版 SDK 的起步实现，不等于最终生产版音频系统。
 
 1. 文档定位
 
-本文档面向 Unity 程序开发人员，定义 AudioForge 第一期开源包中工具端导出结果的消费方式、运行时建议架构、行为语义、接入步骤、联调边界与验收标准。
+本文档面向 Unity 程序开发人员，定义 AudioForge 当前导出结果的消费方式、运行时建议架构、行为语义、接入步骤、联调边界与验收标准。
 
 如果你是第一次接手该 SDK，推荐阅读顺序固定为：
 
@@ -83,7 +87,7 @@ AudioForge Unity 端对接开发文档（第一期）
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
 
-2026-05-12 版本说明：当前这轮 0.07.0 发布建议重新生成 Unity SDK 包。主要原因不是运行时代码目录结构大改，而是需要同步 `PlayMode = OneShot` 的最新文档解释、一期对比总览、最新验证材料和签收摘要。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.07.0/`。
+2026-05-13 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 2`、Game Sync API、emitter context 和 child effects smoke。重新打包后的目录名仍为 `dist/AudioForgeUnityPackage-0.07.0/`。
 
 自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
 
@@ -186,13 +190,23 @@ AudioForgeUnityPackage-<version>/
 
 - `Initialize()`
 - `bool HasEvent(string eventId)`
+- `bool HasGameParameter(string name)`
+- `bool HasStateGroup(string groupName)`
+- `bool HasSwitchGroup(string groupName)`
+- `AudioForgeEmitterHandle RegisterEmitter(GameObject gameObject)`
+- `void UnregisterEmitter(AudioForgeEmitterHandle emitter)`
 - `void PlayEvent(string eventId)`
 - `void PlayEvent(string eventId, AudioSource overrideSource)`
-- `void PlayEvent(string eventId, AudioSource overrideSource, float localEventVolumeDbOffset)`
+- `void PlayEvent(string eventId, AudioForgeEmitterHandle emitter)`
+- `void PlayEvent(string eventId, AudioForgeEmitterHandle emitter, AudioSource overrideSource, float localEventVolumeDbOffset)`
 - `void StopEvent(string eventId)`
 - `void StopBus(string busName)`
 - `void SetBusVolume(string busName, float linearVolume)`
 - `void SetBusMuted(string busName, bool isMuted)`
+- `void SetGlobalGameParameter(string name, float value)`
+- `void SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)`
+- `void SetState(string groupName, string stateName)`
+- `void SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)`
 - `void SetUnityEventVolumeOffsetDb(string eventId, float volumeDbOffset)`
 - `void SetResourceProvider(IAudioForgeResourceProvider resourceProvider)`
 
@@ -219,8 +233,11 @@ AudioForgeUnityPackage-<version>/
 - 项目级默认总线和运行时音频格式。
 - `SchemaVersion`。
 - 总线列表以及可选的 `BusConfigs` 初始状态。
+- `GameParameters`、`StateGroups`、`SwitchGroups` 顶层定义。
 - 事件列表。
 - 每个事件下的 Clip 列表。
+- 事件级 `DefaultClipIds`、`RtpcBindings`、`StateOverrides`、`SwitchVariants`。
+- 总线级 `RtpcBindings`、`StateOverrides`。
 - 各类播放行为参数。
 
 6.2 AudioManifest.json
@@ -285,7 +302,22 @@ AudioForgeUnityPackage-<version>/
 - `ParentBus`：父 Bus 名称；缺省时按 `Master` 处理。
 - `VolumeDb`：工具端配置的初始总线音量，单位 dB。
 - `IsMuted`：工具端配置的初始总线静音状态。
+- `RtpcBindings`：总线级连续调制规则，当前主要驱动 Bus Volume。
+- `StateOverrides`：总线级全局 State 覆盖规则。
 - 若 `AudioData.json` 中同时存在 `Buses` 与 `BusConfigs`，Unity 端应优先采用 `BusConfigs` 作为初始化总线状态，再将 `Buses` 视为兼容性保底字段。
+
+7.4 GameSync 顶层字段
+
+- `GameParameters`：项目级连续参数定义，包含 `Name`、`DefaultValue`、`MinValue`、`MaxValue`、`Description`。
+- `StateGroups`：全局离散模式定义，包含 `Name`、`DefaultState`、`States` 与 `StateEffects`。
+- `SwitchGroups`：emitter 级离散分支定义，包含 `Name`、`DefaultSwitch`、`Switches`、`UseGameParameter`、`MappedGameParameter`、`Thresholds` 与 `SwitchEffects`。
+
+7.5 Event GameSync 字段
+
+- `DefaultClipIds`：事件默认候选 Clip 集合；当没有命中 Switch Variant 时，运行时应优先消费这组 Clip。
+- `RtpcBindings`：事件级连续调制规则，当前支持 `EventVolumeDb` 与 `EventPitchCents`。
+- `StateOverrides`：事件级 State 覆盖规则，可叠加音量、音高与静音。
+- `SwitchVariants`：事件级 Switch 分支选片规则。
 
 8. 行为语义要求
 
@@ -469,17 +501,17 @@ Combo 联调时请额外确认以下边界：
 
 14.1 二期改动与 SDK 影响标注
 
-- 需要同步 SDK 文档但当前无需改 SDK 代码的内容：`OneShot` 播放模式、导出前有效 binding 过滤语义、事件树 OneShot 图标。
+- 需要同步 SDK 文档但若直接采用仓库自带 runtime 通常无需项目额外改代码的内容：`OneShot` 播放模式、导出前有效 binding 过滤语义、GameSync 工作区、试听中心 GameSync 控件、事件树 OneShot 图标。
 - 当前明确不进入 SDK 契约的二期内容：对象浏览器三分页、bindings 弹窗、`Enabled` / `Active` 原始状态、拖拽追加反馈、设计页绑定摘要区。
 - 只有当未来决定把 `Enabled` / `Active`、ShuffleBag、Loop 或其他 editor-only 状态直接写入 `AudioData.json` 时，才需要升级 SchemaVersion 并同步修改 Unity SDK 解析与运行时行为。
 
-14.2 三期扩展路线（尚未进入当前 SDK）
+14.2 三期后续扩展路线
 
-- RTPC：phase3 将其定义为连续 Game Parameter，可驱动事件音量、事件音高和 Bus 音量等属性；第一版计划同时支持全局值和 emitter 级局部值。
-- State：phase3 将其定义为全局离散模式，主要用于 Event / Bus 属性覆盖，不承担分支选片职责。
-- Switch：phase3 将其定义为按 emitter / game object 生效的离散分支选择，主要用于事件内的变体分支和容器切换。
-- phase3 的第一阶段不会要求当前项目立刻迁移到新契约；预计会通过 `SchemaVersion = 2` 与显式兼容逻辑，把 v1 与 v2 区分开处理。
-- 对当前 0.07.0 包而言，这一节只是一份路线图，不代表你现在就要在项目里实现 RTPC / State / Switch。
+- RTPC：当前已支持全局值、emitter 局部值、事件音量、事件音高和 Bus 音量；后续重点是 active voice 持续重算。
+- State：当前已支持全局模式切换、Event / Bus 属性覆盖和 State child effects；后续重点是过渡时间与插值。
+- Switch：当前已支持 emitter 级分支选择、RTPC 映射阈值、事件变体选片和 Switch child effects；后续重点是更复杂的容器层级。
+- 当前包已经进入 `SchemaVersion = 2` 与显式 v1 兼容逻辑并存阶段；如果项目内仍维护自研 runtime，请优先同步这套兼容路径。
+- 对当前 0.07.0 包而言，这一节不再只是路线图，而是说明“已落地能力之外还剩什么没有做完”。
 
 补充说明：若 Unity 端本阶段仍采用原生 `AudioSource.pitch` 执行音高变化，则“音高变化是否保时长”不计入第一期最小验收失败项，但需在联调记录中明确标注。
 

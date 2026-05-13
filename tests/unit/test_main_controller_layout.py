@@ -8,9 +8,10 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from audioforge.app.controllers.main_controller import AuditionSession, MainController
-from audioforge.app.models.audio_project import ClipModel, ValidationIssue
+from audioforge.app.models.audio_project import ClipModel, GameParameterModel, StateGroupModel, SwitchGroupModel, ValidationIssue
 from audioforge.app.services.recovery_service import RecoveryService
-from audioforge.app.utils.constants import WWISE_BUS_VIEW_LABEL, WWISE_MASTER_MIXER_TITLE
+from audioforge.app.services.preview_service import PreviewResult
+from audioforge.app.utils.constants import MAX_PITCH_CENTS, MIN_PITCH_CENTS, WWISE_BUS_VIEW_LABEL, WWISE_MASTER_MIXER_TITLE
 from audioforge.app.widgets.event_tree import encode_source_binding_token
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
@@ -68,6 +69,92 @@ def test_switching_from_contents_to_property_editor_keeps_clip_edit_stable(monke
     assert controller.current_event is not None
     assert controller.current_event.clips[0].asset_key == "ui/test_asset"
     assert controller.window.property_tabs.currentIndex() == 1
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_preview_current_event_uses_preview_gamesync_context(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)]
+    controller.project.state_groups = [StateGroupModel(name="CombatState", states=["Explore", "Combat"], default_state="Explore")]
+    controller.project.switch_groups = [SwitchGroupModel(name="SurfaceType", switches=["Grass", "Stone"], default_switch="Grass")]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.preview_parameter_name_combo.setCurrentText("PlayerSpeed")
+    controller.window.preview_parameter_scope_combo.setCurrentText("Emitter")
+    controller.window.preview_parameter_value_spin.setValue(6.0)
+    controller.window.preview_state_group_combo.setCurrentText("CombatState")
+    controller.window.preview_state_name_combo.setCurrentText("Combat")
+    controller.window.preview_switch_group_combo.setCurrentText("SurfaceType")
+    controller.window.preview_switch_name_combo.setCurrentText("Stone")
+    QApplication.processEvents()
+
+    captured: dict[str, object] = {}
+
+    def fake_preview_event(event, **kwargs):
+        captured["event_id"] = event.id
+        captured.update(kwargs)
+        return PreviewResult(accepted=False, reason="Muted by state override.")
+
+    monkeypatch.setattr(controller.preview_service, "preview_event", fake_preview_event)
+
+    controller.preview_current_event(silent_log=True)
+
+    context = captured["preview_gamesync"]
+    assert captured["event_id"] == controller.current_event.id
+    assert context.emitter_game_parameters["PlayerSpeed"] == 6.0
+    assert context.states["CombatState"] == "Combat"
+    assert context.switches["SurfaceType"] == "Stone"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_preview_gamesync_change_retriggers_current_event_audition(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    assert controller.current_event is not None
+    clip = controller.current_event.clips[0]
+    controller._audition_session = AuditionSession(
+        playback_owner_id=f"event:{controller.current_event.id}",
+        event_id=controller.current_event.id,
+        event_name=controller.current_event.display_name or controller.current_event.id,
+        clip_id=clip.id,
+        asset_key=clip.asset_key,
+        file_path=clip.source_path or "preview.wav",
+        target_kind="event",
+        title=f"事件 {controller.current_event.display_name or controller.current_event.id}",
+        detail=f"片段 {clip.id} | 资源 {clip.asset_key} | Bus {controller.current_event.bus}",
+        bus_name=controller.current_event.bus,
+        effective_volume_db=controller.current_event.volume_db,
+        tracked_base_volume_db=controller.current_event.volume_db,
+        pitch_cents=0,
+        preserve_timing_pitch_cents=controller.current_event.pitch_cents,
+        trim_start_ms=clip.trim_start_ms,
+        trim_end_ms=clip.trim_end_ms,
+        fade_in_ms=clip.fade_in_ms,
+        fade_out_ms=clip.fade_out_ms,
+    )
+
+    calls: list[bool] = []
+    monkeypatch.setattr(controller, "preview_current_event", lambda silent_log=False: calls.append(silent_log))
+
+    controller.window.preview_parameter_name_combo.setCurrentText("PlayerSpeed")
+    controller.window.preview_parameter_scope_combo.setCurrentText("Emitter")
+    controller.window.preview_parameter_value_spin.setValue(4.0)
+    QApplication.processEvents()
+
+    assert controller.window.activity_preview_host.isAncestorOf(controller.window.preview_gamesync_group)
+    assert calls and calls[-1] is True
 
     controller.is_dirty = False
     controller.window.close()
@@ -305,7 +392,7 @@ def test_workspace_mode_switch_keeps_main_editor_width(monkeypatch) -> None:
     QApplication.processEvents()
     expected_main_sizes = controller.window.main_splitter.sizes()
 
-    for mode in ["build", "validation", "results", "events"]:
+    for mode in ["build", "validation", "results", "gamesync", "events"]:
         controller.window._activate_workspace_mode(mode)
         QApplication.processEvents()
 
@@ -313,6 +400,25 @@ def test_workspace_mode_switch_keeps_main_editor_width(monkeypatch) -> None:
         assert controller.window.workspace_mode_stack.width() == expected_main_sizes[1]
         assert controller.window.workspace_mode_stack.currentWidget() is not None
         assert controller.window.workspace_mode_stack.currentWidget().width() == expected_main_sizes[1]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_gamesync_workspace_and_explorer_tab_are_available(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+
+    explorer_tabs = [controller.window.explorer_tabs.tabText(index) for index in range(controller.window.explorer_tabs.count())]
+    assert "GameSync" in explorer_tabs
+    assert controller.window.task_sidebar.button("gamesync") is not None
+
+    controller.window._activate_workspace_mode("gamesync")
+    QApplication.processEvents()
+
+    assert controller.window.workspace_mode_stack.currentWidget() == controller.window._workspace_mode_pages["gamesync"]
+    assert controller.window.status_label.text() == "当前工作区：GameSync"
 
     controller.is_dirty = False
     controller.window.close()
@@ -586,11 +692,12 @@ def test_explorer_tabs_include_bus_source_event_and_source_tree_uses_project_ass
     controller._refresh_ui()
     QApplication.processEvents()
 
-    assert controller.window.explorer_tabs.count() == 3
+    assert controller.window.explorer_tabs.count() == 4
     assert [controller.window.explorer_tabs.tabText(index) for index in range(controller.window.explorer_tabs.count())] == [
         "总线树",
         "源音频树",
         "事件树",
+        "GameSync",
     ]
 
     controller.window.source_tree.select_source_path(str(source_file))
@@ -727,12 +834,258 @@ def test_event_design_layout_moves_source_binding_above_notes(monkeypatch) -> No
     controller = MainController()
 
     design_page = controller.window.event_design_scroll.widget()
-    design_splitter = design_page.layout().itemAt(0).widget()
+    design_splitter = design_page.layout().itemAt(0).widget().layout().itemAt(0).widget()
     left_container = design_splitter.widget(0)
     right_container = design_splitter.widget(1)
 
     assert left_container.layout().itemAt(2).widget() is controller.window.event_source_binding_group.parentWidget()
     assert right_container.layout().itemAt(2).widget() is controller.window.notes_group.parentWidget()
+    assert design_page.layout().itemAt(1).widget() is controller.window.event_gamesync_group.parentWidget()
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_gamesync_workspace_edits_update_project_models(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window._activate_workspace_mode("gamesync")
+    controller.window.gamesync_workspace_tabs.setCurrentIndex(1)
+
+    controller.window.gamesync_parameter_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_parameter_name_edit.setText("PlayerSpeed")
+    controller.window.gamesync_parameter_name_edit.editingFinished.emit()
+    controller.window.gamesync_parameter_default_spin.setValue(3.5)
+    controller.window.gamesync_parameter_min_spin.setValue(0.0)
+    controller.window.gamesync_parameter_max_spin.setValue(10.0)
+    controller.window.gamesync_parameter_notes_edit.setPlainText("驱动 RTPC。")
+    QApplication.processEvents()
+
+    assert len(controller.project.game_parameters) == 1
+    assert controller.project.game_parameters[0].name == "PlayerSpeed"
+    assert controller.project.game_parameters[0].default_value == 3.5
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_gamesync_workspace_supports_explicit_state_and_switch_children(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window._activate_workspace_mode("gamesync")
+
+    controller.window.gamesync_workspace_tabs.setCurrentIndex(2)
+    controller.window.gamesync_state_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_state_name_edit.setText("QuestState")
+    controller.window.gamesync_state_name_edit.editingFinished.emit()
+    controller.window.gamesync_state_value_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_state_values_edit.setText("Yes")
+    controller.window.gamesync_state_values_edit.editingFinished.emit()
+    controller.window.gamesync_state_value_volume_spin.setValue(2.5)
+    controller.window.gamesync_state_value_pitch_spin.setValue(45)
+    controller.window.gamesync_state_value_notes_edit.setPlainText("肯定分支更亮。")
+    QApplication.processEvents()
+    controller.window.gamesync_state_value_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_state_values_edit.setText("No")
+    controller.window.gamesync_state_values_edit.editingFinished.emit()
+
+    controller.window.gamesync_workspace_tabs.setCurrentIndex(3)
+    controller.window.gamesync_switch_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_switch_name_edit.setText("SurfaceType")
+    controller.window.gamesync_switch_name_edit.editingFinished.emit()
+    controller.window.gamesync_switch_value_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_switch_values_edit.setText("Grass")
+    controller.window.gamesync_switch_values_edit.editingFinished.emit()
+    controller.window.gamesync_switch_value_add_button.click()
+    QApplication.processEvents()
+    controller.window.gamesync_switch_values_edit.setText("Stone")
+    controller.window.gamesync_switch_values_edit.editingFinished.emit()
+    controller.window.gamesync_switch_value_volume_spin.setValue(-1.5)
+    controller.window.gamesync_switch_value_mute_check.setChecked(True)
+    QApplication.processEvents()
+
+    assert controller.project.state_groups[0].states == ["Yes", "No"]
+    assert controller.project.state_groups[0].state_effects["Yes"].volume_db == 2.5
+    assert controller.project.state_groups[0].state_effects["Yes"].pitch_cents == 45
+    assert controller.project.switch_groups[0].switches == ["Grass", "Stone"]
+    assert controller.project.switch_groups[0].switch_effects["Stone"].volume_db == -1.5
+    assert controller.project.switch_groups[0].switch_effects["Stone"].is_muted is True
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_gamesync_workspace_mutation_preserves_active_tab(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window._activate_workspace_mode("gamesync")
+    controller.window.gamesync_workspace_tabs.setCurrentIndex(2)
+
+    controller.window.gamesync_state_add_button.click()
+    QApplication.processEvents()
+
+    assert controller.window.gamesync_workspace_tabs.currentIndex() == 2
+    assert len(controller.project.state_groups) == 1
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_navigation_state_restores_gamesync_workspace_tab(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window._activate_workspace_mode("gamesync")
+    controller.window.gamesync_workspace_tabs.setCurrentIndex(3)
+    QApplication.processEvents()
+
+    state = controller.window.navigation_state()
+    controller.window.gamesync_workspace_tabs.setCurrentIndex(0)
+    controller.window.apply_navigation_state(state)
+
+    assert controller.window.gamesync_workspace_tabs.currentIndex() == 3
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_event_and_bus_gamesync_bindings_update_project_models(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="PlayerSpeed")]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.event_rtpc_add_button.click()
+    QApplication.processEvents()
+    controller.window.event_rtpc_parameter_edit.setCurrentText("PlayerSpeed")
+    controller.window.event_rtpc_scope_combo.setCurrentText("Emitter")
+    QApplication.processEvents()
+
+    controller.window._select_project_bus_by_name("UI")
+    QApplication.processEvents()
+    controller.window.bus_state_add_button.click()
+    QApplication.processEvents()
+    controller.window.bus_state_group_edit.setText("MusicState")
+    controller.window.bus_state_group_edit.editingFinished.emit()
+    controller.window.bus_state_name_edit.setText("Combat")
+    controller.window.bus_state_name_edit.editingFinished.emit()
+    controller.window.bus_state_volume_spin.setValue(2.0)
+    QApplication.processEvents()
+
+    assert controller.current_event is not None
+    assert controller.current_event.rtpc_bindings[0].parameter_name == "PlayerSpeed"
+    assert controller.current_event.rtpc_bindings[0].scope == "Emitter"
+    ui_bus = next(config for config in controller.project.settings.bus_configs if config.name == "UI")
+    assert ui_bus.state_overrides[0].group_name == "MusicState"
+    assert ui_bus.state_overrides[0].state_name == "Combat"
+    assert ui_bus.state_overrides[0].volume_db == 2.0
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_event_gamesync_bindings_only_select_project_definitions(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="PlayerSpeed")]
+    controller.project.state_groups = [StateGroupModel(name="QuestState", states=["Completed", "Failed"], default_state="Completed")]
+    controller.project.switch_groups = [SwitchGroupModel(name="SurfaceType", switches=["Grass", "Stone"], default_switch="Grass")]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.event_rtpc_add_button.click()
+    QApplication.processEvents()
+    controller.window.event_rtpc_parameter_edit.setCurrentText("PlayerSpeed")
+
+    controller.window.event_state_add_button.click()
+    QApplication.processEvents()
+    controller.window.event_state_group_edit.setCurrentText("QuestState")
+    controller.window.event_state_name_edit.setCurrentText("Completed")
+
+    controller.window.event_switch_add_button.click()
+    QApplication.processEvents()
+    controller.window.event_switch_group_edit.setCurrentText("SurfaceType")
+    controller.window.event_switch_name_edit.setCurrentText("Stone")
+    controller.window.event_rtpc_parameter_edit.setCurrentText("UnknownParameter")
+    QApplication.processEvents()
+
+    assert [parameter.name for parameter in controller.project.game_parameters] == ["PlayerSpeed"]
+    assert controller.project.state_groups[0].states == ["Completed", "Failed"]
+    assert controller.project.switch_groups[0].switches == ["Grass", "Stone"]
+    assert controller.window.event_rtpc_parameter_edit.isEditable() is False
+    assert controller.window.event_state_group_edit.isEditable() is False
+    assert controller.window.event_switch_group_edit.isEditable() is False
+    assert controller.current_event is not None
+    assert controller.current_event.rtpc_bindings[0].parameter_name == "PlayerSpeed"
+    assert controller.current_event.state_overrides[0].group_name == "QuestState"
+    assert controller.current_event.state_overrides[0].state_name == "Completed"
+    assert controller.current_event.switch_variants[0].group_name == "SurfaceType"
+    assert controller.current_event.switch_variants[0].switch_name == "Stone"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_preview_gamesync_parameter_editor_supports_negative_ranges(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="SignedBlend", default_value=-3.0, min_value=-12.0, max_value=6.0)]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.preview_parameter_name_combo.setCurrentText("SignedBlend")
+    QApplication.processEvents()
+
+    assert controller.window.preview_parameter_value_spin.keyboardTracking() is False
+    assert controller.window.preview_parameter_value_spin.minimum() == -12.0
+    assert controller.window.preview_parameter_value_spin.maximum() == 6.0
+    assert controller.window.preview_parameter_slider.isEnabled() is True
+    assert controller.window.preview_parameter_min_label.text() == "-12"
+    assert controller.window.preview_parameter_max_label.text() == "6"
+
+    controller.window.preview_parameter_slider.setValue(controller.window.preview_parameter_slider.maximum())
+    QApplication.processEvents()
+
+    assert controller.window.preview_parameter_value_spin.value() == 6.0
+    assert controller.window.preview_parameter_current_label.text() == "6"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_rtpc_curve_editor_uses_parameter_and_target_ranges(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="SignedBlend", default_value=0.0, min_value=-10.0, max_value=8.0)]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.event_rtpc_add_button.click()
+    QApplication.processEvents()
+    controller.window.event_rtpc_parameter_edit.setCurrentText("SignedBlend")
+    controller.window.event_rtpc_target_combo.setCurrentText("EventPitchCents")
+    QApplication.processEvents()
+
+    assert controller.window.event_rtpc_selected_input_spin.minimum() == -10.0
+    assert controller.window.event_rtpc_selected_input_spin.maximum() == 8.0
+    assert controller.window.event_rtpc_selected_output_spin.minimum() == float(MIN_PITCH_CENTS)
+    assert controller.window.event_rtpc_selected_output_spin.maximum() == float(MAX_PITCH_CENTS)
+    assert controller.window.event_rtpc_curve_table._x_range() == (-10.0, 8.0)
+    assert controller.window.event_rtpc_curve_table._y_range() == (float(MIN_PITCH_CENTS), float(MAX_PITCH_CENTS))
 
     controller.is_dirty = False
     controller.window.close()
@@ -756,6 +1109,7 @@ def test_event_source_binding_summary_panel_is_read_only(monkeypatch, tmp_path) 
     ]
     controller._refresh_ui()
     controller.window.show()
+    controller.window._activate_workspace_mode("events")
     QApplication.processEvents()
 
     overview_cards = [

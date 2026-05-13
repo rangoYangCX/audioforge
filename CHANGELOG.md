@@ -12,9 +12,29 @@
 
 ## [Unreleased]
 
-- 新增 phase3 文档基线：`docs/internal/audioforge_第三期RTPC-State-Switch实施计划.md` 明确了 RTPC / State / Switch 适配的阶段目标、工作拆分和验收边界。
-- 新增 `docs/UnityRuntime三期GameSync设计.md`，集中定义 Schema v2、Game Sync 数据模型、runtime API、求值顺序和 emitter 作用域设计。
-- README、开发文档、Unity SDK 对接文档与 Wwise 工作台映射文档已同步补充 phase3 方向说明，明确当前 0.07.0 交付仍停留在 phase2 基线，RTPC / State / Switch 尚未进入现有 SDK 契约。
+### Added
+
+- phase3 主链已落地：工程模型、`.afproj` 序列化、Schema v2 导出、PreviewService 和 Unity runtime 现已统一支持 RTPC / State / Switch。
+- 新增项目级 `GameParameters`、`StateGroups`、`SwitchGroups`，以及事件/总线级 `RtpcBindings`、`StateOverrides`、事件级 `SwitchVariants` 与 `DefaultClipIds`。
+- 新增 GameSync 工作区、事件/总线绑定编辑器、State / Switch 子项 child effects 编辑、RTPC 图形曲线编辑器，以及试听中心内嵌 GameSync 控件与 transport 风格 RTPC 调参条。
+- Unity runtime 新增 emitter context、`SetGlobalGameParameter` / `SetGameParameter` / `SetState` / `SetSwitch` API、Switch Variant 选片、Bus GameSync 求值与 child effects smoke。
+
+### Changed
+
+- `SchemaVersion` 从 1 升级到 2，并保留 v1 payload 兼容初始化路径。
+- StateGroup / SwitchGroup 在保留 names list 的同时新增 `state_effects` / `switch_effects`，兼容旧工程并让子项效果能贯穿 authoring、preview、exporter 与 Unity runtime。
+- Unity SDK 对接文档、README、开发文档和包内 Quick Start 已同步改为当前 v2 契约口径，不再把 phase3 描述为“仅规划中”。
+
+### Fixed
+
+- 修复 GameSync 页面在新建参数、State 或 Switch 等操作后回跳概览页的问题，导航状态现在会保留 `gamesync_workspace_tab`。
+- 修复试听中心 RTPC 参数条对负数范围支持不完整的问题，当前已按参数定义范围驱动 spin 与 slider。
+
+### Validation
+
+- `pytest tests/unit/test_project_serializer.py tests/unit/test_exporter.py tests/unit/test_preview_service.py tests/unit/test_main_controller_layout.py -k "gamesync or preview_current_event_uses_preview_gamesync_context or preview_gamesync_change_retriggers_current_event_audition or preview_gamesync_parameter_editor_supports_negative_ranges or rtpc_curve_editor_uses_parameter_and_target_ranges"`：25 项通过。
+- `pytest tests/unit/test_main_controller_layout.py -k "navigation_state_restores_gamesync_workspace_tab"`：1 项通过。
+- Unity package 与 unity_validation 关键 C# 文件编辑器诊断：无错误。
 
 ## [0.07.0] - 2026-05-12
 

@@ -174,6 +174,7 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
         for asset in manifest_assets
         if isinstance(asset, dict) and asset.get("AssetKey", "")
     }
+    schema_version = int(audio_data.get("SchemaVersion", 0)) if isinstance(audio_data, dict) else 0
 
     event_ids = sorted(events.keys())
     declared_event_count = int(build_report.get("EventCount", -1)) if isinstance(build_report, dict) else -1
@@ -182,11 +183,21 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
     invalid_bus_events: list[str] = []
     manifest_missing_for_clip: list[str] = []
     manifest_runtime_mismatch: list[str] = []
+    missing_schema_v2_fields: list[str] = []
+
+    if schema_version >= 2:
+        for field_name in ("GameParameters", "StateGroups", "SwitchGroups"):
+            if not isinstance(audio_data.get(field_name, None), list):
+                missing_schema_v2_fields.append(f"top_level:{field_name}")
 
     for event_id, payload in events.items():
         if not isinstance(payload, dict):
             details.append(f"event_payload_invalid={event_id}")
             continue
+        if schema_version >= 2:
+            for field_name in ("DefaultClipIds", "RtpcBindings", "StateOverrides", "SwitchVariants"):
+                if not isinstance(payload.get(field_name, None), list):
+                    missing_schema_v2_fields.append(f"event:{event_id}:{field_name}")
         clips = payload.get("Clips", [])
         actual_clip_count += len(clips)
         bus_name = payload.get("Bus", "")
@@ -221,6 +232,13 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
         passed = False
         details.append(f"bus_config_names={','.join(sorted(bus_config_names))}")
         details.append(f"expected_bus_names={','.join(expected_bus_names)}")
+    if schema_version >= 2:
+        for config in bus_configs:
+            if not isinstance(config, dict):
+                continue
+            for field_name in ("RtpcBindings", "StateOverrides"):
+                if not isinstance(config.get(field_name, None), list):
+                    missing_schema_v2_fields.append(f"bus:{config.get('Name', '')}:{field_name}")
 
     runtime_format = audio_data.get("RuntimeAudioFormat", "") if isinstance(audio_data, dict) else ""
     for asset_key, asset in manifest_by_key.items():
@@ -233,8 +251,11 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
     if manifest_runtime_mismatch:
         passed = False
         details.extend(f"manifest_runtime_format_mismatch={entry}" for entry in manifest_runtime_mismatch)
+    if missing_schema_v2_fields:
+        passed = False
+        details.extend(f"missing_schema_v2_field={entry}" for entry in missing_schema_v2_fields)
 
-    details.append(f"schema_version={audio_data.get('SchemaVersion', 'unknown')}")
+    details.append(f"schema_version={schema_version or 'unknown'}")
     details.append(f"runtime_audio_format={runtime_format}")
     details.append(f"events={len(event_ids)}")
     details.append(f"clips={actual_clip_count}")

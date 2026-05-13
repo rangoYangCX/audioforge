@@ -57,6 +57,7 @@ class TaskSidebar(QFrame):
         button_specs = [
             ("resources", "资源整理"),
             ("events", "事件设计"),
+            ("gamesync", "GameSync"),
             ("buses", WWISE_MASTER_MIXER_TITLE),
             ("validation", "校验修复"),
             ("build", "构建交付"),

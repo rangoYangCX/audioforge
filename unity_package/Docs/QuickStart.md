@@ -1,6 +1,6 @@
 # AudioForge Unity SDK Quick Start
 
-当前文档同步日期：2026-05-12
+当前文档同步日期：2026-05-13
 
 这份文档只回答一件事：拿到包以后，Unity 程序最快怎么在 10 分钟内听到第一声。
 
@@ -20,6 +20,8 @@
 - `AudioManifest.json` -> `Assets/StreamingAssets/AudioForge/AudioManifest.json`
 - `Assets/**` -> `Assets/StreamingAssets/AudioForge/Assets/**`
 
+如果当前导出是 `SchemaVersion = 2`，`AudioData.json` 里还会包含 `GameParameters`、`StateGroups`、`SwitchGroups` 和事件/总线级 GameSync 区块；这些字段已经由包内 runtime 负责解析，不需要额外复制其他配置文件。
+
 ## 第三步：搭最小验证场景
 
 1. 在场景里新建一个空物体，命名为 `AudioForgeBootstrap`。
@@ -27,6 +29,12 @@
 3. 如果你想直接观察运行时状态，再额外挂上 `AudioForgeRuntimeDebugPanel`。
 4. 在 `AudioForgeBootstrap` Inspector 中把 `Event Id` 设为一个导出里真实存在的事件，例如 `sfx_level_check_02`。
 5. 保持 `Auto Play On Start = true`，进入 Play 模式确认是否能出声。
+
+如果你要顺手验证 GameSync：
+
+1. 再创建一个挂有 `AudioForgeEventPlayer` 的对象。
+2. 保持 `UseEmitterContext = true`。
+3. 进入 Play 模式后，通过脚本或 Inspector 调用 `SetState`、`SetSwitch`、`SetGameParameter` 相关路径，确认调试面板里能看到事件结果变化。
 
 ## 第四步：看懂下一步该改哪层
 
@@ -44,4 +52,4 @@
 3. 至少一个真实事件可以被触发播放。
 4. `AudioForgeRuntimeDebugPanel` 或日志里能看到事件触发记录。
 
-补充说明：0.07.0 这轮发布不会把接入步骤改成另一套流程，但建议你同步新版文档，因为 `PlayMode = OneShot` 和有效 Clip 集合的解释已经补齐；包内还新增了一期对比总览和最新签收材料。
+补充说明：当前包除了 `PlayMode = OneShot` 外，还已经补齐 `SchemaVersion = 2`、GameSync API、emitter context 和 child effects smoke；如果项目里不是直接使用包内 runtime，而是自行维护运行时，请优先同步这些契约变化。

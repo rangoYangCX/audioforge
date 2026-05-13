@@ -24,6 +24,57 @@ public static class AudioForgeJsonAdapter
             RuntimeAudioFormat = root.TryGetValue("RuntimeAudioFormat", out var runtimeFormat) ? runtimeFormat?.ToString() ?? "ogg" : "ogg",
         };
 
+        foreach (Dictionary<string, object> parameterPayload in EnumerateObjectList(root, "GameParameters"))
+        {
+            database.GameParameters.Add(
+                new AudioForgeGameParameterConfig
+                {
+                    Name = ReadString(parameterPayload, "Name"),
+                    DefaultValue = ReadFloat(parameterPayload, "DefaultValue"),
+                    MinValue = ReadFloat(parameterPayload, "MinValue"),
+                    MaxValue = ReadFloat(parameterPayload, "MaxValue"),
+                    Description = ReadString(parameterPayload, "Description"),
+                }
+            );
+        }
+
+        foreach (Dictionary<string, object> stateGroupPayload in EnumerateObjectList(root, "StateGroups"))
+        {
+            var group = new AudioForgeStateGroupConfig
+            {
+                Name = ReadString(stateGroupPayload, "Name"),
+                DefaultState = ReadString(stateGroupPayload, "DefaultState"),
+            };
+            group.States.AddRange(ReadStringList(stateGroupPayload, "States"));
+            group.StateEffects.AddRange(ReadGameSyncEffects(stateGroupPayload, "StateEffects", "StateName"));
+            database.StateGroups.Add(group);
+        }
+
+        foreach (Dictionary<string, object> switchGroupPayload in EnumerateObjectList(root, "SwitchGroups"))
+        {
+            var group = new AudioForgeSwitchGroupConfig
+            {
+                Name = ReadString(switchGroupPayload, "Name"),
+                DefaultSwitch = ReadString(switchGroupPayload, "DefaultSwitch"),
+                UseGameParameter = ReadBool(switchGroupPayload, "UseGameParameter"),
+                MappedGameParameter = ReadString(switchGroupPayload, "MappedGameParameter"),
+            };
+            group.Switches.AddRange(ReadStringList(switchGroupPayload, "Switches"));
+            foreach (Dictionary<string, object> thresholdPayload in EnumerateObjectList(switchGroupPayload, "Thresholds"))
+            {
+                group.Thresholds.Add(
+                    new AudioForgeSwitchThresholdConfig
+                    {
+                        SwitchName = ReadString(thresholdPayload, "SwitchName"),
+                        MinValue = ReadFloat(thresholdPayload, "MinValue"),
+                        MaxValue = ReadFloat(thresholdPayload, "MaxValue"),
+                    }
+                );
+            }
+            group.SwitchEffects.AddRange(ReadGameSyncEffects(switchGroupPayload, "SwitchEffects", "SwitchName"));
+            database.SwitchGroups.Add(group);
+        }
+
         IList busConfigsObject = root.ContainsKey("BusConfigs") ? root["BusConfigs"] as IList : null;
         if (busConfigsObject != null)
         {
@@ -49,6 +100,8 @@ public static class AudioForgeJsonAdapter
                         ParentBus = ReadString(busConfigPayload, "ParentBus"),
                         VolumeDb = ReadFloat(busConfigPayload, "VolumeDb"),
                         IsMuted = ReadBool(busConfigPayload, "IsMuted"),
+                        RtpcBindings = ReadRtpcBindings(busConfigPayload, "RtpcBindings"),
+                        StateOverrides = ReadStateOverrides(busConfigPayload, "StateOverrides"),
                     }
                 );
             }
@@ -106,7 +159,11 @@ public static class AudioForgeJsonAdapter
                 ComboPitchStepCents = ReadInt(eventPayload, "ComboPitchStepCents"),
                 ComboResetSeconds = ReadFloat(eventPayload, "ComboResetSeconds"),
                 ComboMaxStep = ReadInt(eventPayload, "ComboMaxStep"),
+                RtpcBindings = ReadRtpcBindings(eventPayload, "RtpcBindings"),
+                StateOverrides = ReadStateOverrides(eventPayload, "StateOverrides"),
+                SwitchVariants = ReadSwitchVariants(eventPayload, "SwitchVariants"),
             };
+            eventConfig.DefaultClipIds.AddRange(ReadStringList(eventPayload, "DefaultClipIds"));
 
             var clips = eventPayload["Clips"] as IList;
             if (clips != null)
@@ -138,6 +195,135 @@ public static class AudioForgeJsonAdapter
         }
 
         return database;
+    }
+
+    private static List<AudioForgeRtpcBindingConfig> ReadRtpcBindings(Dictionary<string, object> payload, string key)
+    {
+        var result = new List<AudioForgeRtpcBindingConfig>();
+        foreach (Dictionary<string, object> bindingPayload in EnumerateObjectList(payload, key))
+        {
+            var binding = new AudioForgeRtpcBindingConfig
+            {
+                ParameterName = ReadString(bindingPayload, "ParameterName"),
+                Target = ReadString(bindingPayload, "Target"),
+                Scope = ReadString(bindingPayload, "Scope"),
+            };
+            foreach (Dictionary<string, object> pointPayload in EnumerateObjectList(bindingPayload, "CurvePoints"))
+            {
+                binding.CurvePoints.Add(
+                    new AudioForgeCurvePointConfig
+                    {
+                        InputValue = ReadFloat(pointPayload, "InputValue"),
+                        OutputValue = ReadFloat(pointPayload, "OutputValue"),
+                        Interpolation = ReadString(pointPayload, "Interpolation"),
+                    }
+                );
+            }
+            result.Add(binding);
+        }
+        return result;
+    }
+
+    private static List<AudioForgeStateOverrideConfig> ReadStateOverrides(Dictionary<string, object> payload, string key)
+    {
+        var result = new List<AudioForgeStateOverrideConfig>();
+        foreach (Dictionary<string, object> overridePayload in EnumerateObjectList(payload, key))
+        {
+            result.Add(
+                new AudioForgeStateOverrideConfig
+                {
+                    GroupName = ReadString(overridePayload, "GroupName"),
+                    StateName = ReadString(overridePayload, "StateName"),
+                    VolumeDb = ReadFloat(overridePayload, "VolumeDb"),
+                    PitchCents = ReadInt(overridePayload, "PitchCents"),
+                    IsMuted = ReadBool(overridePayload, "IsMuted"),
+                }
+            );
+        }
+        return result;
+    }
+
+    private static List<AudioForgeSwitchVariantConfig> ReadSwitchVariants(Dictionary<string, object> payload, string key)
+    {
+        var result = new List<AudioForgeSwitchVariantConfig>();
+        foreach (Dictionary<string, object> variantPayload in EnumerateObjectList(payload, key))
+        {
+            var variant = new AudioForgeSwitchVariantConfig
+            {
+                GroupName = ReadString(variantPayload, "GroupName"),
+                SwitchName = ReadString(variantPayload, "SwitchName"),
+            };
+            variant.ClipIds.AddRange(ReadStringList(variantPayload, "ClipIds"));
+            result.Add(variant);
+        }
+        return result;
+    }
+
+    private static List<AudioForgeGameSyncEffectConfig> ReadGameSyncEffects(Dictionary<string, object> payload, string key, string nameKey)
+    {
+        var result = new List<AudioForgeGameSyncEffectConfig>();
+        foreach (Dictionary<string, object> effectPayload in EnumerateObjectList(payload, key))
+        {
+            result.Add(
+                new AudioForgeGameSyncEffectConfig
+                {
+                    ValueName = ReadString(effectPayload, nameKey),
+                    VolumeDb = ReadFloat(effectPayload, "VolumeDb"),
+                    PitchCents = ReadInt(effectPayload, "PitchCents"),
+                    IsMuted = ReadBool(effectPayload, "IsMuted"),
+                    Notes = ReadString(effectPayload, "Notes"),
+                }
+            );
+        }
+        return result;
+    }
+
+    private static IEnumerable<Dictionary<string, object>> EnumerateObjectList(Dictionary<string, object> payload, string key)
+    {
+        if (!payload.TryGetValue(key, out var value))
+        {
+            yield break;
+        }
+
+        IList list = value as IList;
+        if (list == null)
+        {
+            yield break;
+        }
+
+        foreach (object item in list)
+        {
+            Dictionary<string, object> objectPayload = item as Dictionary<string, object>;
+            if (objectPayload != null)
+            {
+                yield return objectPayload;
+            }
+        }
+    }
+
+    private static List<string> ReadStringList(Dictionary<string, object> payload, string key)
+    {
+        var result = new List<string>();
+        if (!payload.TryGetValue(key, out var value))
+        {
+            return result;
+        }
+
+        IList list = value as IList;
+        if (list == null)
+        {
+            return result;
+        }
+
+        foreach (object item in list)
+        {
+            if (item == null)
+            {
+                continue;
+            }
+            result.Add(item.ToString());
+        }
+        return result;
     }
 
     private static string ReadString(Dictionary<string, object> payload, string key)

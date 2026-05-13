@@ -32,6 +32,92 @@ public sealed class AudioForgeBusConfig
     public string ParentBus;
     public float VolumeDb;
     public bool IsMuted;
+    public List<AudioForgeRtpcBindingConfig> RtpcBindings = new List<AudioForgeRtpcBindingConfig>();
+    public List<AudioForgeStateOverrideConfig> StateOverrides = new List<AudioForgeStateOverrideConfig>();
+}
+
+[Serializable]
+public sealed class AudioForgeCurvePointConfig
+{
+    public float InputValue;
+    public float OutputValue;
+    public string Interpolation;
+}
+
+[Serializable]
+public sealed class AudioForgeRtpcBindingConfig
+{
+    public string ParameterName;
+    public string Target;
+    public string Scope;
+    public List<AudioForgeCurvePointConfig> CurvePoints = new List<AudioForgeCurvePointConfig>();
+}
+
+[Serializable]
+public sealed class AudioForgeStateOverrideConfig
+{
+    public string GroupName;
+    public string StateName;
+    public float VolumeDb;
+    public int PitchCents;
+    public bool IsMuted;
+}
+
+[Serializable]
+public sealed class AudioForgeSwitchVariantConfig
+{
+    public string GroupName;
+    public string SwitchName;
+    public List<string> ClipIds = new List<string>();
+}
+
+[Serializable]
+public sealed class AudioForgeGameParameterConfig
+{
+    public string Name;
+    public float DefaultValue;
+    public float MinValue;
+    public float MaxValue;
+    public string Description;
+}
+
+[Serializable]
+public sealed class AudioForgeStateGroupConfig
+{
+    public string Name;
+    public string DefaultState;
+    public List<string> States = new List<string>();
+    public List<AudioForgeGameSyncEffectConfig> StateEffects = new List<AudioForgeGameSyncEffectConfig>();
+}
+
+[Serializable]
+public sealed class AudioForgeGameSyncEffectConfig
+{
+    public string ValueName;
+    public float VolumeDb;
+    public int PitchCents;
+    public bool IsMuted;
+    public string Notes;
+}
+
+[Serializable]
+public sealed class AudioForgeSwitchThresholdConfig
+{
+    public string SwitchName;
+    public float MinValue;
+    public float MaxValue;
+}
+
+[Serializable]
+public sealed class AudioForgeSwitchGroupConfig
+{
+    public string Name;
+    public string DefaultSwitch;
+    public List<string> Switches = new List<string>();
+    public bool UseGameParameter;
+    public string MappedGameParameter;
+    public List<AudioForgeSwitchThresholdConfig> Thresholds = new List<AudioForgeSwitchThresholdConfig>();
+    public List<AudioForgeGameSyncEffectConfig> SwitchEffects = new List<AudioForgeGameSyncEffectConfig>();
 }
 
 /// <summary>
@@ -58,7 +144,11 @@ public sealed class AudioForgeEventConfig
     public int ComboPitchStepCents;
     public float ComboResetSeconds;
     public int ComboMaxStep;
+    public List<string> DefaultClipIds = new List<string>();
     public List<AudioForgeClipConfig> Clips = new List<AudioForgeClipConfig>();
+    public List<AudioForgeRtpcBindingConfig> RtpcBindings = new List<AudioForgeRtpcBindingConfig>();
+    public List<AudioForgeStateOverrideConfig> StateOverrides = new List<AudioForgeStateOverrideConfig>();
+    public List<AudioForgeSwitchVariantConfig> SwitchVariants = new List<AudioForgeSwitchVariantConfig>();
 }
 
 /// <summary>
@@ -72,7 +162,24 @@ public sealed class AudioForgeDatabase
     public string RuntimeAudioFormat;
     public List<string> Buses = new List<string>();
     public List<AudioForgeBusConfig> BusConfigs = new List<AudioForgeBusConfig>();
+    public List<AudioForgeGameParameterConfig> GameParameters = new List<AudioForgeGameParameterConfig>();
+    public List<AudioForgeStateGroupConfig> StateGroups = new List<AudioForgeStateGroupConfig>();
+    public List<AudioForgeSwitchGroupConfig> SwitchGroups = new List<AudioForgeSwitchGroupConfig>();
     public List<AudioForgeEventConfig> Events = new List<AudioForgeEventConfig>();
+}
+
+public sealed class AudioForgeEmitterHandle
+{
+    public string EmitterId;
+    public GameObject BoundGameObject;
+}
+
+public sealed class AudioForgeEmitterContext
+{
+    public string EmitterId;
+    public GameObject BoundGameObject;
+    public readonly Dictionary<string, float> LocalGameParameters = new Dictionary<string, float>();
+    public readonly Dictionary<string, string> LocalSwitches = new Dictionary<string, string>();
 }
 
 /// <summary>
@@ -94,10 +201,13 @@ public sealed class AudioForgeRuntimeState
 public sealed class AudioForgeActiveVoice
 {
     public AudioSource Source;
+    public string EventId;
+    public string EmitterId;
     public string BusName;
     public bool ManagedByPool;
     public float StartedAtTime;
     public float BaseVolume;
+    public int BasePitchCents;
 }
 
 /// <summary>

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import audioforge.app.services.audio_processor as audio_processor_module
-from audioforge.app.models.audio_project import BusConfig, ClipModel, EventModel, MASTER_BUS_NAME, ProjectSettings
+from audioforge.app.models.audio_project import BusConfig, ClipModel, CurvePointModel, EventModel, GameParameterModel, MASTER_BUS_NAME, ProjectSettings, RtpcBindingModel, StateGroupModel, StateOverrideModel, SwitchGroupModel, SwitchVariantModel
 from audioforge.app.services.audio_processor import AudioProcessor
 from audioforge.app.services.exporter import ExportRequest, RuntimeExporter
 from audioforge.app.services.validator import ProjectValidator
@@ -32,11 +32,89 @@ def test_runtime_exporter_writes_bundle_and_assets(tmp_path: Path) -> None:
     manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
     report = json.loads(result.report_file.read_text(encoding="utf-8"))
 
+    assert payload["SchemaVersion"] == 2
     assert payload["RuntimeAudioFormat"] == "wav"
     assert payload["Events"]["UiClick"]["Bus"] == "UI"
     assert manifest["Assets"][0]["ExportPath"] == "ui/click_primary.wav"
     assert report["EventCount"] == 1
     assert report["ClipCount"] == 1
+
+
+def test_runtime_exporter_writes_schema_v2_gamesync_payload(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    alternate_wav = write_wav_fixture(tmp_path / "fixtures" / "ui_click_surface.wav", frequency_hz=523.25)
+    event = project.events["UiClick"]
+    variant_clip = ClipModel.from_path(alternate_wav, "ui/click_surface")
+    variant_clip.active = False
+    event.clips.append(variant_clip)
+    event.rtpc_bindings = [
+        RtpcBindingModel(
+            parameter_name="PlayerSpeed",
+            target="EventVolumeDb",
+            scope="Emitter",
+            curve_points=[
+                CurvePointModel(input_value=0.0, output_value=-6.0, interpolation="Linear"),
+                CurvePointModel(input_value=8.0, output_value=2.0, interpolation="Constant"),
+            ],
+        )
+    ]
+    event.state_overrides = [StateOverrideModel(group_name="CombatState", state_name="Combat", volume_db=3.0, pitch_cents=120, is_muted=False)]
+    event.switch_variants = [SwitchVariantModel(group_name="FootstepSurface", switch_name="Stone", clip_ids=[variant_clip.id])]
+    project.game_parameters = [GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)]
+    project.state_groups = [
+        StateGroupModel(
+            name="CombatState",
+            states=["Explore", "Combat"],
+            default_state="Explore",
+            state_effects={"Combat": {"volume_db": 2.0, "pitch_cents": 50, "is_muted": False, "notes": "战斗态增强。"}},
+        )
+    ]
+    project.switch_groups = [
+        SwitchGroupModel(
+            name="FootstepSurface",
+            switches=["Grass", "Stone"],
+            default_switch="Grass",
+            use_game_parameter=True,
+            mapped_game_parameter="PlayerSpeed",
+            switch_effects={"Stone": {"volume_db": 1.0, "pitch_cents": -30, "is_muted": False, "notes": "石地更硬。"}},
+        )
+    ]
+    project.settings.bus_configs[1].rtpc_bindings = [
+        RtpcBindingModel(
+            parameter_name="PlayerSpeed",
+            target="BusVolumeDb",
+            scope="Global",
+            curve_points=[CurvePointModel(input_value=0.0, output_value=-3.0), CurvePointModel(input_value=10.0, output_value=0.0)],
+        )
+    ]
+    project.settings.bus_configs[1].state_overrides = [
+        StateOverrideModel(group_name="CombatState", state_name="Combat", volume_db=1.5, pitch_cents=0, is_muted=False)
+    ]
+
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+    result = RuntimeExporter().export(project, export_root, issues)
+
+    payload = json.loads(result.data_file.read_text(encoding="utf-8"))
+    manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
+    ui_click = payload["Events"]["UiClick"]
+    ui_bus = next(config for config in payload["BusConfigs"] if config["Name"] == "BGM")
+
+    assert payload["SchemaVersion"] == 2
+    assert payload["GameParameters"][0]["Name"] == "PlayerSpeed"
+    assert payload["StateGroups"][0]["DefaultState"] == "Explore"
+    assert payload["StateGroups"][0]["StateEffects"][0]["StateName"] == "Combat"
+    assert payload["SwitchGroups"][0]["UseGameParameter"] is True
+    assert payload["SwitchGroups"][0]["Thresholds"][0]["SwitchName"] == "Grass"
+    assert payload["SwitchGroups"][0]["SwitchEffects"][0]["SwitchName"] == "Stone"
+    assert ui_click["RtpcBindings"][0]["Scope"] == "Emitter"
+    assert ui_click["RtpcBindings"][0]["CurvePoints"][1]["Interpolation"] == "Constant"
+    assert ui_click["StateOverrides"][0]["GroupName"] == "CombatState"
+    assert ui_click["SwitchVariants"][0]["ClipIds"] == [variant_clip.id]
+    assert variant_clip.id in ui_click["Clips"][1]["ClipId"]
+    assert ui_bus["RtpcBindings"][0]["Target"] == "BusVolumeDb"
+    assert ui_bus["StateOverrides"][0]["StateName"] == "Combat"
+    assert {asset["AssetKey"] for asset in manifest["Assets"]} == {"ui/click_primary", "ui/click_surface"}
 
 
 def test_runtime_exporter_is_stable_across_repeated_exports(tmp_path: Path) -> None:

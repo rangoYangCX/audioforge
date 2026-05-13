@@ -1,7 +1,17 @@
 from __future__ import annotations
 
-from audioforge.app.models.audio_project import ClipModel, EventModel
-from audioforge.app.services.preview_service import PreviewService
+from audioforge.app.models.audio_project import (
+    ClipModel,
+    CurvePointModel,
+    EventModel,
+    GameParameterModel,
+    RtpcBindingModel,
+    StateGroupModel,
+    StateOverrideModel,
+    SwitchGroupModel,
+    SwitchVariantModel,
+)
+from audioforge.app.services.preview_service import PreviewGameSyncContext, PreviewService
 
 from tests.helpers import build_sample_project, write_wav_fixture
 
@@ -62,3 +72,68 @@ def test_preview_service_ignores_inactive_bindings_for_random_mode(tmp_path) -> 
     assert result.accepted is True
     assert result.clip_id == event.clips[0].id
     assert result.asset_key == "ui/random_primary"
+
+
+def test_preview_service_applies_gamesync_rtpc_state_and_mapped_switch(tmp_path) -> None:
+    default_path = write_wav_fixture(tmp_path / "fixtures" / "surface_default.wav", frequency_hz=440.0)
+    stone_path = write_wav_fixture(tmp_path / "fixtures" / "surface_stone.wav", frequency_hz=660.0)
+    default_clip = ClipModel.from_path(default_path, "footstep/default")
+    stone_clip = ClipModel.from_path(stone_path, "footstep/stone")
+    stone_clip.active = False
+    event = EventModel(
+        id="Footstep",
+        display_name="Footstep",
+        bus="SFX",
+        play_mode="OneShot",
+        clips=[default_clip, stone_clip],
+        rtpc_bindings=[
+            RtpcBindingModel(
+                parameter_name="PlayerSpeed",
+                target="EventVolumeDb",
+                scope="Emitter",
+                curve_points=[
+                    CurvePointModel(input_value=0.0, output_value=-6.0),
+                    CurvePointModel(input_value=10.0, output_value=2.0),
+                ],
+            )
+        ],
+        state_overrides=[
+            StateOverrideModel(group_name="CombatState", state_name="Combat", volume_db=3.0, pitch_cents=120, is_muted=False)
+        ],
+        switch_variants=[
+            SwitchVariantModel(group_name="FootstepSurface", switch_name="Stone", clip_ids=[stone_clip.id])
+        ],
+    )
+
+    result = PreviewService(seed=7).preview_event(
+        event,
+        preview_gamesync=PreviewGameSyncContext(
+            emitter_game_parameters={"PlayerSpeed": 10.0},
+            states={"CombatState": "Combat"},
+        ),
+        game_parameters=[GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)],
+        state_groups=[
+            StateGroupModel(
+                name="CombatState",
+                states=["Explore", "Combat"],
+                default_state="Explore",
+                state_effects={"Combat": {"volume_db": 1.5, "pitch_cents": 30, "is_muted": False}},
+            )
+        ],
+        switch_groups=[
+            SwitchGroupModel(
+                name="FootstepSurface",
+                switches=["Grass", "Stone"],
+                default_switch="Grass",
+                use_game_parameter=True,
+                mapped_game_parameter="PlayerSpeed",
+                switch_effects={"Stone": {"volume_db": 0.5, "pitch_cents": -10, "is_muted": False}},
+            )
+        ],
+    )
+
+    assert result.accepted is True
+    assert result.clip_id == stone_clip.id
+    assert result.asset_key == "footstep/stone"
+    assert result.volume_db == 7.0
+    assert result.pitch_cents == 140

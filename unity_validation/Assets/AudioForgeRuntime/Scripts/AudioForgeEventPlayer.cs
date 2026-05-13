@@ -17,10 +17,12 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
     public bool PlayOnStart;
     public bool TriggerOnEnable;
     public bool UseAttachedAudioSource;
+    public bool UseEmitterContext = true;
     public KeyCode TriggerKey = KeyCode.None;
     public float LocalEventVolumeDbOffset;
 
     [HideInInspector] public AudioSource OverrideAudioSource;
+    private AudioForgeEmitterHandle _emitterHandle;
 
     private IEnumerator Start()
     {
@@ -51,6 +53,36 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
         StartCoroutine(PlayRoutine());
     }
 
+    public void SetSwitch(string groupName, string switchName)
+    {
+        AudioForgeRuntime runtime = ResolveRuntime();
+        if (runtime == null)
+        {
+            return;
+        }
+        EnsureEmitterHandle(runtime);
+        runtime.SetSwitch(groupName, switchName, _emitterHandle);
+    }
+
+    public void SetGameParameter(string name, float value)
+    {
+        AudioForgeRuntime runtime = ResolveRuntime();
+        if (runtime == null)
+        {
+            return;
+        }
+        EnsureEmitterHandle(runtime);
+        runtime.SetGameParameter(name, value, _emitterHandle);
+    }
+
+    private void OnDestroy()
+    {
+        if (Runtime != null && _emitterHandle != null)
+        {
+            Runtime.UnregisterEmitter(_emitterHandle);
+        }
+    }
+
     private IEnumerator PlayRoutine()
     {
         AudioForgeRuntime runtime = ResolveRuntime();
@@ -71,6 +103,13 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
             source = OverrideAudioSource != null ? OverrideAudioSource : GetComponent<AudioSource>();
         }
 
+        if (UseEmitterContext)
+        {
+            EnsureEmitterHandle(runtime);
+            yield return runtime.PlayEvent(EventId, _emitterHandle, source, LocalEventVolumeDbOffset);
+            yield break;
+        }
+
         yield return runtime.PlayEvent(EventId, source, LocalEventVolumeDbOffset);
     }
 
@@ -89,5 +128,14 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
 
         Runtime = FindObjectOfType<AudioForgeRuntime>();
         return Runtime;
+    }
+
+    private void EnsureEmitterHandle(AudioForgeRuntime runtime)
+    {
+        if (_emitterHandle != null)
+        {
+            return;
+        }
+        _emitterHandle = runtime.RegisterEmitter(gameObject);
     }
 }

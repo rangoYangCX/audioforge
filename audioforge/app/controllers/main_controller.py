@@ -4,20 +4,37 @@ import copy
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from audioforge.app.models.audio_project import AudioProject, BusConfig, ClipModel, EventModel, FolderModel, MASTER_BUS_NAME, ValidationIssue, new_id, normalize_event_binding_states
+from audioforge.app.models.audio_project import (
+    AudioProject,
+    BusConfig,
+    ClipModel,
+    EventModel,
+    FolderModel,
+    GameParameterModel,
+    MASTER_BUS_NAME,
+    RtpcBindingModel,
+    StateGroupModel,
+    StateOverrideModel,
+    SwitchGroupModel,
+    SwitchVariantModel,
+    ValidationIssue,
+    new_id,
+    normalize_event_binding_states,
+)
 from audioforge.app.services.audio_meter_service import AudioMeterService
 from audioforge.app.services.command_history import CommandHistory, EditorSnapshot
 from audioforge.app.services.exporter import ExportPlan, ExportRequest, RuntimeExporter
 from audioforge.app.services.playback_service import PlaybackService
 from audioforge.app.services.preview_audio_renderer import PreviewAudioRenderer
 from audioforge.app.services.preview_bus_mixer import MASTER_BUS_NAME, PreviewBusMixer
-from audioforge.app.services.preview_service import PreviewService
+from audioforge.app.services.preview_service import PreviewGameSyncContext, PreviewService
 from audioforge.app.services.project_serializer import ProjectSerializer
 from audioforge.app.services.recovery_service import RecoveryService
 from audioforge.app.services.validator import ProjectValidator
@@ -364,6 +381,8 @@ class MainController(QObject):
         self.window.tree.eventBindingsPopupRequested.connect(self.open_event_bindings_popup)
         self.window.eventPropertiesChanged.connect(self.update_current_event_from_form)
         self.window.projectSettingsChanged.connect(self.update_project_settings_from_form)
+        self.window.gameSyncChanged.connect(self.update_gamesync_from_form)
+        self.window.previewGameSyncChanged.connect(self.update_preview_gamesync_from_form)
         self.window.previewBusSelectionChanged.connect(self.sync_preview_bus_editor)
         self.window.previewBusStateChanged.connect(self.update_preview_bus_state_from_form)
         self.window.previewTransportPlayRequested.connect(self.play_recent_preview_transport)
@@ -441,6 +460,8 @@ class MainController(QObject):
         elif self.selected_folder_id is not None:
             self.window.tree.select_node("folder", self.selected_folder_id)
         self.window.set_source_browser_entries(self._build_source_browser_entries())
+        self.window.set_gamesync_entries(self._build_gamesync_entries())
+        self.window.set_gamesync_definitions(self.project.game_parameters, self.project.state_groups, self.project.switch_groups)
         self.window.set_project_settings(self.project.settings)
         self._sync_preview_bus_mixer()
         self.sync_preview_bus_editor()
@@ -499,6 +520,37 @@ class MainController(QObject):
                 }
             )
         return entries
+
+    def _build_gamesync_entries(self) -> dict[str, list[dict[str, object]]]:
+        return {
+            "game_parameters": [
+                {
+                    "name": parameter.name,
+                    "summary": f"默认 {parameter.default_value:.2f} | 范围 {parameter.min_value:.2f} - {parameter.max_value:.2f}",
+                    "detail": parameter.notes.strip() or "连续 Game Parameter，可用于 phase3 的 RTPC 绑定。",
+                }
+                for parameter in self.project.game_parameters
+            ],
+            "state_groups": [
+                {
+                    "name": group.name,
+                    "summary": f"默认 {group.default_state or '-'} | 状态 {len(group.states)} 个",
+                    "detail": group.notes.strip() or ("、".join(group.states) if group.states else "当前还没有可用 State。"),
+                }
+                for group in self.project.state_groups
+            ],
+            "switch_groups": [
+                {
+                    "name": group.name,
+                    "summary": (
+                        f"默认 {group.default_switch or '-'} | Switch {len(group.switches)} 个"
+                        + (f" | RTPC 映射 {group.mapped_game_parameter}" if group.use_game_parameter and group.mapped_game_parameter else "")
+                    ),
+                    "detail": group.notes.strip() or ("、".join(group.switches) if group.switches else "当前还没有可用 Switch。"),
+                }
+                for group in self.project.switch_groups
+            ],
+        }
 
     def _reset_diagnostic_snapshot(self) -> None:
         self._diagnostic_snapshot = DiagnosticSnapshot()
@@ -983,12 +1035,16 @@ class MainController(QObject):
             return
 
         form_data = self.window.current_event_form_data()
+        rtpc_bindings = [RtpcBindingModel(**binding) for binding in form_data.get("rtpc_bindings", [])]
+        state_overrides = [StateOverrideModel(**override) for override in form_data.get("state_overrides", [])]
+        switch_variants = [SwitchVariantModel(**variant) for variant in form_data.get("switch_variants", [])]
 
         def mutate() -> bool:
             current_event = self.current_event
             if current_event is None:
                 return False
             previous_play_mode = current_event.play_mode
+            changed = False
 
             new_id_value = str(form_data["id"])
             if new_id_value and new_id_value != current_event.id:
@@ -996,35 +1052,108 @@ class MainController(QObject):
                 self.selected_event_id = new_id_value
                 self.selected_event_ids = [new_id_value if event_id == current_event.id else event_id for event_id in self.selected_event_ids or [current_event.id]]
                 current_event = self.project.events[new_id_value]
+                changed = True
 
-            current_event.display_name = str(form_data["display_name"])
-            current_event.bus = str(form_data["bus"])
-            current_event.play_mode = str(form_data["play_mode"])
-            current_event.steal_policy = str(form_data["steal_policy"])
-            current_event.load_policy = str(form_data["load_policy"])
-            current_event.volume_db = float(form_data["volume_db"])
-            current_event.volume_rand_min_db = float(form_data["volume_rand_min_db"])
-            current_event.volume_rand_max_db = float(form_data["volume_rand_max_db"])
-            current_event.pitch_cents = int(form_data["pitch_cents"])
-            current_event.pitch_rand_min_cents = int(form_data["pitch_rand_min_cents"])
-            current_event.pitch_rand_max_cents = int(form_data["pitch_rand_max_cents"])
-            current_event.cooldown_seconds = float(form_data["cooldown_seconds"])
-            current_event.max_instances = int(form_data["max_instances"])
-            current_event.combo_pitch_step_cents = int(form_data["combo_pitch_step_cents"])
-            current_event.combo_reset_seconds = float(form_data["combo_reset_seconds"])
-            current_event.combo_max_step = int(form_data["combo_max_step"])
-            current_event.avoid_immediate_repeat = bool(form_data["avoid_immediate_repeat"])
+            updated_display_name = str(form_data["display_name"])
+            if current_event.display_name != updated_display_name:
+                current_event.display_name = updated_display_name
+                changed = True
+            updated_bus = str(form_data["bus"])
+            if current_event.bus != updated_bus:
+                current_event.bus = updated_bus
+                changed = True
+            updated_play_mode = str(form_data["play_mode"])
+            if current_event.play_mode != updated_play_mode:
+                current_event.play_mode = updated_play_mode
+                changed = True
+            updated_steal_policy = str(form_data["steal_policy"])
+            if current_event.steal_policy != updated_steal_policy:
+                current_event.steal_policy = updated_steal_policy
+                changed = True
+            updated_load_policy = str(form_data["load_policy"])
+            if current_event.load_policy != updated_load_policy:
+                current_event.load_policy = updated_load_policy
+                changed = True
+            updated_volume_db = float(form_data["volume_db"])
+            if current_event.volume_db != updated_volume_db:
+                current_event.volume_db = updated_volume_db
+                changed = True
+            updated_volume_rand_min_db = float(form_data["volume_rand_min_db"])
+            if current_event.volume_rand_min_db != updated_volume_rand_min_db:
+                current_event.volume_rand_min_db = updated_volume_rand_min_db
+                changed = True
+            updated_volume_rand_max_db = float(form_data["volume_rand_max_db"])
+            if current_event.volume_rand_max_db != updated_volume_rand_max_db:
+                current_event.volume_rand_max_db = updated_volume_rand_max_db
+                changed = True
+            updated_pitch_cents = int(form_data["pitch_cents"])
+            if current_event.pitch_cents != updated_pitch_cents:
+                current_event.pitch_cents = updated_pitch_cents
+                changed = True
+            updated_pitch_rand_min_cents = int(form_data["pitch_rand_min_cents"])
+            if current_event.pitch_rand_min_cents != updated_pitch_rand_min_cents:
+                current_event.pitch_rand_min_cents = updated_pitch_rand_min_cents
+                changed = True
+            updated_pitch_rand_max_cents = int(form_data["pitch_rand_max_cents"])
+            if current_event.pitch_rand_max_cents != updated_pitch_rand_max_cents:
+                current_event.pitch_rand_max_cents = updated_pitch_rand_max_cents
+                changed = True
+            updated_cooldown_seconds = float(form_data["cooldown_seconds"])
+            if current_event.cooldown_seconds != updated_cooldown_seconds:
+                current_event.cooldown_seconds = updated_cooldown_seconds
+                changed = True
+            updated_max_instances = int(form_data["max_instances"])
+            if current_event.max_instances != updated_max_instances:
+                current_event.max_instances = updated_max_instances
+                changed = True
+            updated_combo_pitch_step_cents = int(form_data["combo_pitch_step_cents"])
+            if current_event.combo_pitch_step_cents != updated_combo_pitch_step_cents:
+                current_event.combo_pitch_step_cents = updated_combo_pitch_step_cents
+                changed = True
+            updated_combo_reset_seconds = float(form_data["combo_reset_seconds"])
+            if current_event.combo_reset_seconds != updated_combo_reset_seconds:
+                current_event.combo_reset_seconds = updated_combo_reset_seconds
+                changed = True
+            updated_combo_max_step = int(form_data["combo_max_step"])
+            if current_event.combo_max_step != updated_combo_max_step:
+                current_event.combo_max_step = updated_combo_max_step
+                changed = True
+            updated_avoid_repeat = bool(form_data["avoid_immediate_repeat"])
+            if current_event.avoid_immediate_repeat != updated_avoid_repeat:
+                current_event.avoid_immediate_repeat = updated_avoid_repeat
+                changed = True
             event_tags = [str(tag) for tag in form_data["tags"]]
             for clip in current_event.clips:
-                clip.tags = list(event_tags)
-            current_event.notes = str(form_data["notes"])
+                if clip.tags != list(event_tags):
+                    clip.tags = list(event_tags)
+                    changed = True
+            if current_event.rtpc_bindings != rtpc_bindings:
+                current_event.rtpc_bindings = rtpc_bindings
+                changed = True
+            if current_event.state_overrides != state_overrides:
+                current_event.state_overrides = state_overrides
+                changed = True
+            if current_event.switch_variants != switch_variants:
+                current_event.switch_variants = switch_variants
+                changed = True
+            updated_notes = str(form_data["notes"])
+            if current_event.notes != updated_notes:
+                current_event.notes = updated_notes
+                changed = True
             if previous_play_mode == "OneShot" and current_event.play_mode != "OneShot":
                 for clip in current_event.clips:
                     if clip.enabled:
                         clip.active = True
+                        changed = True
             normalize_event_binding_states(current_event)
-            self.project.touch()
-            return True
+            changed = self._merge_gamesync_definitions(
+                rtpc_bindings=current_event.rtpc_bindings,
+                state_overrides=current_event.state_overrides,
+                switch_variants=current_event.switch_variants,
+            ) or changed
+            if changed:
+                self.project.touch()
+            return changed
 
         try:
             changed = self._apply_mutation(
@@ -1062,6 +1191,8 @@ class MainController(QObject):
                 parent_bus=str(bus_config.get("parent_bus", MASTER_BUS_NAME) or MASTER_BUS_NAME),
                 volume_db=float(bus_config["volume_db"]),
                 is_muted=bool(bus_config["is_muted"]),
+                rtpc_bindings=[RtpcBindingModel(**binding) for binding in bus_config.get("rtpc_bindings", [])],
+                state_overrides=[StateOverrideModel(**override) for override in bus_config.get("state_overrides", [])],
             )
             for bus_config in form_data["bus_configs"]
         ]
@@ -1100,6 +1231,10 @@ class MainController(QObject):
                 if event.bus not in buses:
                     event.bus = default_bus
                     changed = True
+            changed = self._merge_gamesync_definitions(
+                rtpc_bindings=[binding for config in self.project.settings.bus_configs for binding in config.rtpc_bindings],
+                state_overrides=[override for config in self.project.settings.bus_configs for override in config.state_overrides],
+            ) or changed
             if changed:
                 self.project.touch()
             return changed
@@ -1109,6 +1244,137 @@ class MainController(QObject):
             navigation_state = self.window.navigation_state()
             self._refresh_ui()
             self.window.apply_navigation_state(navigation_state)
+
+    def update_gamesync_from_form(self) -> None:
+        form_data = self.window.current_gamesync_form_data()
+        game_parameters = [GameParameterModel(**payload) for payload in form_data.get("game_parameters", [])]
+        state_groups = [StateGroupModel(**payload) for payload in form_data.get("state_groups", [])]
+        switch_groups = [SwitchGroupModel(**payload) for payload in form_data.get("switch_groups", [])]
+
+        def mutate() -> bool:
+            changed = False
+            if self.project.game_parameters != game_parameters:
+                self.project.game_parameters = game_parameters
+                changed = True
+            if self.project.state_groups != state_groups:
+                self.project.state_groups = state_groups
+                changed = True
+            if self.project.switch_groups != switch_groups:
+                self.project.switch_groups = switch_groups
+                changed = True
+            if changed:
+                self.project.touch()
+            return changed
+
+        if self._apply_mutation("Update GameSync Definitions", mutate, merge_key="gamesync-definitions"):
+            self.window.append_log("已更新 GameSync 定义。")
+            navigation_state = self.window.navigation_state()
+            self._refresh_ui()
+            self.window.apply_navigation_state(navigation_state)
+
+    def _merge_gamesync_definitions(
+        self,
+        *,
+        rtpc_bindings: Iterable[RtpcBindingModel] = (),
+        state_overrides: Iterable[StateOverrideModel] = (),
+        switch_variants: Iterable[SwitchVariantModel] = (),
+    ) -> bool:
+        changed = False
+
+        for binding in rtpc_bindings:
+            parameter_name = binding.parameter_name.strip()
+            if not parameter_name or self._find_game_parameter(parameter_name) is not None:
+                continue
+            self.project.game_parameters.append(GameParameterModel(name=parameter_name))
+            changed = True
+
+        for override in state_overrides:
+            group_name = override.group_name.strip()
+            state_name = override.state_name.strip()
+            if not group_name:
+                continue
+            existing_group = self._find_state_group(group_name)
+            if existing_group is None:
+                self.project.state_groups.append(
+                    StateGroupModel(
+                        name=group_name,
+                        states=[state_name] if state_name else [],
+                        default_state=state_name,
+                    )
+                )
+                changed = True
+                continue
+            if state_name and state_name.casefold() not in {value.casefold() for value in existing_group.states}:
+                existing_group.states.append(state_name)
+                if not existing_group.default_state:
+                    existing_group.default_state = state_name
+                changed = True
+
+        for variant in switch_variants:
+            group_name = variant.group_name.strip()
+            switch_name = variant.switch_name.strip()
+            if not group_name:
+                continue
+            existing_group = self._find_switch_group(group_name)
+            if existing_group is None:
+                self.project.switch_groups.append(
+                    SwitchGroupModel(
+                        name=group_name,
+                        switches=[switch_name] if switch_name else [],
+                        default_switch=switch_name,
+                    )
+                )
+                changed = True
+                continue
+            if switch_name and switch_name.casefold() not in {value.casefold() for value in existing_group.switches}:
+                existing_group.switches.append(switch_name)
+                if not existing_group.default_switch:
+                    existing_group.default_switch = switch_name
+                changed = True
+
+        return changed
+
+    def _find_game_parameter(self, name: str) -> GameParameterModel | None:
+        normalized = name.strip().casefold()
+        for parameter in self.project.game_parameters:
+            if parameter.name.casefold() == normalized:
+                return parameter
+        return None
+
+    def _find_state_group(self, name: str) -> StateGroupModel | None:
+        normalized = name.strip().casefold()
+        for group in self.project.state_groups:
+            if group.name.casefold() == normalized:
+                return group
+        return None
+
+    def _find_switch_group(self, name: str) -> SwitchGroupModel | None:
+        normalized = name.strip().casefold()
+        for group in self.project.switch_groups:
+            if group.name.casefold() == normalized:
+                return group
+        return None
+
+    def _current_preview_gamesync_context(self) -> PreviewGameSyncContext:
+        payload = self.window.current_preview_gamesync_context_data()
+        return PreviewGameSyncContext(
+            global_game_parameters=payload.get("global_parameters", {}),
+            emitter_game_parameters=payload.get("emitter_parameters", {}),
+            states=payload.get("states", {}),
+            switches=payload.get("switches", {}),
+        )
+
+    def _resolve_preview_event_mix(self, event: EventModel) -> tuple[float, int, bool]:
+        return self.preview_service.resolve_mix_adjustment(
+            event.rtpc_bindings,
+            event.state_overrides,
+            base_volume_db=event.volume_db,
+            base_pitch_cents=event.pitch_cents,
+            preview_gamesync=self._current_preview_gamesync_context(),
+            game_parameters=self.project.game_parameters,
+            state_groups=self.project.state_groups,
+            switch_groups=self.project.switch_groups,
+        )
 
     def sync_preview_bus_editor(self) -> None:
         self._sync_preview_bus_mixer()
@@ -1143,6 +1409,14 @@ class MainController(QObject):
         self.window.append_log(
             f"{WWISE_TRANSPORT_TITLE} 已更新：{state.name} 音量={state.volume_linear * 100:.0f}% 静音={'是' if state.is_muted else '否'}"
         )
+
+    def update_preview_gamesync_from_form(self) -> None:
+        event = self.current_event
+        if event is None:
+            return
+        session = self._current_audition_session()
+        if session is not None and session.event_id == event.id:
+            self.preview_current_event(silent_log=True)
 
     def apply_default_bus_to_all_events(self) -> None:
         default_bus = self.project.settings.default_bus
@@ -2209,25 +2483,31 @@ class MainController(QObject):
             return
         self._sync_preview_transport_state()
 
-    def preview_current_event(self) -> None:
+    def preview_current_event(self, silent_log: bool = False) -> None:
         event = self.current_event
         if event is None:
             QMessageBox.information(self.window, "试听事件", "请先选择一个事件，再执行试听。")
             return
+        preview_gamesync = self._current_preview_gamesync_context()
         result = self.preview_service.preview_event(
             event,
             preview_duration_resolver=self._resolve_preview_duration_seconds,
+            preview_gamesync=preview_gamesync,
+            game_parameters=self.project.game_parameters,
+            state_groups=self.project.state_groups,
+            switch_groups=self.project.switch_groups,
         )
         if not result.accepted:
             self.window.clear_preview_audio_metrics(result.reason)
             self._clear_audition_session(event.id)
-            self.window.append_log(f"试听被拒绝：{event.id}，原因：{result.reason}")
+            if not silent_log:
+                self.window.append_log(f"试听被拒绝：{event.id}，原因：{result.reason}")
             self._sync_preview_transport_state()
             return
         clip = next((item for item in event.clips if item.id == result.clip_id), None)
         playback_message = "Simulated only"
+        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, result.volume_db, preview_gamesync=preview_gamesync)
         if clip is not None and clip.source_path:
-            effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, result.volume_db)
             preview_preserve_timing_pitch_cents = result.pitch_cents + result.combo_pitch_cents
             session = self._create_audition_session(
                 event=event,
@@ -2248,9 +2528,10 @@ class MainController(QObject):
         else:
             self.window.clear_preview_audio_metrics("当前试听片段没有可分析的源文件。")
             self._clear_audition_session(event.id)
-        self.window.append_log(
-            f"试听 {event.id}：片段={result.clip_id} 资源={result.asset_key} 事件音量={result.volume_db:.2f}dB 总线后={self._resolve_effective_preview_volume_db(event.bus, result.volume_db):.2f}dB 基础音高={result.pitch_cents} 连击加成={result.combo_pitch_cents} 连击={result.combo_step} 活动实例={result.active_instances} 时长={result.playback_duration_seconds:.2f}s 播放={playback_message}"
-        )
+        if not silent_log:
+            self.window.append_log(
+                f"试听 {event.id}：片段={result.clip_id} 资源={result.asset_key} 事件音量={result.volume_db:.2f}dB 总线后={effective_volume_db:.2f}dB 基础音高={result.pitch_cents} 连击加成={result.combo_pitch_cents} 连击={result.combo_step} 活动实例={result.active_instances} 时长={result.playback_duration_seconds:.2f}s 播放={playback_message}"
+            )
         self._sync_preview_transport_state()
 
     def preview_selected_clip(self, clip_id: str) -> None:
@@ -2266,15 +2547,22 @@ class MainController(QObject):
             self.window.append_log(f"试听片段被拒绝：{clip_id} 没有源文件。")
             self._sync_preview_transport_state()
             return
-        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, event.volume_db)
+        resolved_volume_db, resolved_pitch_cents, is_muted = self._resolve_preview_event_mix(event)
+        if is_muted:
+            self.window.clear_preview_audio_metrics("当前事件被 State Override 静音。")
+            self._clear_audition_session(event.id)
+            self.window.append_log(f"试听片段被拒绝：{event.id} 当前被 State Override 静音。")
+            self._sync_preview_transport_state()
+            return
+        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, resolved_volume_db, preview_gamesync=self._current_preview_gamesync_context())
         session = self._create_audition_session(
             event=event,
             clip=clip,
             target_kind="clip",
             effective_volume_db=effective_volume_db,
-            tracked_base_volume_db=event.volume_db,
+            tracked_base_volume_db=resolved_volume_db,
             pitch_cents=0,
-            preserve_timing_pitch_cents=event.pitch_cents,
+            preserve_timing_pitch_cents=resolved_pitch_cents,
             trim_start_ms=clip.trim_start_ms,
             trim_end_ms=clip.trim_end_ms,
             fade_in_ms=clip.fade_in_ms,
@@ -2303,15 +2591,22 @@ class MainController(QObject):
         segment_end_ms = max(segment_start_ms + 1, int(end_ms))
         segment_length_ms = max(1, segment_end_ms - segment_start_ms)
         segment_fade_ms = min(40, max(8, segment_length_ms // 12))
-        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, event.volume_db)
+        resolved_volume_db, resolved_pitch_cents, is_muted = self._resolve_preview_event_mix(event)
+        if is_muted:
+            self.window.clear_preview_audio_metrics("当前事件被 State Override 静音。")
+            self._clear_audition_session(event.id)
+            self.window.append_log(f"局部试听被拒绝：{event.id} 当前被 State Override 静音。")
+            self._sync_preview_transport_state()
+            return
+        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, resolved_volume_db, preview_gamesync=self._current_preview_gamesync_context())
         session = self._create_audition_session(
             event=event,
             clip=clip,
             target_kind="segment",
             effective_volume_db=effective_volume_db,
-            tracked_base_volume_db=event.volume_db,
+            tracked_base_volume_db=resolved_volume_db,
             pitch_cents=0,
-            preserve_timing_pitch_cents=event.pitch_cents,
+            preserve_timing_pitch_cents=resolved_pitch_cents,
             trim_start_ms=segment_start_ms,
             trim_end_ms=segment_end_ms,
             fade_in_ms=segment_fade_ms,
@@ -2472,11 +2767,42 @@ class MainController(QObject):
             current_name = parent_name
         return gain_db
 
-    def _resolve_effective_preview_volume_db(self, bus_name: str, base_volume_db: float) -> float:
-        authored_gain_db = self._resolve_authored_bus_gain_db(bus_name)
-        if authored_gain_db <= -96.0:
-            return -96.0
-        return base_volume_db + authored_gain_db + self.preview_bus_mixer.effective_gain_db(bus_name)
+    def _resolve_effective_preview_volume_db(
+        self,
+        bus_name: str,
+        base_volume_db: float,
+        *,
+        preview_gamesync: PreviewGameSyncContext | None = None,
+    ) -> float:
+        preview_context = preview_gamesync or self._current_preview_gamesync_context()
+        config_map = self._project_bus_config_map()
+        resolved_volume_db = float(base_volume_db)
+        current_name = bus_name
+        visited: set[str] = set()
+        while current_name in config_map:
+            config = config_map[current_name]
+            if config.is_muted:
+                return -96.0
+            resolved_volume_db += config.volume_db
+            bus_gamesync_db, is_muted = self.preview_service.resolve_bus_adjustment(
+                config.rtpc_bindings,
+                config.state_overrides,
+                preview_gamesync=preview_context,
+                game_parameters=self.project.game_parameters,
+                state_groups=self.project.state_groups,
+                switch_groups=self.project.switch_groups,
+            )
+            resolved_volume_db += bus_gamesync_db
+            if is_muted:
+                return -96.0
+            if current_name == MASTER_BUS_NAME:
+                break
+            parent_name = config.parent_bus or MASTER_BUS_NAME
+            if parent_name in visited:
+                return -96.0
+            visited.add(parent_name)
+            current_name = parent_name
+        return resolved_volume_db + self.preview_bus_mixer.effective_gain_db(bus_name)
 
     def scan_project_loudness(self) -> None:
         report = self._scan_project_loudness()

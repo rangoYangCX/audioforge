@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QRadioButton,
     QScrollArea,
+    QSlider,
     QSizePolicy,
     QStackedWidget,
     QStyle,
@@ -54,7 +55,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from audioforge.app.models.audio_project import BusConfig, ClipModel, EventModel, ProjectSettings, ValidationIssue
+from audioforge.app.models.audio_project import (
+    BusConfig,
+    ClipModel,
+    EventModel,
+    GameParameterModel,
+    ProjectSettings,
+    RtpcBindingModel,
+    StateGroupModel,
+    StateOverrideModel,
+    SwitchGroupModel,
+    SwitchVariantModel,
+    ValidationIssue,
+)
 from audioforge.app.services.audio_meter_service import AudioMeterSnapshot, LoudnessReading
 from audioforge.app.utils.icons import load_app_icon
 from audioforge.app.utils.constants import (
@@ -99,6 +112,7 @@ from audioforge.app.widgets.clip_table import ClipTableWidget
 from audioforge.app.widgets.clip_waveform_editor import ClipWaveformEditor
 from audioforge.app.widgets.event_tree import EventTreeWidget, decode_source_binding_token
 from audioforge.app.widgets.loudness_history_plot import LoudnessHistoryPlot
+from audioforge.app.widgets.rtpc_curve_editor import RtpcCurveEditor
 from audioforge.app.widgets.source_tree import SOURCE_ASSET_MIME_TYPE, SourceTreeWidget
 from audioforge.app.views.shell_components import AppShell, CompatibilityTabWidget, DetachedToolWindow, TaskSidebar
 
@@ -548,6 +562,8 @@ class EventBindingsPopup(QDialog):
 class MainWindow(QMainWindow):
     eventPropertiesChanged = Signal()
     projectSettingsChanged = Signal()
+    gameSyncChanged = Signal()
+    previewGameSyncChanged = Signal()
     previewBusSelectionChanged = Signal()
     previewBusStateChanged = Signal()
     logAppended = Signal(str)
@@ -648,12 +664,27 @@ class MainWindow(QMainWindow):
             "tags": [],
         }
         self._source_browser_entries: list[dict[str, object]] = []
+        self._gamesync_entries: dict[str, list[dict[str, object]]] = {
+            "game_parameters": [],
+            "state_groups": [],
+            "switch_groups": [],
+        }
+        self._loading_gamesync = False
+        self._gamesync_models: dict[str, list[dict[str, object]]] = {
+            "game_parameters": [],
+            "state_groups": [],
+            "switch_groups": [],
+        }
+        self._event_rtpc_bindings: list[dict[str, object]] = []
+        self._event_state_overrides: list[dict[str, object]] = []
+        self._event_switch_variants: list[dict[str, object]] = []
         self._current_event_source_paths: list[str] = []
 
         self.tree = EventTreeWidget()
         self.tree_filter_edit = QLineEdit()
         self.tree_filter_edit.setPlaceholderText("搜索当前浏览页")
         self.explorer_tabs = QTabWidget()
+        self.gamesync_browser_tabs = QTabWidget()
         self.object_type_label = QLabel("Event")
         self.object_name_label = QLabel("未选择对象")
         self.object_scope_label = QLabel("Project / Root")
@@ -745,6 +776,73 @@ class MainWindow(QMainWindow):
         self.source_browser_summary_label.setWordWrap(True)
         self.source_browser_status_label = QLabel("当前没有源音频。")
         self.source_browser_status_label.setWordWrap(True)
+        self.gamesync_browser_summary_label = QLabel("GameSync 浏览页会汇总项目级 RTPC、State Group 和 Switch Group。")
+        self.gamesync_browser_summary_label.setWordWrap(True)
+        self.gamesync_browser_status_label = QLabel("当前还没有任何 GameSync 定义。")
+        self.gamesync_browser_status_label.setWordWrap(True)
+        self.gamesync_parameter_browser_list = QListWidget()
+        self.gamesync_state_browser_list = QListWidget()
+        self.gamesync_switch_browser_list = QListWidget()
+        self.gamesync_parameter_browser_detail_label = QLabel("当前还没有 Game Parameter。")
+        self.gamesync_state_browser_detail_label = QLabel("当前还没有 State Group。")
+        self.gamesync_switch_browser_detail_label = QLabel("当前还没有 Switch Group。")
+        self.gamesync_parameter_add_button = QPushButton("新建参数")
+        self.gamesync_parameter_remove_button = QPushButton("删除参数")
+        self.gamesync_parameter_name_edit = QLineEdit()
+        self.gamesync_parameter_default_spin = QDoubleSpinBox()
+        self.gamesync_parameter_default_spin.setRange(-99999.0, 99999.0)
+        self.gamesync_parameter_default_spin.setDecimals(2)
+        self.gamesync_parameter_min_spin = QDoubleSpinBox()
+        self.gamesync_parameter_min_spin.setRange(-99999.0, 99999.0)
+        self.gamesync_parameter_min_spin.setDecimals(2)
+        self.gamesync_parameter_max_spin = QDoubleSpinBox()
+        self.gamesync_parameter_max_spin.setRange(-99999.0, 99999.0)
+        self.gamesync_parameter_max_spin.setDecimals(2)
+        self.gamesync_parameter_notes_edit = QPlainTextEdit()
+        self.gamesync_parameter_notes_edit.setPlaceholderText("用法说明、范围约束、运行时映射")
+        self.gamesync_state_add_button = QPushButton("新建 State Group")
+        self.gamesync_state_remove_button = QPushButton("删除 State Group")
+        self.gamesync_state_name_edit = QLineEdit()
+        self.gamesync_state_value_list = QListWidget()
+        self.gamesync_state_value_add_button = QPushButton("新增 State")
+        self.gamesync_state_value_remove_button = QPushButton("删除 State")
+        self.gamesync_state_values_edit = QLineEdit()
+        self.gamesync_state_values_edit.setPlaceholderText("State 名称，例如 Completed")
+        self.gamesync_state_value_volume_spin = QDoubleSpinBox()
+        self.gamesync_state_value_volume_spin.setRange(MIN_VOLUME_DB, MAX_VOLUME_DB)
+        self.gamesync_state_value_volume_spin.setDecimals(1)
+        self.gamesync_state_value_volume_spin.setSuffix(" dB")
+        self.gamesync_state_value_pitch_spin = QSpinBox()
+        self.gamesync_state_value_pitch_spin.setRange(MIN_PITCH_CENTS, MAX_PITCH_CENTS)
+        self.gamesync_state_value_mute_check = QCheckBox("该 State 静音")
+        self.gamesync_state_value_notes_edit = QPlainTextEdit()
+        self.gamesync_state_value_notes_edit.setPlaceholderText("记录该 State 的音量、音高或场景语义")
+        self.gamesync_state_default_edit = QLineEdit()
+        self.gamesync_state_notes_edit = QPlainTextEdit()
+        self.gamesync_state_notes_edit.setPlaceholderText("描述该组 State 的用途")
+        self.gamesync_switch_add_button = QPushButton("新建 Switch Group")
+        self.gamesync_switch_remove_button = QPushButton("删除 Switch Group")
+        self.gamesync_switch_name_edit = QLineEdit()
+        self.gamesync_switch_value_list = QListWidget()
+        self.gamesync_switch_value_add_button = QPushButton("新增 Switch")
+        self.gamesync_switch_value_remove_button = QPushButton("删除 Switch")
+        self.gamesync_switch_values_edit = QLineEdit()
+        self.gamesync_switch_values_edit.setPlaceholderText("Switch 名称，例如 Stone")
+        self.gamesync_switch_value_volume_spin = QDoubleSpinBox()
+        self.gamesync_switch_value_volume_spin.setRange(MIN_VOLUME_DB, MAX_VOLUME_DB)
+        self.gamesync_switch_value_volume_spin.setDecimals(1)
+        self.gamesync_switch_value_volume_spin.setSuffix(" dB")
+        self.gamesync_switch_value_pitch_spin = QSpinBox()
+        self.gamesync_switch_value_pitch_spin.setRange(MIN_PITCH_CENTS, MAX_PITCH_CENTS)
+        self.gamesync_switch_value_mute_check = QCheckBox("该 Switch 静音")
+        self.gamesync_switch_value_notes_edit = QPlainTextEdit()
+        self.gamesync_switch_value_notes_edit.setPlaceholderText("记录该 Switch 的音量、音高或场景语义")
+        self.gamesync_switch_default_edit = QLineEdit()
+        self.gamesync_switch_use_rtpc_check = QCheckBox("使用 Game Parameter 映射")
+        self.gamesync_switch_mapped_parameter_edit = QLineEdit()
+        self.gamesync_switch_mapped_parameter_edit.setPlaceholderText("SurfaceBlend")
+        self.gamesync_switch_notes_edit = QPlainTextEdit()
+        self.gamesync_switch_notes_edit.setPlaceholderText("记录 emitter 作用域或映射规则")
         self.event_source_binding_summary_label = QLabel("当前事件还没有绑定源音频。")
         self.event_source_binding_summary_label.setWordWrap(True)
         self.event_source_binding_detail_label = QLabel("这里现在只展示当前事件的绑定摘要。需要追加源音频或切换 Active / Enabled，请在事件树中展开当前事件打开绑定弹窗。")
@@ -775,6 +873,106 @@ class MainWindow(QMainWindow):
         self.project_master_effective_bar = QProgressBar()
         self.project_master_effective_bar.setRange(0, 100)
         self.project_master_hint_label = QLabel("主 Bus 会作为正式工程 Bus 一起保存和导出；试听总控仍可在下方传输控制面板中单独调整。")
+        self.event_rtpc_list = QListWidget()
+        self.event_rtpc_add_button = QPushButton("新增 RTPC")
+        self.event_rtpc_remove_button = QPushButton("删除 RTPC")
+        self.event_rtpc_parameter_edit = QComboBox()
+        self.event_rtpc_target_combo = QComboBox()
+        self.event_rtpc_target_combo.addItems(["EventVolumeDb", "EventPitchCents"])
+        self.event_rtpc_scope_combo = QComboBox()
+        self.event_rtpc_scope_combo.addItems(["Global", "Emitter"])
+        self.event_rtpc_curve_table = self._create_curve_table()
+        self.event_rtpc_interpolation_combo = QComboBox()
+        self.event_rtpc_interpolation_combo.addItems(["Linear", "Constant"])
+        self.event_rtpc_add_point_button = QPushButton("新增曲线点")
+        self.event_rtpc_remove_point_button = QPushButton("删除曲线点")
+        self.event_rtpc_selected_input_spin = QDoubleSpinBox()
+        self.event_rtpc_selected_input_spin.setRange(-99999.0, 99999.0)
+        self.event_rtpc_selected_input_spin.setDecimals(2)
+        self.event_rtpc_selected_output_spin = QDoubleSpinBox()
+        self.event_rtpc_selected_output_spin.setRange(-99999.0, 99999.0)
+        self.event_rtpc_selected_output_spin.setDecimals(2)
+        self.event_rtpc_snap_check = QCheckBox("拖拽吸附")
+        self.event_rtpc_snap_x_spin = QDoubleSpinBox()
+        self.event_rtpc_snap_x_spin.setRange(0.01, 99999.0)
+        self.event_rtpc_snap_x_spin.setDecimals(2)
+        self.event_rtpc_snap_x_spin.setValue(1.0)
+        self.event_rtpc_snap_y_spin = QDoubleSpinBox()
+        self.event_rtpc_snap_y_spin.setRange(0.01, 99999.0)
+        self.event_rtpc_snap_y_spin.setDecimals(2)
+        self.event_rtpc_snap_y_spin.setValue(1.0)
+        self.event_rtpc_notes_edit = QPlainTextEdit()
+        self.event_rtpc_notes_edit.setPlaceholderText("记录驱动对象、取值说明或设计约束")
+        self.event_state_list = QListWidget()
+        self.event_state_add_button = QPushButton("新增 State Override")
+        self.event_state_remove_button = QPushButton("删除 State Override")
+        self.event_state_group_edit = QComboBox()
+        self.event_state_name_edit = QComboBox()
+        self.event_state_volume_spin = QDoubleSpinBox()
+        self.event_state_volume_spin.setRange(MIN_VOLUME_DB, MAX_VOLUME_DB)
+        self.event_state_volume_spin.setDecimals(1)
+        self.event_state_volume_spin.setSuffix(" dB")
+        self.event_state_pitch_spin = QSpinBox()
+        self.event_state_pitch_spin.setRange(MIN_PITCH_CENTS, MAX_PITCH_CENTS)
+        self.event_state_mute_check = QCheckBox("切到该 State 时静音")
+        self.event_state_notes_edit = QPlainTextEdit()
+        self.event_state_notes_edit.setPlaceholderText("记录覆盖原因或目标场景")
+        self.event_switch_list = QListWidget()
+        self.event_switch_add_button = QPushButton("新增 Switch Variant")
+        self.event_switch_remove_button = QPushButton("删除 Switch Variant")
+        self.event_switch_group_edit = QComboBox()
+        self.event_switch_name_edit = QComboBox()
+        self.event_switch_clip_ids_edit = QLineEdit()
+        self.event_switch_clip_ids_edit.setPlaceholderText("clip_a, clip_b")
+        self.event_switch_notes_edit = QPlainTextEdit()
+        self.event_switch_notes_edit.setPlaceholderText("记录该变体关联的源音频或层级规则")
+        self.bus_rtpc_list = QListWidget()
+        self.bus_rtpc_add_button = QPushButton("新增 RTPC")
+        self.bus_rtpc_remove_button = QPushButton("删除 RTPC")
+        self.bus_rtpc_parameter_edit = QLineEdit()
+        self.bus_rtpc_parameter_edit.setPlaceholderText("CombatIntensity")
+        self.bus_rtpc_target_combo = QComboBox()
+        self.bus_rtpc_target_combo.addItems(["BusVolumeDb"])
+        self.bus_rtpc_scope_combo = QComboBox()
+        self.bus_rtpc_scope_combo.addItems(["Global", "Emitter"])
+        self.bus_rtpc_curve_table = self._create_curve_table()
+        self.bus_rtpc_interpolation_combo = QComboBox()
+        self.bus_rtpc_interpolation_combo.addItems(["Linear", "Constant"])
+        self.bus_rtpc_add_point_button = QPushButton("新增曲线点")
+        self.bus_rtpc_remove_point_button = QPushButton("删除曲线点")
+        self.bus_rtpc_selected_input_spin = QDoubleSpinBox()
+        self.bus_rtpc_selected_input_spin.setRange(-99999.0, 99999.0)
+        self.bus_rtpc_selected_input_spin.setDecimals(2)
+        self.bus_rtpc_selected_output_spin = QDoubleSpinBox()
+        self.bus_rtpc_selected_output_spin.setRange(-99999.0, 99999.0)
+        self.bus_rtpc_selected_output_spin.setDecimals(2)
+        self.bus_rtpc_snap_check = QCheckBox("拖拽吸附")
+        self.bus_rtpc_snap_x_spin = QDoubleSpinBox()
+        self.bus_rtpc_snap_x_spin.setRange(0.01, 99999.0)
+        self.bus_rtpc_snap_x_spin.setDecimals(2)
+        self.bus_rtpc_snap_x_spin.setValue(1.0)
+        self.bus_rtpc_snap_y_spin = QDoubleSpinBox()
+        self.bus_rtpc_snap_y_spin.setRange(0.01, 99999.0)
+        self.bus_rtpc_snap_y_spin.setDecimals(2)
+        self.bus_rtpc_snap_y_spin.setValue(1.0)
+        self.bus_rtpc_notes_edit = QPlainTextEdit()
+        self.bus_rtpc_notes_edit.setPlaceholderText("记录混音目标或调制范围")
+        self.bus_state_list = QListWidget()
+        self.bus_state_add_button = QPushButton("新增 State Override")
+        self.bus_state_remove_button = QPushButton("删除 State Override")
+        self.bus_state_group_edit = QLineEdit()
+        self.bus_state_group_edit.setPlaceholderText("MusicState")
+        self.bus_state_name_edit = QLineEdit()
+        self.bus_state_name_edit.setPlaceholderText("Stealth")
+        self.bus_state_volume_spin = QDoubleSpinBox()
+        self.bus_state_volume_spin.setRange(MIN_VOLUME_DB, MAX_VOLUME_DB)
+        self.bus_state_volume_spin.setDecimals(1)
+        self.bus_state_volume_spin.setSuffix(" dB")
+        self.bus_state_pitch_spin = QSpinBox()
+        self.bus_state_pitch_spin.setRange(MIN_PITCH_CENTS, MAX_PITCH_CENTS)
+        self.bus_state_mute_check = QCheckBox("切到该 State 时静音")
+        self.bus_state_notes_edit = QPlainTextEdit()
+        self.bus_state_notes_edit.setPlaceholderText("记录总线状态覆盖的使用场景")
         self.preview_bus_combo = QComboBox()
         self.preview_bus_volume_spin = QDoubleSpinBox()
         self.preview_bus_volume_spin.setRange(0.0, 100.0)
@@ -782,6 +980,52 @@ class MainWindow(QMainWindow):
         self.preview_bus_volume_spin.setSuffix(" %")
         self.preview_bus_mute_check = QCheckBox("静音")
         self.preview_bus_effective_label = QLabel(f"{WWISE_EFFECTIVE_OUTPUT_LABEL}: 100%")
+        self._preview_gamesync_loading = False
+        self._preview_gamesync_definitions: dict[str, list[dict[str, object]]] = {
+            "game_parameters": [],
+            "state_groups": [],
+            "switch_groups": [],
+        }
+        self._preview_gamesync_state: dict[str, object] = {
+            "selected_parameter_name": "",
+            "selected_parameter_scope": "Emitter",
+            "global_parameters": {},
+            "emitter_parameters": {},
+            "selected_state_group": "",
+            "states": {},
+            "selected_switch_group": "",
+            "switches": {},
+        }
+        self.preview_gamesync_group = QGroupBox()
+        self.preview_gamesync_group.setTitle("")
+        self.preview_gamesync_group.setProperty("role", "inlineRecentPreview")
+        self.preview_gamesync_label = QLabel("试听 GameSync")
+        self.preview_rtpc_transport_frame = QFrame()
+        self.preview_rtpc_transport_frame.setObjectName("PreviewRtpcTransportFrame")
+        self.preview_gamesync_modes_frame = QFrame()
+        self.preview_gamesync_modes_frame.setObjectName("PreviewGameSyncModesFrame")
+        self.preview_parameter_section_label = QLabel("RTPC")
+        self.preview_parameter_name_combo = QComboBox()
+        self.preview_parameter_scope_combo = QComboBox()
+        self.preview_parameter_scope_combo.addItems(["Global", "Emitter"])
+        self.preview_parameter_current_label = QLabel("0")
+        self.preview_parameter_min_label = QLabel("0")
+        self.preview_parameter_max_label = QLabel("0")
+        self.preview_parameter_slider = QSlider(Qt.Orientation.Horizontal)
+        self.preview_parameter_slider.setRange(0, 1000)
+        self.preview_parameter_slider.setSingleStep(1)
+        self.preview_parameter_slider.setPageStep(50)
+        self.preview_parameter_slider.setTracking(False)
+        self.preview_parameter_value_spin = QDoubleSpinBox()
+        self.preview_parameter_value_spin.setRange(-99999.0, 99999.0)
+        self.preview_parameter_value_spin.setDecimals(2)
+        self.preview_parameter_value_spin.setKeyboardTracking(False)
+        self.preview_state_section_label = QLabel("State")
+        self.preview_state_group_combo = QComboBox()
+        self.preview_state_name_combo = QComboBox()
+        self.preview_switch_section_label = QLabel("Switch")
+        self.preview_switch_group_combo = QComboBox()
+        self.preview_switch_name_combo = QComboBox()
         self.export_root_edit = QLineEdit()
         self.export_root_edit.setPlaceholderText("./Export")
         self.export_root_browse_button = QPushButton("选择目录")
@@ -1146,6 +1390,17 @@ class MainWindow(QMainWindow):
         self.resources_batch_feedback_detail_label = QLabel("支持批量权重、批量属性、批量重命名和排序反馈。")
         self.buses_workspace_status_label = QLabel(f"等待选择 {WWISE_OUTPUT_BUS_LABEL}。")
         self.buses_overview_hint_label = QLabel(f"从左侧概览选择当前要处理的 {WWISE_MASTER_MIXER_TITLE} 工作流。")
+        self.gamesync_workspace_status_label = QLabel("等待建立项目级 GameSync 定义。")
+        self.gamesync_overview_hint_label = QLabel("先补齐项目级 RTPC、State Group、Switch Group 壳层，再继续向事件和运行时绑定扩展。")
+        self.gamesync_overview_total_label = QLabel("GameSync 对象 0")
+        self.gamesync_overview_detail_label = QLabel("当前工程还没有任何 GameSync 定义。")
+        self.gamesync_workspace_tabs = QTabWidget()
+        self.gamesync_parameter_workspace_list = QListWidget()
+        self.gamesync_state_workspace_list = QListWidget()
+        self.gamesync_switch_workspace_list = QListWidget()
+        self.gamesync_parameter_workspace_detail_label = QLabel("当前还没有 Game Parameter。")
+        self.gamesync_state_workspace_detail_label = QLabel("当前还没有 State Group。")
+        self.gamesync_switch_workspace_detail_label = QLabel("当前还没有 Switch Group。")
         self.build_workspace_status_label = QLabel("等待准备导出配置。")
         self.build_overview_hint_label = QLabel("先确认导出设置，再查看差异和构建结果。")
         self.validation_overview_hint_label = QLabel("按级别与关键字聚焦问题，再回到对象或资源页修复。")
@@ -1317,11 +1572,81 @@ class MainWindow(QMainWindow):
         preview_momentary_inline.setObjectName("PreviewMomentaryInline")
         preview_momentary_inline.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
+        self.preview_gamesync_group.setMinimumWidth(0)
+        self.preview_gamesync_group.setMinimumHeight(56)
+        self.preview_gamesync_group.setMaximumHeight(84)
+        self.preview_gamesync_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        preview_gamesync_layout = QHBoxLayout(self.preview_gamesync_group)
+        preview_gamesync_layout.setContentsMargins(0, 0, 0, 0)
+        preview_gamesync_layout.setSpacing(8)
+        self.preview_gamesync_label.setProperty("role", "previewTransportTitle")
+        self.preview_gamesync_label.setMinimumWidth(0)
+        self.preview_gamesync_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.preview_parameter_section_label.setProperty("role", "previewTransportCaption")
+        self.preview_state_section_label.setProperty("role", "previewTransportCaption")
+        self.preview_switch_section_label.setProperty("role", "previewTransportCaption")
+        self.preview_parameter_current_label.setProperty("role", "previewTransportReadout")
+        self.preview_parameter_min_label.setProperty("role", "previewTransportCaption")
+        self.preview_parameter_max_label.setProperty("role", "previewTransportCaption")
+        for combo in [
+            self.preview_parameter_name_combo,
+            self.preview_parameter_scope_combo,
+            self.preview_state_group_combo,
+            self.preview_state_name_combo,
+            self.preview_switch_group_combo,
+            self.preview_switch_name_combo,
+        ]:
+            combo.setMinimumWidth(96)
+            combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.preview_parameter_name_combo.setMinimumWidth(124)
+        self.preview_parameter_slider.setMinimumWidth(176)
+        self.preview_parameter_slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.preview_parameter_value_spin.setMinimumWidth(82)
+        self.preview_parameter_value_spin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+        rtpc_layout = QVBoxLayout(self.preview_rtpc_transport_frame)
+        rtpc_layout.setContentsMargins(10, 6, 10, 6)
+        rtpc_layout.setSpacing(4)
+        rtpc_header_layout = QHBoxLayout()
+        rtpc_header_layout.setContentsMargins(0, 0, 0, 0)
+        rtpc_header_layout.setSpacing(6)
+        rtpc_header_layout.addWidget(self.preview_gamesync_label)
+        rtpc_header_layout.addWidget(self.preview_parameter_section_label)
+        rtpc_header_layout.addWidget(self.preview_parameter_name_combo)
+        rtpc_header_layout.addWidget(self.preview_parameter_scope_combo)
+        rtpc_header_layout.addStretch(1)
+        rtpc_header_layout.addWidget(self.preview_parameter_current_label)
+        rtpc_layout.addLayout(rtpc_header_layout)
+
+        rtpc_value_layout = QHBoxLayout()
+        rtpc_value_layout.setContentsMargins(0, 0, 0, 0)
+        rtpc_value_layout.setSpacing(8)
+        rtpc_value_layout.addWidget(self.preview_parameter_min_label)
+        rtpc_value_layout.addWidget(self.preview_parameter_slider, 1)
+        rtpc_value_layout.addWidget(self.preview_parameter_max_label)
+        rtpc_value_layout.addWidget(self.preview_parameter_value_spin)
+        rtpc_layout.addLayout(rtpc_value_layout)
+
+        preview_modes_layout = QGridLayout(self.preview_gamesync_modes_frame)
+        preview_modes_layout.setContentsMargins(10, 6, 10, 6)
+        preview_modes_layout.setHorizontalSpacing(6)
+        preview_modes_layout.setVerticalSpacing(4)
+        preview_modes_layout.addWidget(self.preview_state_section_label, 0, 0)
+        preview_modes_layout.addWidget(self.preview_state_group_combo, 0, 1)
+        preview_modes_layout.addWidget(self.preview_state_name_combo, 0, 2)
+        preview_modes_layout.addWidget(self.preview_switch_section_label, 1, 0)
+        preview_modes_layout.addWidget(self.preview_switch_group_combo, 1, 1)
+        preview_modes_layout.addWidget(self.preview_switch_name_combo, 1, 2)
+
+        preview_gamesync_layout.addWidget(self.preview_rtpc_transport_frame, 1)
+        preview_gamesync_layout.addWidget(self.preview_gamesync_modes_frame, 0)
+
         loudness_group_layout.addWidget(preview_summary_widget, 0)
         loudness_group_layout.addWidget(self.preview_waveform_strip, 1)
         loudness_group_layout.addWidget(preview_momentary_inline, 0)
         self.set_preview_transport_state("idle", has_target=False, can_replay=False)
         self.clear_recent_preview_insight()
+        self._load_preview_gamesync_editor()
 
         self.notes_group = QGroupBox("备注")
         notes_layout = QVBoxLayout(self.notes_group)
@@ -1334,6 +1659,7 @@ class MainWindow(QMainWindow):
         event_source_binding_layout.addWidget(self.event_source_binding_detail_label)
         event_source_binding_layout.addWidget(self.event_source_binding_empty_label)
         event_source_binding_layout.addWidget(self.event_source_binding_overview_scroll)
+        self.event_gamesync_group = self._build_event_gamesync_group()
 
         self.inline_bus_group = QGroupBox(WWISE_PROPERTY_EDITOR_TITLE)
         inline_bus_layout = QVBoxLayout(self.inline_bus_group)
@@ -1381,6 +1707,7 @@ class MainWindow(QMainWindow):
         bus_validation_layout = QVBoxLayout(self.bus_validation_group)
         bus_validation_layout.setContentsMargins(12, 10, 12, 10)
         bus_validation_layout.addWidget(self.project_bus_export_label)
+        self.bus_gamesync_group = self._build_bus_gamesync_group()
         self.inline_bus_content = QSplitter()
         self.inline_bus_content.setObjectName("InlineBusContentSplitter")
         self.inline_bus_content.setOrientation(Qt.Orientation.Horizontal)
@@ -1391,6 +1718,7 @@ class MainWindow(QMainWindow):
         bus_status_layout.setContentsMargins(0, 0, 0, 0)
         bus_status_layout.addWidget(self.bus_level_group)
         bus_status_layout.addWidget(self.bus_validation_group)
+        bus_status_layout.addWidget(self.bus_gamesync_group, 1)
         bus_status_layout.addStretch(1)
         self.inline_bus_content.addWidget(bus_status_panel)
         self.inline_bus_content.setStretchFactor(0, 3)
@@ -1471,6 +1799,42 @@ class MainWindow(QMainWindow):
         source_browser_layout.addWidget(self.source_tree)
         source_browser_layout.addWidget(self.source_browser_summary_label)
         source_browser_layout.addWidget(self.source_browser_status_label)
+
+        self.gamesync_browser_group = QGroupBox("GameSync")
+        gamesync_browser_layout = QVBoxLayout(self.gamesync_browser_group)
+        self.gamesync_browser_tabs.addTab(
+            self._build_gamesync_entry_panel(
+                "Game Parameters",
+                "项目级连续参数，后续会映射到 RTPC。",
+                self.gamesync_parameter_browser_list,
+                self.gamesync_parameter_browser_detail_label,
+            ),
+            load_app_icon("rtpc"),
+            "参数",
+        )
+        self.gamesync_browser_tabs.addTab(
+            self._build_gamesync_entry_panel(
+                "State Groups",
+                "项目级全局离散模式，后续用于 Event / Bus 属性覆盖。",
+                self.gamesync_state_browser_list,
+                self.gamesync_state_browser_detail_label,
+            ),
+            load_app_icon("state"),
+            "State",
+        )
+        self.gamesync_browser_tabs.addTab(
+            self._build_gamesync_entry_panel(
+                "Switch Groups",
+                "按 emitter 生效的离散分支，后续用于事件内变体切换。",
+                self.gamesync_switch_browser_list,
+                self.gamesync_switch_browser_detail_label,
+            ),
+            load_app_icon("switch"),
+            "Switch",
+        )
+        gamesync_browser_layout.addWidget(self.gamesync_browser_tabs)
+        gamesync_browser_layout.addWidget(self.gamesync_browser_summary_label)
+        gamesync_browser_layout.addWidget(self.gamesync_browser_status_label)
 
         self.master_bus_group = QGroupBox(WWISE_MASTER_AUDIO_BUS_TITLE)
         master_bus_layout = QFormLayout(self.master_bus_group)
@@ -1679,6 +2043,7 @@ class MainWindow(QMainWindow):
 
         self.events_workspace = self._build_events_workspace()
         self.resources_workspace = self._build_resources_workspace()
+        self.gamesync_workspace = self._build_gamesync_workspace()
         self.buses_workspace = self._build_buses_workspace()
         self.build_workspace = self._build_build_workspace()
         self.validation_workspace = self._build_validation_workspace()
@@ -1734,6 +2099,7 @@ class MainWindow(QMainWindow):
         for mode, title, description in [
             ("events", "事件设计", "以事件参数、触发控制和响度监视作为专属工作区，不再依赖旧属性编辑器。"),
             ("resources", "资源整理", "集中处理片段编排、批处理和生成预览，不再从属性页反复跳转。"),
+            ("gamesync", "GameSync", "集中查看项目级 Game Parameter、State Group 和 Switch Group，为 phase3 的 runtime 绑定做准备。"),
             ("buses", WWISE_MASTER_MIXER_TITLE, "将当前输出 Bus、Bus 层级和主 Bus 整合为独立工作区。"),
             ("validation", "校验修复", "直接进入问题中心，按校验结果修复对象与资源。"),
             ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
@@ -1745,6 +2111,7 @@ class MainWindow(QMainWindow):
             self.workspace_mode_stack.addWidget(page)
         self._workspace_mode_hosts["events"].addWidget(self.events_workspace)
         self._workspace_mode_hosts["resources"].addWidget(self.resources_workspace)
+        self._workspace_mode_hosts["gamesync"].addWidget(self.gamesync_workspace)
         self._workspace_mode_hosts["buses"].addWidget(self.buses_workspace)
         self._workspace_mode_hosts["build"].addWidget(self.build_workspace)
 
@@ -1778,6 +2145,7 @@ class MainWindow(QMainWindow):
         self.explorer_tabs.addTab(self.bus_browser_group, load_app_icon("bus"), "总线树")
         self.explorer_tabs.addTab(self.source_browser_group, load_app_icon("audio"), "源音频树")
         self.explorer_tabs.addTab(event_browser_page, load_app_icon("event"), "事件树")
+        self.explorer_tabs.addTab(self.gamesync_browser_group, load_app_icon("curve"), "GameSync")
         left_layout.addWidget(self.explorer_tabs)
         self._sync_explorer_browser_state()
         self.explorer_placeholder = self._build_detached_explorer_placeholder()
@@ -2250,11 +2618,18 @@ class MainWindow(QMainWindow):
 
     def _build_events_workspace(self) -> QWidget:
         self.events_workspace_tabs = QTabWidget()
-        design_page = self._build_two_column_page(
+        top_section = self._build_two_column_page(
             [self.event_general_group, self.event_behavior_group, self.event_source_binding_group],
             [self.modulation_group, self.combo_group, self.notes_group],
             splitter_name="EventDesignPageSplitter",
         )
+        design_page = QWidget()
+        design_layout = QVBoxLayout(design_page)
+        design_layout.setContentsMargins(0, 0, 0, 0)
+        design_layout.setSpacing(10)
+        design_layout.addWidget(top_section)
+        design_layout.addWidget(self._wrap_workspace_widget(self.event_gamesync_group))
+        design_layout.addStretch(1)
         self.event_design_scroll = self._wrap_scrollable_page(design_page)
         self.events_workspace_tabs.addTab(self.event_design_scroll, load_app_icon("event"), "事件参数")
         self.events_workspace_tabs.addTab(self.loudness_view, load_app_icon("audio"), "响度监视器")
@@ -2340,6 +2715,471 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self._build_resources_batch_feedback_card())
         layout.addWidget(self.contents_tabs, 1)
+        return workspace
+
+    def _create_curve_table(self) -> RtpcCurveEditor:
+        editor = RtpcCurveEditor()
+        editor.setMinimumHeight(164)
+        return editor
+
+    def _build_curve_editor_panel(
+        self,
+        table: RtpcCurveEditor,
+        interpolation_combo: QComboBox,
+        add_button: QPushButton,
+        remove_button: QPushButton,
+    ) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(8)
+        curve_hint = QLabel("曲线点")
+        curve_hint.setProperty("role", "workspaceSectionTitle")
+        action_row.addWidget(curve_hint)
+        action_row.addWidget(interpolation_combo)
+        action_row.addStretch(1)
+        action_row.addWidget(add_button)
+        action_row.addWidget(remove_button)
+        layout.addLayout(action_row)
+        layout.addWidget(table)
+        return panel
+
+    def _build_gamesync_parameter_editor(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(self.gamesync_parameter_add_button)
+        action_row.addWidget(self.gamesync_parameter_remove_button)
+        action_row.addStretch(1)
+        form = QFormLayout()
+        form.addRow("参数名", self.gamesync_parameter_name_edit)
+        form.addRow("默认值", self.gamesync_parameter_default_spin)
+        form.addRow("最小值", self.gamesync_parameter_min_spin)
+        form.addRow("最大值", self.gamesync_parameter_max_spin)
+        layout.addLayout(action_row)
+        layout.addLayout(form)
+        layout.addWidget(self.gamesync_parameter_notes_edit, 1)
+        return panel
+
+    def _build_gamesync_state_editor(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(self.gamesync_state_add_button)
+        action_row.addWidget(self.gamesync_state_remove_button)
+        action_row.addStretch(1)
+        form = QFormLayout()
+        form.addRow("组名", self.gamesync_state_name_edit)
+        form.addRow("默认 State", self.gamesync_state_default_edit)
+        child_actions = QHBoxLayout()
+        child_actions.setContentsMargins(0, 0, 0, 0)
+        child_actions.setSpacing(8)
+        child_actions.addWidget(self.gamesync_state_value_add_button)
+        child_actions.addWidget(self.gamesync_state_value_remove_button)
+        child_actions.addStretch(1)
+        self.gamesync_state_value_list.setAlternatingRowColors(True)
+        layout.addLayout(action_row)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("State 子项"))
+        layout.addLayout(child_actions)
+        layout.addWidget(self.gamesync_state_value_list)
+        layout.addWidget(self.gamesync_state_values_edit)
+        state_effect_form = QFormLayout()
+        state_effect_form.addRow("音量效果", self.gamesync_state_value_volume_spin)
+        state_effect_form.addRow("音高效果", self.gamesync_state_value_pitch_spin)
+        state_effect_form.addRow("静音效果", self.gamesync_state_value_mute_check)
+        layout.addLayout(state_effect_form)
+        layout.addWidget(self.gamesync_state_value_notes_edit)
+        layout.addWidget(self.gamesync_state_notes_edit, 1)
+        return panel
+
+    def _build_gamesync_switch_editor(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(self.gamesync_switch_add_button)
+        action_row.addWidget(self.gamesync_switch_remove_button)
+        action_row.addStretch(1)
+        form = QFormLayout()
+        form.addRow("组名", self.gamesync_switch_name_edit)
+        form.addRow("默认 Switch", self.gamesync_switch_default_edit)
+        form.addRow("映射模式", self.gamesync_switch_use_rtpc_check)
+        form.addRow("Game Parameter", self.gamesync_switch_mapped_parameter_edit)
+        child_actions = QHBoxLayout()
+        child_actions.setContentsMargins(0, 0, 0, 0)
+        child_actions.setSpacing(8)
+        child_actions.addWidget(self.gamesync_switch_value_add_button)
+        child_actions.addWidget(self.gamesync_switch_value_remove_button)
+        child_actions.addStretch(1)
+        self.gamesync_switch_value_list.setAlternatingRowColors(True)
+        layout.addLayout(action_row)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("Switch 子项"))
+        layout.addLayout(child_actions)
+        layout.addWidget(self.gamesync_switch_value_list)
+        layout.addWidget(self.gamesync_switch_values_edit)
+        switch_effect_form = QFormLayout()
+        switch_effect_form.addRow("音量效果", self.gamesync_switch_value_volume_spin)
+        switch_effect_form.addRow("音高效果", self.gamesync_switch_value_pitch_spin)
+        switch_effect_form.addRow("静音效果", self.gamesync_switch_value_mute_check)
+        layout.addLayout(switch_effect_form)
+        layout.addWidget(self.gamesync_switch_value_notes_edit)
+        layout.addWidget(self.gamesync_switch_notes_edit, 1)
+        return panel
+
+    def _build_rtpc_binding_editor(
+        self,
+        list_widget: QListWidget,
+        add_button: QPushButton,
+        remove_button: QPushButton,
+        parameter_edit: QLineEdit,
+        target_combo: QComboBox,
+        scope_combo: QComboBox,
+        curve_table: RtpcCurveEditor,
+        interpolation_combo: QComboBox,
+        add_point_button: QPushButton,
+        remove_point_button: QPushButton,
+        selected_input_spin: QDoubleSpinBox,
+        selected_output_spin: QDoubleSpinBox,
+        snap_check: QCheckBox,
+        snap_x_spin: QDoubleSpinBox,
+        snap_y_spin: QDoubleSpinBox,
+        notes_edit: QPlainTextEdit,
+    ) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(add_button)
+        action_row.addWidget(remove_button)
+        action_row.addStretch(1)
+        form = QFormLayout()
+        form.addRow("Game Parameter", parameter_edit)
+        form.addRow("目标", target_combo)
+        form.addRow("作用域", scope_combo)
+        list_widget.setAlternatingRowColors(True)
+        layout.addLayout(action_row)
+        layout.addWidget(list_widget)
+        layout.addLayout(form)
+        layout.addWidget(self._build_curve_editor_panel(curve_table, interpolation_combo, add_point_button, remove_point_button))
+        layout.addWidget(self._build_curve_detail_panel(selected_input_spin, selected_output_spin, snap_check, snap_x_spin, snap_y_spin))
+        layout.addWidget(notes_edit, 1)
+        return panel
+
+    def _build_curve_detail_panel(
+        self,
+        selected_input_spin: QDoubleSpinBox,
+        selected_output_spin: QDoubleSpinBox,
+        snap_check: QCheckBox,
+        snap_x_spin: QDoubleSpinBox,
+        snap_y_spin: QDoubleSpinBox,
+    ) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewCard")
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+        layout.addWidget(QLabel("选中点输入"))
+        layout.addWidget(selected_input_spin)
+        layout.addWidget(QLabel("输出"))
+        layout.addWidget(selected_output_spin)
+        layout.addSpacing(10)
+        layout.addWidget(snap_check)
+        layout.addWidget(QLabel("X 步长"))
+        layout.addWidget(snap_x_spin)
+        layout.addWidget(QLabel("Y 步长"))
+        layout.addWidget(snap_y_spin)
+        layout.addStretch(1)
+        return panel
+
+    def _build_state_override_editor(
+        self,
+        list_widget: QListWidget,
+        add_button: QPushButton,
+        remove_button: QPushButton,
+        group_edit: QLineEdit,
+        state_edit: QLineEdit,
+        volume_spin: QDoubleSpinBox,
+        pitch_spin: QSpinBox,
+        mute_check: QCheckBox,
+        notes_edit: QPlainTextEdit,
+    ) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(add_button)
+        action_row.addWidget(remove_button)
+        action_row.addStretch(1)
+        form = QFormLayout()
+        form.addRow("State Group", group_edit)
+        form.addRow("State", state_edit)
+        form.addRow("音量覆盖", volume_spin)
+        form.addRow("音高覆盖", pitch_spin)
+        form.addRow("静音", mute_check)
+        list_widget.setAlternatingRowColors(True)
+        layout.addLayout(action_row)
+        layout.addWidget(list_widget)
+        layout.addLayout(form)
+        layout.addWidget(notes_edit, 1)
+        return panel
+
+    def _build_switch_variant_editor(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.addWidget(self.event_switch_add_button)
+        action_row.addWidget(self.event_switch_remove_button)
+        action_row.addStretch(1)
+        form = QFormLayout()
+        form.addRow("Switch Group", self.event_switch_group_edit)
+        form.addRow("Switch", self.event_switch_name_edit)
+        form.addRow("Clip IDs", self.event_switch_clip_ids_edit)
+        self.event_switch_list.setAlternatingRowColors(True)
+        layout.addLayout(action_row)
+        layout.addWidget(self.event_switch_list)
+        layout.addLayout(form)
+        layout.addWidget(self.event_switch_notes_edit, 1)
+        return panel
+
+    def _build_event_gamesync_group(self) -> QGroupBox:
+        group = QGroupBox("GameSync 绑定")
+        layout = QVBoxLayout(group)
+        tabs = QTabWidget()
+        tabs.addTab(
+            self._build_rtpc_binding_editor(
+                self.event_rtpc_list,
+                self.event_rtpc_add_button,
+                self.event_rtpc_remove_button,
+                self.event_rtpc_parameter_edit,
+                self.event_rtpc_target_combo,
+                self.event_rtpc_scope_combo,
+                self.event_rtpc_curve_table,
+                self.event_rtpc_interpolation_combo,
+                self.event_rtpc_add_point_button,
+                self.event_rtpc_remove_point_button,
+                self.event_rtpc_selected_input_spin,
+                self.event_rtpc_selected_output_spin,
+                self.event_rtpc_snap_check,
+                self.event_rtpc_snap_x_spin,
+                self.event_rtpc_snap_y_spin,
+                self.event_rtpc_notes_edit,
+            ),
+            load_app_icon("rtpc"),
+            "RTPC",
+        )
+        tabs.addTab(
+            self._build_state_override_editor(
+                self.event_state_list,
+                self.event_state_add_button,
+                self.event_state_remove_button,
+                self.event_state_group_edit,
+                self.event_state_name_edit,
+                self.event_state_volume_spin,
+                self.event_state_pitch_spin,
+                self.event_state_mute_check,
+                self.event_state_notes_edit,
+            ),
+            load_app_icon("state"),
+            "State",
+        )
+        tabs.addTab(self._build_switch_variant_editor(), load_app_icon("switch"), "Switch")
+        layout.addWidget(tabs)
+        self.event_gamesync_tabs = tabs
+        return group
+
+    def _build_bus_gamesync_group(self) -> QGroupBox:
+        group = QGroupBox("Bus GameSync 绑定")
+        layout = QVBoxLayout(group)
+        tabs = QTabWidget()
+        tabs.addTab(
+            self._build_rtpc_binding_editor(
+                self.bus_rtpc_list,
+                self.bus_rtpc_add_button,
+                self.bus_rtpc_remove_button,
+                self.bus_rtpc_parameter_edit,
+                self.bus_rtpc_target_combo,
+                self.bus_rtpc_scope_combo,
+                self.bus_rtpc_curve_table,
+                self.bus_rtpc_interpolation_combo,
+                self.bus_rtpc_add_point_button,
+                self.bus_rtpc_remove_point_button,
+                self.bus_rtpc_selected_input_spin,
+                self.bus_rtpc_selected_output_spin,
+                self.bus_rtpc_snap_check,
+                self.bus_rtpc_snap_x_spin,
+                self.bus_rtpc_snap_y_spin,
+                self.bus_rtpc_notes_edit,
+            ),
+            load_app_icon("rtpc"),
+            "RTPC",
+        )
+        tabs.addTab(
+            self._build_state_override_editor(
+                self.bus_state_list,
+                self.bus_state_add_button,
+                self.bus_state_remove_button,
+                self.bus_state_group_edit,
+                self.bus_state_name_edit,
+                self.bus_state_volume_spin,
+                self.bus_state_pitch_spin,
+                self.bus_state_mute_check,
+                self.bus_state_notes_edit,
+            ),
+            load_app_icon("state"),
+            "State",
+        )
+        layout.addWidget(tabs)
+        self.bus_gamesync_tabs = tabs
+        return group
+
+    def _build_gamesync_entry_panel(
+        self,
+        title: str,
+        summary: str,
+        list_widget: QListWidget,
+        detail_label: QLabel,
+        editor_widget: QWidget | None = None,
+    ) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "workspaceSectionTitle")
+        summary_label = QLabel(summary)
+        summary_label.setProperty("role", "workspaceSectionSummary")
+        summary_label.setWordWrap(True)
+        list_widget.setAlternatingRowColors(True)
+        detail_card = QFrame()
+        detail_card.setObjectName("WorkspaceOverviewCard")
+        detail_layout = QVBoxLayout(detail_card)
+        detail_layout.setContentsMargins(12, 10, 12, 10)
+        detail_layout.setSpacing(6)
+        detail_label.setWordWrap(True)
+        detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        detail_layout.addWidget(detail_label)
+        layout.addWidget(title_label)
+        layout.addWidget(summary_label)
+        layout.addWidget(list_widget, 1)
+        layout.addWidget(detail_card)
+        if editor_widget is not None:
+            layout.addWidget(editor_widget, 1)
+        return panel
+
+    def _build_gamesync_overview_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setObjectName("WorkspaceOverviewPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_overview_card(
+                "GameSync 概览",
+                self.gamesync_overview_hint_label,
+                [
+                    ("概览", lambda: self.gamesync_workspace_tabs.setCurrentIndex(0), "curve", 0, 0),
+                    ("参数", lambda: self.gamesync_workspace_tabs.setCurrentIndex(1), "rtpc", 0, 1),
+                    ("State", lambda: self.gamesync_workspace_tabs.setCurrentIndex(2), "state", 1, 0),
+                    ("Switch", lambda: self.gamesync_workspace_tabs.setCurrentIndex(3), "switch", 1, 1),
+                ],
+            )
+        )
+        stats_card = QFrame()
+        stats_card.setObjectName("WorkspaceOverviewCard")
+        stats_layout = QVBoxLayout(stats_card)
+        stats_layout.setContentsMargins(12, 10, 12, 10)
+        stats_layout.setSpacing(6)
+        self.gamesync_overview_total_label.setProperty("role", "workspaceSectionTitle")
+        self.gamesync_overview_detail_label.setProperty("role", "workspaceSectionSummary")
+        self.gamesync_overview_detail_label.setWordWrap(True)
+        stats_layout.addWidget(self.gamesync_overview_total_label)
+        stats_layout.addWidget(self.gamesync_overview_detail_label)
+        layout.addWidget(stats_card)
+        layout.addWidget(
+            self._build_workspace_note_card(
+                "阶段边界",
+                [
+                    "项目级对象、事件绑定、总线绑定统一走工程模型，避免 authoring 数据散落在 UI 状态里。",
+                    "曲线模型先对齐 Wwise 心智，运行时 Schema v2 与 Unity API 仍留在后续 phase3 runtime 接入。",
+                ],
+            )
+        )
+        layout.addStretch(1)
+        return panel
+
+    def _build_gamesync_workspace(self) -> QWidget:
+        self.gamesync_workspace_tabs.addTab(self._build_gamesync_overview_panel(), load_app_icon("curve"), "概览")
+        self.gamesync_workspace_tabs.addTab(
+            self._build_gamesync_entry_panel(
+                "Game Parameters",
+                "项目级连续参数，驱动 RTPC 曲线与运行时全局参数。",
+                self.gamesync_parameter_workspace_list,
+                self.gamesync_parameter_workspace_detail_label,
+                self._build_gamesync_parameter_editor(),
+            ),
+            load_app_icon("rtpc"),
+            "参数",
+        )
+        self.gamesync_workspace_tabs.addTab(
+            self._build_gamesync_entry_panel(
+                "State Groups",
+                "项目级全局离散模式，用于事件与总线属性覆盖。",
+                self.gamesync_state_workspace_list,
+                self.gamesync_state_workspace_detail_label,
+                self._build_gamesync_state_editor(),
+            ),
+            load_app_icon("state"),
+            "State",
+        )
+        self.gamesync_workspace_tabs.addTab(
+            self._build_gamesync_entry_panel(
+                "Switch Groups",
+                "项目级 emitter 分支列表，用于事件内部变体切换。",
+                self.gamesync_switch_workspace_list,
+                self.gamesync_switch_workspace_detail_label,
+                self._build_gamesync_switch_editor(),
+            ),
+            load_app_icon("switch"),
+            "Switch",
+        )
+
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(
+            self._build_workspace_action_bar(
+                "GameSync",
+                self.gamesync_workspace_status_label,
+                [
+                    ("概览", lambda: self.gamesync_workspace_tabs.setCurrentIndex(0), "curve"),
+                    ("参数", lambda: self.gamesync_workspace_tabs.setCurrentIndex(1), "rtpc"),
+                    ("State", lambda: self.gamesync_workspace_tabs.setCurrentIndex(2), "state"),
+                    ("Switch", lambda: self.gamesync_workspace_tabs.setCurrentIndex(3), "switch"),
+                ],
+            )
+        )
+        layout.addWidget(self.gamesync_workspace_tabs, 1)
         return workspace
 
     def _build_buses_overview_panel(self) -> QWidget:
@@ -2569,7 +3409,8 @@ class MainWindow(QMainWindow):
                 ("事件设计", lambda: self._activate_workspace_mode("events"), "event", 0, 0),
                 ("资源整理", lambda: self._activate_workspace_mode("resources"), "content", 0, 1),
                 (WWISE_MASTER_MIXER_TITLE, lambda: self._activate_workspace_mode("buses"), "bus", 1, 0),
-                ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 1, 1),
+                ("GameSync", lambda: self._activate_workspace_mode("gamesync"), "generate", 1, 1),
+                ("结果中心", lambda: self._activate_workspace_mode("results"), "report", 2, 0),
             ],
         )
         first_run_note = self._build_workspace_note_card(
@@ -2988,7 +3829,8 @@ class MainWindow(QMainWindow):
         self.activity_preview_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         activity_preview_layout = QHBoxLayout(self.activity_preview_host)
         activity_preview_layout.setContentsMargins(0, 0, 0, 0)
-        activity_preview_layout.setSpacing(0)
+        activity_preview_layout.setSpacing(8)
+        activity_preview_layout.addWidget(self.preview_gamesync_group, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         activity_preview_layout.addWidget(self.loudness_group, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_row.addWidget(self.activity_preview_host, 1, Qt.AlignmentFlag.AlignVCenter)
         results_button = QPushButton("结果中心")
@@ -3183,6 +4025,12 @@ class MainWindow(QMainWindow):
                 "action": lambda: self._activate_workspace_mode("events"),
             },
             {
+                "title": "切到 GameSync",
+                "description": "进入项目级 RTPC、State Group 和 Switch Group 工作区。",
+                "keywords": "gamesync rtpc state switch 参数 状态 分支",
+                "action": lambda: self._activate_workspace_mode("gamesync"),
+            },
+            {
                 "title": f"切到 {WWISE_MASTER_MIXER_TITLE}",
                 "description": f"集中查看 {WWISE_OUTPUT_BUS_LABEL}、{WWISE_ROUTING_LABEL}、{WWISE_MASTER_MIXER_HIERARCHY_TITLE} 和 {WWISE_MASTER_AUDIO_BUS_TITLE}。",
                 "keywords": WWISE_BUS_WORKSPACE_KEYWORDS,
@@ -3309,6 +4157,7 @@ class MainWindow(QMainWindow):
             "home": "欢迎页",
             "resources": "资源整理",
             "events": "事件设计",
+            "gamesync": "GameSync",
             "buses": WWISE_MASTER_MIXER_TITLE,
             "validation": "校验修复",
             "build": "构建交付",
@@ -3354,6 +4203,10 @@ class MainWindow(QMainWindow):
             self.editor_tabs.setCurrentIndex(0)
             self.property_tabs.setCurrentIndex(0)
             self.events_workspace_tabs.setCurrentIndex(0)
+        elif mode == "gamesync":
+            self._mount_workspace_surface("gamesync")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["gamesync"])
+            self.gamesync_workspace_tabs.setCurrentIndex(0)
         elif mode == "buses":
             self._mount_workspace_surface("buses")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["buses"])
@@ -3438,6 +4291,13 @@ class MainWindow(QMainWindow):
                 "keywords": "事件设计 事件 属性 播放模式 引用关系 events design",
                 "priority": 25,
                 "action": lambda: self._activate_workspace_mode("events"),
+            },
+            {
+                "title": "工作区 | GameSync",
+                "description": "GameSync / 项目级 Game Parameter、State Group 和 Switch Group。",
+                "keywords": "gamesync rtpc state switch 参数 状态 分支",
+                "priority": 25,
+                "action": lambda: self._activate_workspace_mode("gamesync"),
             },
             {
                 "title": f"工作区 | {WWISE_MASTER_MIXER_TITLE}",
@@ -3923,6 +4783,13 @@ class MainWindow(QMainWindow):
             self.avoid_repeat_check.setChecked(False)
             self.notes_edit.clear()
             self.clip_table.setRowCount(0)
+            self._event_rtpc_bindings = []
+            self._event_state_overrides = []
+            self._event_switch_variants = []
+            self._refresh_event_binding_views()
+            self._load_event_binding_editor("rtpc")
+            self._load_event_binding_editor("state")
+            self._load_event_binding_editor("switch")
             self._current_event_source_paths = []
             self.set_object_context(
                 object_type="Folder",
@@ -3959,6 +4826,7 @@ class MainWindow(QMainWindow):
             if event_changed:
                 self._project_bus_selection_overridden = False
             self._update_object_bus_status()
+            self.set_preview_gamesync_enabled(False)
             self._loading_event = False
             return
 
@@ -3997,6 +4865,13 @@ class MainWindow(QMainWindow):
         self.combo_max_step_spin.setValue(event.combo_max_step)
         self.avoid_repeat_check.setChecked(event.avoid_immediate_repeat)
         self.notes_edit.setPlainText(event.notes)
+        self._event_rtpc_bindings = [self._rtpc_binding_payload(binding) for binding in getattr(event, "rtpc_bindings", [])]
+        self._event_state_overrides = [self._state_override_payload(override) for override in getattr(event, "state_overrides", [])]
+        self._event_switch_variants = [self._switch_variant_payload(variant) for variant in getattr(event, "switch_variants", [])]
+        self._refresh_event_binding_views()
+        self._load_event_binding_editor("rtpc")
+        self._load_event_binding_editor("state")
+        self._load_event_binding_editor("switch")
         self._set_clip_rows(event)
         self._clip_lookup = {clip.id: clip for clip in event.clips}
         self._current_event_source_paths = self._normalized_event_source_paths(event)
@@ -4017,6 +4892,7 @@ class MainWindow(QMainWindow):
         else:
             self._sync_current_event_bus_selection()
         self._update_object_bus_status()
+        self.set_preview_gamesync_enabled(True)
         if event.clips and not self.clip_table.selected_clip_ids():
             self.clip_table.selectRow(0)
         self._sync_clip_detail_from_table()
@@ -4388,7 +5264,7 @@ class MainWindow(QMainWindow):
         return str(payload[0]), str(payload[1])
 
     def _active_explorer_page_key(self) -> str:
-        page_keys = {0: "buses", 1: "sources", 2: "events"}
+        page_keys = {0: "buses", 1: "sources", 2: "events", 3: "gamesync"}
         return page_keys.get(self.explorer_tabs.currentIndex(), "events")
 
     def _sync_explorer_browser_state(self) -> None:
@@ -4396,6 +5272,7 @@ class MainWindow(QMainWindow):
             "buses": "搜索总线",
             "sources": "搜索源音频",
             "events": "搜索事件与文件夹",
+            "gamesync": "搜索 GameSync 定义",
         }
         self.tree_filter_edit.setPlaceholderText(placeholder_map.get(self._active_explorer_page_key(), "搜索当前浏览页"))
         self._apply_explorer_filter(self.tree_filter_edit.text())
@@ -4403,6 +5280,7 @@ class MainWindow(QMainWindow):
     def _apply_explorer_filter(self, query: str) -> None:
         self._apply_project_bus_browser_filter(query)
         self._refresh_source_browser_tree()
+        self._refresh_gamesync_views()
         self.tree.apply_filter(query)
 
     def _apply_project_bus_browser_filter(self, query: str) -> None:
@@ -4478,6 +5356,8 @@ class MainWindow(QMainWindow):
             editor_title = f"结果/{self._report_page_titles[self._active_report_index].replace('当前：', '')}"
         elif self._active_workspace_mode == "events":
             editor_title = f"事件设计/{self.events_workspace_tabs.tabText(self.events_workspace_tabs.currentIndex())}"
+        elif self._active_workspace_mode == "gamesync":
+            editor_title = f"GameSync/{self.gamesync_workspace_tabs.tabText(self.gamesync_workspace_tabs.currentIndex())}"
         elif self._active_workspace_mode == "buses":
             editor_title = f"{WWISE_MASTER_MIXER_TITLE}/{WWISE_PROPERTY_EDITOR_TITLE}"
         elif self._active_workspace_mode == "build":
@@ -4582,6 +5462,7 @@ class MainWindow(QMainWindow):
             "editor_tab": self.editor_tabs.currentIndex(),
             "property_tab": self.property_tabs.currentIndex(),
             "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
+            "gamesync_workspace_tab": self.gamesync_workspace_tabs.currentIndex(),
             "contents_tab": self.contents_tabs.currentIndex(),
             "report_tab": self._active_report_index,
             "workspace_splitter_sizes": self.workspace_splitter.sizes(),
@@ -4608,6 +5489,7 @@ class MainWindow(QMainWindow):
         editor_tab = state.get("editor_tab")
         property_tab = state.get("property_tab")
         events_workspace_tab = state.get("events_workspace_tab")
+        gamesync_workspace_tab = state.get("gamesync_workspace_tab")
         contents_tab = state.get("contents_tab")
         report_tab = state.get("report_tab")
         if isinstance(workspace_mode, str) and workspace_mode in self._workspace_mode_pages:
@@ -4626,6 +5508,8 @@ class MainWindow(QMainWindow):
             self.property_tabs.setCurrentIndex(property_tab)
         if isinstance(events_workspace_tab, int) and 0 <= events_workspace_tab < self.events_workspace_tabs.count():
             self.events_workspace_tabs.setCurrentIndex(events_workspace_tab)
+        if isinstance(gamesync_workspace_tab, int) and 0 <= gamesync_workspace_tab < self.gamesync_workspace_tabs.count():
+            self.gamesync_workspace_tabs.setCurrentIndex(gamesync_workspace_tab)
         if isinstance(contents_tab, int) and 0 <= contents_tab < self.contents_tabs.count():
             self.contents_tabs.setCurrentIndex(contents_tab)
         if isinstance(report_tab, int) and 0 <= report_tab < len(self._report_page_titles):
@@ -4688,6 +5572,14 @@ class MainWindow(QMainWindow):
         )
         self.buses_overview_hint_label.setText(
             f"当前浏览 Bus {current_project_bus}。左侧只保留导航与工程设置，主画布用于路由和输出调整。"
+        )
+        gamesync_tab_title = self.gamesync_workspace_tabs.tabText(self.gamesync_workspace_tabs.currentIndex())
+        total_gamesync_count = sum(len(self._gamesync_entries.get(key, [])) for key in ("game_parameters", "state_groups", "switch_groups"))
+        self.gamesync_workspace_status_label.setText(
+            f"当前页 {gamesync_tab_title} | GameSync 对象 {total_gamesync_count} 个 | phase3 工程对象已接入。"
+        )
+        self.gamesync_overview_hint_label.setText(
+            f"当前浏览 {gamesync_tab_title}。先稳定项目级对象，再推进 Event / Bus 绑定与 Schema v2。"
         )
         if self._build_status_detail_override is not None:
             self.build_workspace_status_label.setText(self._build_status_detail_override)
@@ -4920,6 +5812,8 @@ class MainWindow(QMainWindow):
             self.preview_transport_header,
             self.preview_transport_frame,
             self.preview_transport_metrics_frame,
+            self.preview_rtpc_transport_frame,
+            self.preview_gamesync_modes_frame,
             self.preview_transport_title_label,
             self.preview_transport_status_chip,
             self.preview_transport_toggle_button,
@@ -4929,6 +5823,10 @@ class MainWindow(QMainWindow):
             self.preview_transport_restart_button,
             self.preview_transport_stop_button,
             self.open_loudness_view_button,
+            self.preview_parameter_current_label,
+            self.preview_parameter_min_label,
+            self.preview_parameter_max_label,
+            self.preview_parameter_slider,
         ]:
             widget.style().unpolish(widget)
             widget.style().polish(widget)
@@ -5632,6 +6530,7 @@ class MainWindow(QMainWindow):
             "workspace_mode": self._active_workspace_mode,
             "property_tab": self.property_tabs.currentIndex(),
             "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
+            "gamesync_workspace_tab": self.gamesync_workspace_tabs.currentIndex(),
             "contents_tab": self.contents_tabs.currentIndex(),
             "report_tab": self._active_report_index,
             "explorer_detached": self._explorer_detached,
@@ -5670,6 +6569,7 @@ class MainWindow(QMainWindow):
             "editor_tab": preferences.get("active_editor_tab", self.editor_tabs.currentIndex()),
             "property_tab": preferences.get("property_tab", self.property_tabs.currentIndex()),
             "events_workspace_tab": preferences.get("events_workspace_tab", self.events_workspace_tabs.currentIndex()),
+            "gamesync_workspace_tab": preferences.get("gamesync_workspace_tab", self.gamesync_workspace_tabs.currentIndex()),
             "contents_tab": preferences.get("contents_tab", preferences.get("active_contents_tab", self.contents_tabs.currentIndex())),
             "report_tab": preferences.get("report_tab", self._active_report_index),
             "workspace_splitter_sizes": preferences.get("workspace_splitter_sizes"),
@@ -5793,6 +6693,8 @@ class MainWindow(QMainWindow):
                 "parent_bus": str(config.get("parent_bus", "Master")),
                 "volume_db": float(config["volume_db"]),
                 "is_muted": bool(config["is_muted"]),
+                "rtpc_bindings": [dict(binding) for binding in config.get("rtpc_bindings", [])],
+                "state_overrides": [dict(override) for override in config.get("state_overrides", [])],
             }
             for config in self._project_bus_configs
         ]
@@ -5823,6 +6725,8 @@ class MainWindow(QMainWindow):
             "parent_bus": "Master",
             "volume_db": 0.0,
             "is_muted": False,
+            "rtpc_bindings": [],
+            "state_overrides": [],
         }
         self._project_bus_configs.insert(0, master_config)
         return master_config
@@ -6080,6 +6984,8 @@ class MainWindow(QMainWindow):
             "parent_bus": "Master",
             "volume_db": 0.0,
             "is_muted": False,
+            "rtpc_bindings": [],
+            "state_overrides": [],
         }
         normalized_children: list[dict[str, object]] = []
         seen: set[str] = set()
@@ -6101,6 +7007,8 @@ class MainWindow(QMainWindow):
                     "parent_bus": "Master",
                     "volume_db": float(config.volume_db),
                     "is_muted": bool(config.is_muted),
+                    "rtpc_bindings": [self._rtpc_binding_payload(binding) for binding in getattr(config, "rtpc_bindings", [])],
+                    "state_overrides": [self._state_override_payload(override) for override in getattr(config, "state_overrides", [])],
                 }
                 seen.add(key)
                 continue
@@ -6111,12 +7019,22 @@ class MainWindow(QMainWindow):
                     "parent_bus": str(getattr(config, "parent_bus", "Master") or "Master"),
                     "volume_db": float(config.volume_db),
                     "is_muted": bool(config.is_muted),
+                    "rtpc_bindings": [self._rtpc_binding_payload(binding) for binding in getattr(config, "rtpc_bindings", [])],
+                    "state_overrides": [self._state_override_payload(override) for override in getattr(config, "state_overrides", [])],
                 }
             )
             seen.add(key)
         if not normalized_children:
             normalized_children = [
-                {"name": bus_name, "original_name": bus_name, "parent_bus": "Master", "volume_db": 0.0, "is_muted": False}
+                {
+                    "name": bus_name,
+                    "original_name": bus_name,
+                    "parent_bus": "Master",
+                    "volume_db": 0.0,
+                    "is_muted": False,
+                    "rtpc_bindings": [],
+                    "state_overrides": [],
+                }
                 for bus_name in DEFAULT_BUSES
             ]
         self._project_bus_configs = [normalized_master, *normalized_children]
@@ -6170,6 +7088,7 @@ class MainWindow(QMainWindow):
                 self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
                 self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
                 self.inline_bus_export_chip.setText("导出 BusConfigs")
+                self._load_bus_binding_editors(self._project_master_bus_config())
                 return
             self._active_project_bus_name = ""
             self.project_bus_name_edit.clear()
@@ -6191,6 +7110,7 @@ class MainWindow(QMainWindow):
             self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
             self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
             self.inline_bus_export_chip.setText("导出 -")
+            self._load_bus_binding_editors(None)
             return
         config = self._project_bus_configs[row]
         bus_name = str(config["name"])
@@ -6221,6 +7141,7 @@ class MainWindow(QMainWindow):
         self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} {parent_bus_name}")
         self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} 是" if self.default_bus_combo.currentText() == bus_name else f"{WWISE_DEFAULT_BUS_LABEL} 否")
         self.inline_bus_export_chip.setText("导出 BusConfigs")
+        self._load_bus_binding_editors(config)
         self.project_bus_summary_label.setText(
             f"当前选中：{bus_name}\n{WWISE_ROUTING_LABEL}: {route_text}\n{WWISE_CHILD_BUSES_LABEL}: {', '.join(child_names) if child_names else '无'}\n常用编辑已整合到属性编辑器。"
         )
@@ -6269,6 +7190,7 @@ class MainWindow(QMainWindow):
         current_config["parent_bus"] = new_parent_bus
         current_config["volume_db"] = float(self.project_bus_volume_spin.value())
         current_config["is_muted"] = bool(self.project_bus_mute_check.isChecked())
+        self._sync_bus_binding_editor_to_state(current_config)
         current_default_bus = self.default_bus_combo.currentText()
         if current_default_bus.casefold() == current_name.casefold() and current_default_bus != new_name:
             current_default_bus = new_name
@@ -6286,6 +7208,8 @@ class MainWindow(QMainWindow):
                     parent_bus=str(config.get("parent_bus", "Master")),
                     volume_db=float(config["volume_db"]),
                     is_muted=bool(config["is_muted"]),
+                    rtpc_bindings=[RtpcBindingModel(**binding) for binding in config.get("rtpc_bindings", [])],
+                    state_overrides=[StateOverrideModel(**override) for override in config.get("state_overrides", [])],
                 )
                 for config in self._project_bus_configs
             ],
@@ -6513,6 +7437,9 @@ class MainWindow(QMainWindow):
         self._emit_project_settings_changed()
 
     def current_event_form_data(self) -> dict[str, object]:
+        self._sync_event_binding_editor_to_state("rtpc")
+        self._sync_event_binding_editor_to_state("state")
+        self._sync_event_binding_editor_to_state("switch")
         return {
             "id": self.event_id_edit.text().strip(),
             "display_name": self.display_name_edit.text().strip(),
@@ -6535,6 +7462,15 @@ class MainWindow(QMainWindow):
             "combo_max_step": self.combo_max_step_spin.value(),
             "avoid_immediate_repeat": self.avoid_repeat_check.isChecked(),
             "tags": [tag.strip() for tag in self.tags_summary_edit.text().split(",") if tag.strip()],
+            "rtpc_bindings": [dict(binding) for binding in self._event_rtpc_bindings],
+            "state_overrides": [dict(override) for override in self._event_state_overrides],
+            "switch_variants": [
+                {
+                    **dict(variant),
+                    "clip_ids": list(variant.get("clip_ids", [])),
+                }
+                for variant in self._event_switch_variants
+            ],
             "notes": self.notes_edit.toPlainText().strip(),
         }
 
@@ -7148,6 +8084,7 @@ class MainWindow(QMainWindow):
         self.preview_transport_restart_button.clicked.connect(self.restartPreviewRequested.emit)
         self.preview_transport_stop_button.clicked.connect(self.stopPreviewEventRequested.emit)
         self.events_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
+        self.gamesync_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.contents_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.clear_meter_button.clicked.connect(self.clear_peak_hold)
         self.loudness_scan_button.clicked.connect(self.loudnessScanRequested.emit)
@@ -7176,6 +8113,38 @@ class MainWindow(QMainWindow):
         self.project_bus_mute_check.checkStateChanged.connect(self._emit_project_settings_changed)
         self.project_master_volume_spin.valueChanged.connect(self._emit_project_settings_changed)
         self.project_master_mute_check.checkStateChanged.connect(self._emit_project_settings_changed)
+        self.bus_rtpc_list.itemSelectionChanged.connect(
+            lambda: self._load_bus_binding_editors(self._project_bus_configs[self._selected_project_bus_index()] if self._selected_project_bus_index() >= 0 else None)
+        )
+        self.bus_rtpc_add_button.clicked.connect(lambda: self._add_current_bus_binding("rtpc"))
+        self.bus_rtpc_remove_button.clicked.connect(lambda: self._remove_current_bus_binding("rtpc"))
+        self.bus_rtpc_parameter_edit.editingFinished.connect(self._handle_bus_rtpc_curve_context_changed)
+        self.bus_rtpc_target_combo.currentIndexChanged.connect(self._handle_bus_rtpc_curve_context_changed)
+        self.bus_rtpc_scope_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
+        self.bus_rtpc_curve_table.pointsChanged.connect(self._emit_project_settings_changed)
+        self.bus_rtpc_curve_table.selectionChanged.connect(lambda _index: self._sync_curve_interpolation_combo(self.bus_rtpc_curve_table, self.bus_rtpc_interpolation_combo))
+        self.bus_rtpc_curve_table.selectionChanged.connect(lambda _index: self._sync_curve_point_controls(self.bus_rtpc_curve_table, self.bus_rtpc_selected_input_spin, self.bus_rtpc_selected_output_spin))
+        self.bus_rtpc_curve_table.pointPreviewChanged.connect(lambda: self._sync_curve_point_controls(self.bus_rtpc_curve_table, self.bus_rtpc_selected_input_spin, self.bus_rtpc_selected_output_spin))
+        self.bus_rtpc_interpolation_combo.currentIndexChanged.connect(lambda: self._update_curve_interpolation(self.bus_rtpc_curve_table, self.bus_rtpc_interpolation_combo, self._emit_project_settings_changed))
+        self.bus_rtpc_add_point_button.clicked.connect(lambda: self._append_curve_point(self.bus_rtpc_curve_table, self._emit_project_settings_changed))
+        self.bus_rtpc_remove_point_button.clicked.connect(lambda: self._remove_curve_point(self.bus_rtpc_curve_table, self._emit_project_settings_changed))
+        self.bus_rtpc_selected_input_spin.valueChanged.connect(lambda _value: self._update_curve_point_from_controls(self.bus_rtpc_curve_table, self.bus_rtpc_selected_input_spin, self.bus_rtpc_selected_output_spin))
+        self.bus_rtpc_selected_output_spin.valueChanged.connect(lambda _value: self._update_curve_point_from_controls(self.bus_rtpc_curve_table, self.bus_rtpc_selected_input_spin, self.bus_rtpc_selected_output_spin))
+        self.bus_rtpc_snap_check.checkStateChanged.connect(lambda _state: self._apply_curve_snap_settings(self.bus_rtpc_curve_table, self.bus_rtpc_snap_check, self.bus_rtpc_snap_x_spin, self.bus_rtpc_snap_y_spin))
+        self.bus_rtpc_snap_x_spin.valueChanged.connect(lambda _value: self._apply_curve_snap_settings(self.bus_rtpc_curve_table, self.bus_rtpc_snap_check, self.bus_rtpc_snap_x_spin, self.bus_rtpc_snap_y_spin))
+        self.bus_rtpc_snap_y_spin.valueChanged.connect(lambda _value: self._apply_curve_snap_settings(self.bus_rtpc_curve_table, self.bus_rtpc_snap_check, self.bus_rtpc_snap_x_spin, self.bus_rtpc_snap_y_spin))
+        self.bus_rtpc_notes_edit.textChanged.connect(self._emit_project_settings_changed)
+        self.bus_state_list.itemSelectionChanged.connect(
+            lambda: self._load_bus_binding_editors(self._project_bus_configs[self._selected_project_bus_index()] if self._selected_project_bus_index() >= 0 else None)
+        )
+        self.bus_state_add_button.clicked.connect(lambda: self._add_current_bus_binding("state"))
+        self.bus_state_remove_button.clicked.connect(lambda: self._remove_current_bus_binding("state"))
+        self.bus_state_group_edit.editingFinished.connect(self._emit_project_settings_changed)
+        self.bus_state_name_edit.editingFinished.connect(self._emit_project_settings_changed)
+        self.bus_state_volume_spin.valueChanged.connect(self._emit_project_settings_changed)
+        self.bus_state_pitch_spin.valueChanged.connect(self._emit_project_settings_changed)
+        self.bus_state_mute_check.checkStateChanged.connect(self._emit_project_settings_changed)
+        self.bus_state_notes_edit.textChanged.connect(self._emit_project_settings_changed)
         self.inline_bus_new_button.clicked.connect(self._request_add_and_assign_project_bus)
         self.inline_bus_set_default_button.clicked.connect(self._set_current_bus_as_default)
         self.inline_bus_to_master_button.clicked.connect(self._route_current_bus_to_master)
@@ -7189,9 +8158,81 @@ class MainWindow(QMainWindow):
         self.source_browser_copy_button.clicked.connect(self._copy_selected_source_asset_path)
         self.source_browser_locate_event_button.clicked.connect(self._locate_selected_source_reference_event)
         self.source_browser_add_to_event_button.clicked.connect(self._append_selected_source_to_current_event)
+        self.gamesync_browser_tabs.currentChanged.connect(lambda _index: self._update_gamesync_browser_status())
+        self.gamesync_parameter_browser_list.itemSelectionChanged.connect(self._update_gamesync_browser_status)
+        self.gamesync_state_browser_list.itemSelectionChanged.connect(self._update_gamesync_browser_status)
+        self.gamesync_switch_browser_list.itemSelectionChanged.connect(self._update_gamesync_browser_status)
+        self.gamesync_parameter_workspace_list.itemSelectionChanged.connect(lambda: self._load_gamesync_editor("game_parameters"))
+        self.gamesync_parameter_workspace_list.itemSelectionChanged.connect(
+            lambda: self._update_gamesync_detail_label(
+                self.gamesync_parameter_workspace_list,
+                self.gamesync_parameter_workspace_detail_label,
+                "当前还没有 Game Parameter。",
+            )
+        )
+        self.gamesync_state_workspace_list.itemSelectionChanged.connect(lambda: self._load_gamesync_editor("state_groups"))
+        self.gamesync_state_workspace_list.itemSelectionChanged.connect(
+            lambda: self._update_gamesync_detail_label(
+                self.gamesync_state_workspace_list,
+                self.gamesync_state_workspace_detail_label,
+                "当前还没有 State Group。",
+            )
+        )
+        self.gamesync_switch_workspace_list.itemSelectionChanged.connect(lambda: self._load_gamesync_editor("switch_groups"))
+        self.gamesync_switch_workspace_list.itemSelectionChanged.connect(
+            lambda: self._update_gamesync_detail_label(
+                self.gamesync_switch_workspace_list,
+                self.gamesync_switch_workspace_detail_label,
+                "当前还没有 Switch Group。",
+            )
+        )
+        self.gamesync_parameter_add_button.clicked.connect(lambda: self._create_gamesync_item("game_parameters"))
+        self.gamesync_parameter_remove_button.clicked.connect(lambda: self._remove_gamesync_item("game_parameters"))
+        self.gamesync_parameter_name_edit.editingFinished.connect(self._emit_gamesync_changed)
+        self.gamesync_parameter_default_spin.valueChanged.connect(self._emit_gamesync_changed)
+        self.gamesync_parameter_min_spin.valueChanged.connect(self._emit_gamesync_changed)
+        self.gamesync_parameter_max_spin.valueChanged.connect(self._emit_gamesync_changed)
+        self.gamesync_parameter_notes_edit.textChanged.connect(self._emit_gamesync_changed)
+        self.gamesync_state_add_button.clicked.connect(lambda: self._create_gamesync_item("state_groups"))
+        self.gamesync_state_remove_button.clicked.connect(lambda: self._remove_gamesync_item("state_groups"))
+        self.gamesync_state_name_edit.editingFinished.connect(self._emit_gamesync_changed)
+        self.gamesync_state_value_list.itemSelectionChanged.connect(lambda: self._load_gamesync_child_value_editor("state_groups"))
+        self.gamesync_state_value_add_button.clicked.connect(lambda: self._create_gamesync_child_value("state_groups"))
+        self.gamesync_state_value_remove_button.clicked.connect(lambda: self._remove_gamesync_child_value("state_groups"))
+        self.gamesync_state_values_edit.editingFinished.connect(lambda: self._commit_gamesync_child_value("state_groups"))
+        self.gamesync_state_value_volume_spin.valueChanged.connect(lambda _value: self._commit_gamesync_child_value("state_groups"))
+        self.gamesync_state_value_pitch_spin.valueChanged.connect(lambda _value: self._commit_gamesync_child_value("state_groups"))
+        self.gamesync_state_value_mute_check.checkStateChanged.connect(lambda _state: self._commit_gamesync_child_value("state_groups"))
+        self.gamesync_state_value_notes_edit.textChanged.connect(lambda: self._commit_gamesync_child_value("state_groups"))
+        self.gamesync_state_default_edit.editingFinished.connect(self._emit_gamesync_changed)
+        self.gamesync_state_notes_edit.textChanged.connect(self._emit_gamesync_changed)
+        self.gamesync_switch_add_button.clicked.connect(lambda: self._create_gamesync_item("switch_groups"))
+        self.gamesync_switch_remove_button.clicked.connect(lambda: self._remove_gamesync_item("switch_groups"))
+        self.gamesync_switch_name_edit.editingFinished.connect(self._emit_gamesync_changed)
+        self.gamesync_switch_value_list.itemSelectionChanged.connect(lambda: self._load_gamesync_child_value_editor("switch_groups"))
+        self.gamesync_switch_value_add_button.clicked.connect(lambda: self._create_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_value_remove_button.clicked.connect(lambda: self._remove_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_values_edit.editingFinished.connect(lambda: self._commit_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_value_volume_spin.valueChanged.connect(lambda _value: self._commit_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_value_pitch_spin.valueChanged.connect(lambda _value: self._commit_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_value_mute_check.checkStateChanged.connect(lambda _state: self._commit_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_value_notes_edit.textChanged.connect(lambda: self._commit_gamesync_child_value("switch_groups"))
+        self.gamesync_switch_default_edit.editingFinished.connect(self._emit_gamesync_changed)
+        self.gamesync_switch_use_rtpc_check.checkStateChanged.connect(self._emit_gamesync_changed)
+        self.gamesync_switch_mapped_parameter_edit.editingFinished.connect(self._emit_gamesync_changed)
+        self.gamesync_switch_notes_edit.textChanged.connect(self._emit_gamesync_changed)
         self.preview_bus_combo.currentIndexChanged.connect(self.previewBusSelectionChanged.emit)
         self.preview_bus_volume_spin.valueChanged.connect(self._emit_preview_bus_state_changed)
         self.preview_bus_mute_check.checkStateChanged.connect(self._emit_preview_bus_state_changed)
+        self.preview_parameter_name_combo.currentIndexChanged.connect(self._handle_preview_parameter_selection_changed)
+        self.preview_parameter_scope_combo.currentIndexChanged.connect(self._handle_preview_parameter_selection_changed)
+        self.preview_parameter_value_spin.valueChanged.connect(lambda _value: self._handle_preview_parameter_value_changed())
+        self.preview_parameter_slider.sliderMoved.connect(self._preview_parameter_slider_preview)
+        self.preview_parameter_slider.valueChanged.connect(self._handle_preview_parameter_slider_changed)
+        self.preview_state_group_combo.currentIndexChanged.connect(self._handle_preview_state_group_changed)
+        self.preview_state_name_combo.currentIndexChanged.connect(self._handle_preview_state_value_changed)
+        self.preview_switch_group_combo.currentIndexChanged.connect(self._handle_preview_switch_group_changed)
+        self.preview_switch_name_combo.currentIndexChanged.connect(self._handle_preview_switch_value_changed)
         self.import_template_bus_combo.currentIndexChanged.connect(self._update_event_import_template_defaults_from_controls)
         self.import_template_asset_prefix_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
         self.import_template_tags_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
@@ -7212,6 +8253,43 @@ class MainWindow(QMainWindow):
         self.avoid_repeat_check.checkStateChanged.connect(self._emit_event_properties_changed)
         self.notes_edit.textChanged.connect(self._emit_event_properties_changed)
         self.tags_summary_edit.editingFinished.connect(self._emit_event_properties_changed)
+        self.event_rtpc_list.itemSelectionChanged.connect(lambda: self._load_event_binding_editor("rtpc"))
+        self.event_rtpc_add_button.clicked.connect(lambda: self._create_event_binding("rtpc"))
+        self.event_rtpc_remove_button.clicked.connect(lambda: self._remove_event_binding("rtpc"))
+        self.event_rtpc_parameter_edit.currentIndexChanged.connect(self._handle_event_rtpc_curve_context_changed)
+        self.event_rtpc_target_combo.currentIndexChanged.connect(self._handle_event_rtpc_curve_context_changed)
+        self.event_rtpc_scope_combo.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.event_rtpc_curve_table.pointsChanged.connect(self._emit_event_properties_changed)
+        self.event_rtpc_curve_table.selectionChanged.connect(lambda _index: self._sync_curve_interpolation_combo(self.event_rtpc_curve_table, self.event_rtpc_interpolation_combo))
+        self.event_rtpc_curve_table.selectionChanged.connect(lambda _index: self._sync_curve_point_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
+        self.event_rtpc_curve_table.pointPreviewChanged.connect(lambda: self._sync_curve_point_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
+        self.event_rtpc_interpolation_combo.currentIndexChanged.connect(lambda: self._update_curve_interpolation(self.event_rtpc_curve_table, self.event_rtpc_interpolation_combo, self._emit_event_properties_changed))
+        self.event_rtpc_add_point_button.clicked.connect(lambda: self._append_curve_point(self.event_rtpc_curve_table, self._emit_event_properties_changed))
+        self.event_rtpc_remove_point_button.clicked.connect(lambda: self._remove_curve_point(self.event_rtpc_curve_table, self._emit_event_properties_changed))
+        self.event_rtpc_selected_input_spin.valueChanged.connect(lambda _value: self._update_curve_point_from_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
+        self.event_rtpc_selected_output_spin.valueChanged.connect(lambda _value: self._update_curve_point_from_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
+        self.event_rtpc_snap_check.checkStateChanged.connect(lambda _state: self._apply_curve_snap_settings(self.event_rtpc_curve_table, self.event_rtpc_snap_check, self.event_rtpc_snap_x_spin, self.event_rtpc_snap_y_spin))
+        self.event_rtpc_snap_x_spin.valueChanged.connect(lambda _value: self._apply_curve_snap_settings(self.event_rtpc_curve_table, self.event_rtpc_snap_check, self.event_rtpc_snap_x_spin, self.event_rtpc_snap_y_spin))
+        self.event_rtpc_snap_y_spin.valueChanged.connect(lambda _value: self._apply_curve_snap_settings(self.event_rtpc_curve_table, self.event_rtpc_snap_check, self.event_rtpc_snap_x_spin, self.event_rtpc_snap_y_spin))
+        self.event_rtpc_notes_edit.textChanged.connect(self._emit_event_properties_changed)
+        self.event_state_list.itemSelectionChanged.connect(lambda: self._load_event_binding_editor("state"))
+        self.event_state_add_button.clicked.connect(lambda: self._create_event_binding("state"))
+        self.event_state_remove_button.clicked.connect(lambda: self._remove_event_binding("state"))
+        self.event_state_group_edit.currentIndexChanged.connect(lambda: self._refresh_event_state_name_options())
+        self.event_state_group_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.event_state_name_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.event_state_volume_spin.valueChanged.connect(self._emit_event_properties_changed)
+        self.event_state_pitch_spin.valueChanged.connect(self._emit_event_properties_changed)
+        self.event_state_mute_check.checkStateChanged.connect(self._emit_event_properties_changed)
+        self.event_state_notes_edit.textChanged.connect(self._emit_event_properties_changed)
+        self.event_switch_list.itemSelectionChanged.connect(lambda: self._load_event_binding_editor("switch"))
+        self.event_switch_add_button.clicked.connect(lambda: self._create_event_binding("switch"))
+        self.event_switch_remove_button.clicked.connect(lambda: self._remove_event_binding("switch"))
+        self.event_switch_group_edit.currentIndexChanged.connect(lambda: self._refresh_event_switch_name_options())
+        self.event_switch_group_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.event_switch_name_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.event_switch_clip_ids_edit.editingFinished.connect(self._emit_event_properties_changed)
+        self.event_switch_notes_edit.textChanged.connect(self._emit_event_properties_changed)
         self.clip_source_detail_edit.editingFinished.connect(lambda: self._emit_selected_clip_detail_change("source_path", self.clip_source_detail_edit.text()))
         self.clip_asset_detail_edit.editingFinished.connect(lambda: self._emit_selected_clip_detail_change("asset_key", self.clip_asset_detail_edit.text()))
         self.clip_weight_detail_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("weight", str(value)))
@@ -7293,11 +8371,25 @@ class MainWindow(QMainWindow):
 
     def _emit_event_properties_changed(self, *args) -> None:
         if not self._loading_event and self.property_group.isEnabled():
+            self._sync_event_binding_editor_to_state("rtpc")
+            self._sync_event_binding_editor_to_state("state")
+            self._sync_event_binding_editor_to_state("switch")
             self.eventPropertiesChanged.emit()
 
     def _emit_project_settings_changed(self, *args) -> None:
         if not self._loading_event and self._sync_project_bus_editor_to_state(show_errors=True):
             self.projectSettingsChanged.emit()
+
+    def _emit_gamesync_changed(self, *args) -> None:
+        if not self._loading_gamesync:
+            current_key = {
+                1: "game_parameters",
+                2: "state_groups",
+                3: "switch_groups",
+            }.get(self.gamesync_workspace_tabs.currentIndex())
+            if current_key is not None:
+                self._sync_gamesync_editor_to_state(current_key)
+            self.gameSyncChanged.emit()
 
     def _emit_preview_bus_state_changed(self, *args) -> None:
         if not self._loading_event:
@@ -7359,6 +8451,1635 @@ class MainWindow(QMainWindow):
         self._source_browser_entries = list(entries)
         self._refresh_source_browser_tree()
         self._refresh_event_source_binding_state()
+
+    def _normalized_name_list_from_text(self, text: str) -> list[str]:
+        seen: set[str] = set()
+        values: list[str] = []
+        for raw_value in text.split(","):
+            value = raw_value.strip()
+            if not value:
+                continue
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(value)
+        return values
+
+    def _default_curve_point_payloads(self, input_range: tuple[float, float] = (0.0, 100.0), output_range: tuple[float, float] = (0.0, 1.0)) -> list[dict[str, object]]:
+        input_min, input_max = input_range
+        output_min, output_max = output_range
+        return [
+            {"input_value": float(input_min), "output_value": float(output_min), "interpolation": "Linear"},
+            {"input_value": float(input_max), "output_value": float(output_max), "interpolation": "Linear"},
+        ]
+
+    def _rtpc_input_range(self, parameter_name: str) -> tuple[float, float]:
+        normalized = parameter_name.strip().casefold()
+        for entry in self._gamesync_models.get("game_parameters", []):
+            if str(entry.get("name", "")).strip().casefold() == normalized:
+                return float(entry.get("min_value", 0.0)), float(entry.get("max_value", 100.0))
+        return 0.0, 100.0
+
+    def _rtpc_output_range(self, target: str) -> tuple[float, float]:
+        if target == "EventPitchCents":
+            return float(MIN_PITCH_CENTS), float(MAX_PITCH_CENTS)
+        return float(MIN_VOLUME_DB), float(MAX_VOLUME_DB)
+
+    def _configure_curve_editor_ranges(
+        self,
+        table: RtpcCurveEditor,
+        input_spin: QDoubleSpinBox,
+        output_spin: QDoubleSpinBox,
+        *,
+        parameter_name: str,
+        target: str,
+    ) -> None:
+        input_min, input_max = self._rtpc_input_range(parameter_name)
+        output_min, output_max = self._rtpc_output_range(target)
+        table.set_axis_ranges(input_min, input_max, output_min, output_max)
+        input_spin.blockSignals(True)
+        output_spin.blockSignals(True)
+        input_spin.setRange(input_min, input_max)
+        output_spin.setRange(output_min, output_max)
+        input_spin.blockSignals(False)
+        output_spin.blockSignals(False)
+
+    def _refresh_event_rtpc_curve_editor_ranges(self) -> None:
+        self._configure_curve_editor_ranges(
+            self.event_rtpc_curve_table,
+            self.event_rtpc_selected_input_spin,
+            self.event_rtpc_selected_output_spin,
+            parameter_name=self.event_rtpc_parameter_edit.currentText(),
+            target=self.event_rtpc_target_combo.currentText(),
+        )
+
+    def _refresh_bus_rtpc_curve_editor_ranges(self) -> None:
+        self._configure_curve_editor_ranges(
+            self.bus_rtpc_curve_table,
+            self.bus_rtpc_selected_input_spin,
+            self.bus_rtpc_selected_output_spin,
+            parameter_name=self.bus_rtpc_parameter_edit.text(),
+            target=self.bus_rtpc_target_combo.currentText(),
+        )
+
+    def _copy_curve_point_payloads(self, points: list[dict[str, object]] | None) -> list[dict[str, object]]:
+        normalized = [
+            {
+                "input_value": float(point.get("input_value", 0.0)),
+                "output_value": float(point.get("output_value", 0.0)),
+                "interpolation": "Constant" if str(point.get("interpolation", "Linear")) == "Constant" else "Linear",
+            }
+            for point in (points or [])
+            if isinstance(point, dict)
+        ]
+        if not normalized:
+            normalized = self._default_curve_point_payloads()
+        normalized.sort(key=lambda point: float(point["input_value"]))
+        return normalized
+
+    def _set_curve_table_points(self, table: RtpcCurveEditor, points: list[dict[str, object]] | None) -> None:
+        table.blockSignals(True)
+        table.set_points(self._copy_curve_point_payloads(points))
+        table.blockSignals(False)
+
+    def _curve_table_points(self, table: RtpcCurveEditor) -> list[dict[str, object]]:
+        return self._copy_curve_point_payloads(table.points())
+
+    def _append_curve_point(self, table: RtpcCurveEditor, change_handler) -> None:
+        table.append_point()
+
+    def _remove_curve_point(self, table: RtpcCurveEditor, change_handler) -> None:
+        table.remove_selected_point()
+
+    def _sync_curve_interpolation_combo(self, table: RtpcCurveEditor, combo: QComboBox) -> None:
+        combo.blockSignals(True)
+        combo.setEnabled(table.selected_index() >= 0)
+        combo.setCurrentText(table.selected_interpolation())
+        combo.blockSignals(False)
+
+    def _update_curve_interpolation(self, table: RtpcCurveEditor, combo: QComboBox, change_handler) -> None:
+        if table.selected_index() < 0:
+            return
+        table.set_selected_interpolation(combo.currentText())
+
+    def _sync_curve_point_controls(self, table: RtpcCurveEditor, input_spin: QDoubleSpinBox, output_spin: QDoubleSpinBox) -> None:
+        point = table.selected_point()
+        has_selection = point is not None
+        input_spin.blockSignals(True)
+        output_spin.blockSignals(True)
+        input_spin.setEnabled(has_selection)
+        output_spin.setEnabled(has_selection)
+        if has_selection:
+            input_spin.setValue(float(point.get("input_value", 0.0)))
+            output_spin.setValue(float(point.get("output_value", 0.0)))
+        else:
+            input_spin.setValue(0.0)
+            output_spin.setValue(0.0)
+        input_spin.blockSignals(False)
+        output_spin.blockSignals(False)
+
+    def _update_curve_point_from_controls(self, table: RtpcCurveEditor, input_spin: QDoubleSpinBox, output_spin: QDoubleSpinBox) -> None:
+        if table.selected_point() is None:
+            return
+        table.update_selected_point(
+            input_value=float(input_spin.value()),
+            output_value=float(output_spin.value()),
+        )
+
+    def _apply_curve_snap_settings(
+        self,
+        table: RtpcCurveEditor,
+        snap_check: QCheckBox,
+        snap_x_spin: QDoubleSpinBox,
+        snap_y_spin: QDoubleSpinBox,
+    ) -> None:
+        table.set_snap_settings(
+            snap_check.isChecked(),
+            float(snap_x_spin.value()),
+            float(snap_y_spin.value()),
+        )
+
+    def _game_parameter_payload(self, parameter: GameParameterModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(parameter, GameParameterModel):
+            return {
+                "name": parameter.name,
+                "default_value": float(parameter.default_value),
+                "min_value": float(parameter.min_value),
+                "max_value": float(parameter.max_value),
+                "notes": parameter.notes,
+            }
+        return {
+            "name": str(parameter.get("name", "")).strip(),
+            "default_value": float(parameter.get("default_value", 0.0)),
+            "min_value": float(parameter.get("min_value", 0.0)),
+            "max_value": float(parameter.get("max_value", 100.0)),
+            "notes": str(parameter.get("notes", "")),
+        }
+
+    def _gamesync_child_effect_payload(self, payload: dict[str, object] | object) -> dict[str, object]:
+        if isinstance(payload, dict):
+            return {
+                "volume_db": float(payload.get("volume_db", 0.0)),
+                "pitch_cents": int(payload.get("pitch_cents", 0)),
+                "is_muted": bool(payload.get("is_muted", False)),
+                "notes": str(payload.get("notes", "")),
+            }
+        return {
+            "volume_db": float(getattr(payload, "volume_db", 0.0)),
+            "pitch_cents": int(getattr(payload, "pitch_cents", 0)),
+            "is_muted": bool(getattr(payload, "is_muted", False)),
+            "notes": str(getattr(payload, "notes", "")),
+        }
+
+    def _normalized_gamesync_child_effects(self, effects: dict[str, object] | None) -> dict[str, dict[str, object]]:
+        normalized: dict[str, dict[str, object]] = {}
+        for raw_name, raw_payload in (effects or {}).items():
+            name = str(raw_name).strip()
+            if not name:
+                continue
+            normalized[name] = self._gamesync_child_effect_payload(raw_payload)
+        return normalized
+
+    def _state_group_payload(self, group: StateGroupModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(group, StateGroupModel):
+            return {
+                "name": group.name,
+                "states": list(group.states),
+                "default_state": group.default_state,
+                "state_effects": self._normalized_gamesync_child_effects(group.state_effects),
+                "notes": group.notes,
+            }
+        return {
+            "name": str(group.get("name", "")).strip(),
+            "states": self._normalized_name_list_from_text(", ".join(str(value) for value in group.get("states", []))),
+            "default_state": str(group.get("default_state", "")).strip(),
+            "state_effects": self._normalized_gamesync_child_effects(group.get("state_effects", {})),
+            "notes": str(group.get("notes", "")),
+        }
+
+    def _switch_group_payload(self, group: SwitchGroupModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(group, SwitchGroupModel):
+            return {
+                "name": group.name,
+                "switches": list(group.switches),
+                "default_switch": group.default_switch,
+                "use_game_parameter": bool(group.use_game_parameter),
+                "mapped_game_parameter": group.mapped_game_parameter,
+                "switch_effects": self._normalized_gamesync_child_effects(group.switch_effects),
+                "notes": group.notes,
+            }
+        return {
+            "name": str(group.get("name", "")).strip(),
+            "switches": self._normalized_name_list_from_text(", ".join(str(value) for value in group.get("switches", []))),
+            "default_switch": str(group.get("default_switch", "")).strip(),
+            "use_game_parameter": bool(group.get("use_game_parameter", False)),
+            "mapped_game_parameter": str(group.get("mapped_game_parameter", "")).strip(),
+            "switch_effects": self._normalized_gamesync_child_effects(group.get("switch_effects", {})),
+            "notes": str(group.get("notes", "")),
+        }
+
+    def _refresh_gamesync_entries_from_models(self) -> None:
+        self._gamesync_entries = {
+            "game_parameters": [
+                {
+                    "name": str(entry.get("name", "")).strip(),
+                    "summary": (
+                        f"默认 {float(entry.get('default_value', 0.0)):.2f} | 范围 {float(entry.get('min_value', 0.0)):.2f} - {float(entry.get('max_value', 100.0)):.2f}"
+                    ),
+                    "detail": str(entry.get("notes", "")).strip() or "连续 Game Parameter，可用于 RTPC authoring。",
+                }
+                for entry in self._gamesync_models["game_parameters"]
+            ],
+            "state_groups": [
+                {
+                    "name": str(entry.get("name", "")).strip(),
+                    "summary": f"默认 {str(entry.get('default_state', '')).strip() or '-'} | 状态 {len(entry.get('states', []))} 个",
+                    "detail": str(entry.get("notes", "")).strip() or ("、".join(entry.get("states", [])) if entry.get("states", []) else "当前还没有可用 State。"),
+                }
+                for entry in self._gamesync_models["state_groups"]
+            ],
+            "switch_groups": [
+                {
+                    "name": str(entry.get("name", "")).strip(),
+                    "summary": (
+                        f"默认 {str(entry.get('default_switch', '')).strip() or '-'} | Switch {len(entry.get('switches', []))} 个"
+                        + (
+                            f" | RTPC 映射 {str(entry.get('mapped_game_parameter', '')).strip()}"
+                            if bool(entry.get("use_game_parameter", False)) and str(entry.get("mapped_game_parameter", "")).strip()
+                            else ""
+                        )
+                    ),
+                    "detail": str(entry.get("notes", "")).strip() or ("、".join(entry.get("switches", [])) if entry.get("switches", []) else "当前还没有可用 Switch。"),
+                }
+                for entry in self._gamesync_models["switch_groups"]
+            ],
+        }
+
+    def set_gamesync_definitions(
+        self,
+        game_parameters: list[GameParameterModel],
+        state_groups: list[StateGroupModel],
+        switch_groups: list[SwitchGroupModel],
+    ) -> None:
+        self._loading_gamesync = True
+        self._gamesync_models = {
+            "game_parameters": [self._game_parameter_payload(parameter) for parameter in game_parameters],
+            "state_groups": [self._state_group_payload(group) for group in state_groups],
+            "switch_groups": [self._switch_group_payload(group) for group in switch_groups],
+        }
+        self._preview_gamesync_definitions = {
+            "game_parameters": [dict(entry) for entry in self._gamesync_models["game_parameters"]],
+            "state_groups": [dict(entry) for entry in self._gamesync_models["state_groups"]],
+            "switch_groups": [dict(entry) for entry in self._gamesync_models["switch_groups"]],
+        }
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+        self._refresh_event_binding_option_sets()
+        self._load_preview_gamesync_editor()
+        self._load_gamesync_editor("game_parameters")
+        self._load_gamesync_editor("state_groups")
+        self._load_gamesync_editor("switch_groups")
+        self._loading_gamesync = False
+
+    def _set_combo_box_values(self, combo: QComboBox, values: list[str], current_value: str = "") -> None:
+        seen: set[str] = set()
+        candidates = [*values, current_value.strip()] if current_value.strip() else list(values)
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("")
+        for raw_value in candidates:
+            value = str(raw_value).strip()
+            if not value:
+                continue
+            key = value.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            combo.addItem(value)
+        if current_value.strip() and current_value.strip().casefold() in seen:
+            combo.setCurrentText(current_value.strip())
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+    def _available_game_parameter_names(self) -> list[str]:
+        return [
+            str(entry.get("name", "")).strip()
+            for entry in self._gamesync_models.get("game_parameters", [])
+            if str(entry.get("name", "")).strip()
+        ]
+
+    def _available_state_group_names(self) -> list[str]:
+        return [
+            str(entry.get("name", "")).strip()
+            for entry in self._gamesync_models.get("state_groups", [])
+            if str(entry.get("name", "")).strip()
+        ]
+
+    def _available_states_for_group(self, group_name: str) -> list[str]:
+        normalized = group_name.strip().casefold()
+        for entry in self._gamesync_models.get("state_groups", []):
+            if str(entry.get("name", "")).strip().casefold() == normalized:
+                return [str(value).strip() for value in entry.get("states", []) if str(value).strip()]
+        return []
+
+    def _available_switch_group_names(self) -> list[str]:
+        return [
+            str(entry.get("name", "")).strip()
+            for entry in self._gamesync_models.get("switch_groups", [])
+            if str(entry.get("name", "")).strip()
+        ]
+
+    def _available_switches_for_group(self, group_name: str) -> list[str]:
+        normalized = group_name.strip().casefold()
+        for entry in self._gamesync_models.get("switch_groups", []):
+            if str(entry.get("name", "")).strip().casefold() == normalized:
+                return [str(value).strip() for value in entry.get("switches", []) if str(value).strip()]
+        return []
+
+    def _refresh_event_state_name_options(self, current_value: str | None = None) -> None:
+        selected_group = self.event_state_group_edit.currentText().strip()
+        current_state = self.event_state_name_edit.currentText().strip() if current_value is None else current_value.strip()
+        self._set_combo_box_values(self.event_state_name_edit, self._available_states_for_group(selected_group), current_state)
+
+    def _refresh_event_switch_name_options(self, current_value: str | None = None) -> None:
+        selected_group = self.event_switch_group_edit.currentText().strip()
+        current_switch = self.event_switch_name_edit.currentText().strip() if current_value is None else current_value.strip()
+        self._set_combo_box_values(self.event_switch_name_edit, self._available_switches_for_group(selected_group), current_switch)
+
+    def _refresh_event_binding_option_sets(self) -> None:
+        self._set_combo_box_values(self.event_rtpc_parameter_edit, self._available_game_parameter_names(), self.event_rtpc_parameter_edit.currentText())
+        self._set_combo_box_values(self.event_state_group_edit, self._available_state_group_names(), self.event_state_group_edit.currentText())
+        self._refresh_event_state_name_options()
+        self._set_combo_box_values(self.event_switch_group_edit, self._available_switch_group_names(), self.event_switch_group_edit.currentText())
+        self._refresh_event_switch_name_options()
+
+    def _default_event_rtpc_binding_payload(self) -> dict[str, object]:
+        payload = self._rtpc_binding_payload({})
+        parameter_names = self._available_game_parameter_names()
+        if parameter_names:
+            payload["parameter_name"] = parameter_names[0]
+        payload["curve_points"] = self._default_curve_point_payloads(
+            self._rtpc_input_range(str(payload.get("parameter_name", ""))),
+            self._rtpc_output_range(str(payload.get("target", "EventVolumeDb"))),
+        )
+        return payload
+
+    def _default_bus_rtpc_binding_payload(self) -> dict[str, object]:
+        payload = self._rtpc_binding_payload({"target": "BusVolumeDb"})
+        payload["curve_points"] = self._default_curve_point_payloads(
+            self._rtpc_input_range(str(payload.get("parameter_name", ""))),
+            self._rtpc_output_range("BusVolumeDb"),
+        )
+        return payload
+
+    def _handle_event_rtpc_curve_context_changed(self) -> None:
+        self._refresh_event_rtpc_curve_editor_ranges()
+        self._emit_event_properties_changed()
+
+    def _handle_bus_rtpc_curve_context_changed(self) -> None:
+        self._refresh_bus_rtpc_curve_editor_ranges()
+        self._emit_project_settings_changed()
+
+    def _default_event_state_override_payload(self) -> dict[str, object]:
+        payload = self._state_override_payload({})
+        group_names = self._available_state_group_names()
+        if group_names:
+            payload["group_name"] = group_names[0]
+            states = self._available_states_for_group(group_names[0])
+            if states:
+                payload["state_name"] = states[0]
+        return payload
+
+    def _default_event_switch_variant_payload(self) -> dict[str, object]:
+        payload = self._switch_variant_payload({})
+        group_names = self._available_switch_group_names()
+        if group_names:
+            payload["group_name"] = group_names[0]
+            switches = self._available_switches_for_group(group_names[0])
+            if switches:
+                payload["switch_name"] = switches[0]
+        return payload
+
+    def set_preview_gamesync_enabled(self, enabled: bool) -> None:
+        has_definitions = any(self._preview_gamesync_definitions.values())
+        is_enabled = bool(enabled and has_definitions)
+        self.preview_gamesync_group.setEnabled(is_enabled)
+        self.preview_parameter_slider.setEnabled(is_enabled and bool(self.preview_parameter_name_combo.currentText().strip()))
+
+    def _preview_definition_names(self, key: str) -> list[str]:
+        return [
+            str(entry.get("name", "")).strip()
+            for entry in self._preview_gamesync_definitions.get(key, [])
+            if str(entry.get("name", "")).strip()
+        ]
+
+    def _preview_group_entry(self, key: str, name: str) -> dict[str, object] | None:
+        normalized = name.strip().casefold()
+        for entry in self._preview_gamesync_definitions.get(key, []):
+            if str(entry.get("name", "")).strip().casefold() == normalized:
+                return entry
+        return None
+
+    def _default_preview_parameter_name(self) -> str:
+        names = self._preview_definition_names("game_parameters")
+        return names[0] if names else ""
+
+    def _default_preview_state_group_name(self) -> str:
+        names = self._preview_definition_names("state_groups")
+        return names[0] if names else ""
+
+    def _default_preview_switch_group_name(self) -> str:
+        names = self._preview_definition_names("switch_groups")
+        return names[0] if names else ""
+
+    def _preview_states_for_group(self, group_name: str) -> list[str]:
+        entry = self._preview_group_entry("state_groups", group_name)
+        if entry is None:
+            return []
+        return [str(value).strip() for value in entry.get("states", []) if str(value).strip()]
+
+    def _preview_switches_for_group(self, group_name: str) -> list[str]:
+        entry = self._preview_group_entry("switch_groups", group_name)
+        if entry is None:
+            return []
+        return [str(value).strip() for value in entry.get("switches", []) if str(value).strip()]
+
+    def _preview_parameter_default_value(self, parameter_name: str) -> float:
+        entry = self._preview_group_entry("game_parameters", parameter_name)
+        return float(entry.get("default_value", 0.0)) if entry is not None else 0.0
+
+    def _preview_parameter_limits(self, parameter_name: str) -> tuple[float, float]:
+        entry = self._preview_group_entry("game_parameters", parameter_name)
+        if entry is None:
+            return -99999.0, 99999.0
+        return float(entry.get("min_value", -99999.0)), float(entry.get("max_value", 99999.0))
+
+    def _preview_parameter_slider_steps(self) -> int:
+        return max(1, int(self.preview_parameter_slider.maximum() - self.preview_parameter_slider.minimum()))
+
+    def _format_preview_parameter_value_text(self, value: float) -> str:
+        text = f"{value:.2f}".rstrip("0").rstrip(".")
+        return text if text not in {"", "-0"} else "0"
+
+    def _preview_parameter_slider_value(self, parameter_name: str, value: float) -> int:
+        minimum, maximum = self._preview_parameter_limits(parameter_name)
+        slider_minimum = int(self.preview_parameter_slider.minimum())
+        slider_maximum = int(self.preview_parameter_slider.maximum())
+        if maximum <= minimum:
+            return slider_minimum
+        normalized = (float(value) - minimum) / (maximum - minimum)
+        normalized = min(max(normalized, 0.0), 1.0)
+        return slider_minimum + int(round(normalized * (slider_maximum - slider_minimum)))
+
+    def _preview_parameter_value_from_slider(self, parameter_name: str, slider_value: int) -> float:
+        minimum, maximum = self._preview_parameter_limits(parameter_name)
+        slider_minimum = int(self.preview_parameter_slider.minimum())
+        slider_maximum = int(self.preview_parameter_slider.maximum())
+        if slider_maximum <= slider_minimum or maximum <= minimum:
+            return minimum
+        normalized = (int(slider_value) - slider_minimum) / float(slider_maximum - slider_minimum)
+        value = minimum + normalized * (maximum - minimum)
+        return min(max(value, minimum), maximum)
+
+    def _update_preview_parameter_transport_labels(self, parameter_name: str, value: float) -> None:
+        minimum, maximum = self._preview_parameter_limits(parameter_name)
+        has_parameter = bool(parameter_name)
+        self.preview_parameter_min_label.setText(self._format_preview_parameter_value_text(minimum) if has_parameter else "-")
+        self.preview_parameter_max_label.setText(self._format_preview_parameter_value_text(maximum) if has_parameter else "-")
+        self.preview_parameter_current_label.setText(self._format_preview_parameter_value_text(value) if has_parameter else "RTPC -")
+
+    def _sync_preview_parameter_transport_value(self, parameter_name: str, value: float) -> None:
+        self._update_preview_parameter_transport_labels(parameter_name, value)
+        self.preview_parameter_slider.blockSignals(True)
+        self.preview_parameter_slider.setValue(self._preview_parameter_slider_value(parameter_name, value))
+        self.preview_parameter_slider.blockSignals(False)
+
+    def _preview_default_state_name(self, group_name: str) -> str:
+        entry = self._preview_group_entry("state_groups", group_name)
+        if entry is None:
+            return ""
+        default_state = str(entry.get("default_state", "")).strip()
+        if default_state:
+            return default_state
+        states = self._preview_states_for_group(group_name)
+        return states[0] if states else ""
+
+    def _preview_default_switch_name(self, group_name: str) -> str:
+        entry = self._preview_group_entry("switch_groups", group_name)
+        if entry is None:
+            return ""
+        default_switch = str(entry.get("default_switch", "")).strip()
+        if default_switch:
+            return default_switch
+        switches = self._preview_switches_for_group(group_name)
+        return switches[0] if switches else ""
+
+    def _preview_parameter_values(self, scope: str) -> dict[str, float]:
+        key = "emitter_parameters" if scope == "Emitter" else "global_parameters"
+        values = self._preview_gamesync_state.get(key, {})
+        if not isinstance(values, dict):
+            values = {}
+            self._preview_gamesync_state[key] = values
+        return values
+
+    def _preview_selected_parameter_name(self) -> str:
+        selected = str(self._preview_gamesync_state.get("selected_parameter_name", "")).strip()
+        names = self._preview_definition_names("game_parameters")
+        if selected in names:
+            return selected
+        return self._default_preview_parameter_name()
+
+    def _preview_selected_parameter_scope(self) -> str:
+        selected = str(self._preview_gamesync_state.get("selected_parameter_scope", "Emitter")).strip()
+        return selected if selected in {"Global", "Emitter"} else "Emitter"
+
+    def _preview_selected_state_group(self) -> str:
+        selected = str(self._preview_gamesync_state.get("selected_state_group", "")).strip()
+        names = self._preview_definition_names("state_groups")
+        if selected in names:
+            return selected
+        return self._default_preview_state_group_name()
+
+    def _preview_selected_switch_group(self) -> str:
+        selected = str(self._preview_gamesync_state.get("selected_switch_group", "")).strip()
+        names = self._preview_definition_names("switch_groups")
+        if selected in names:
+            return selected
+        return self._default_preview_switch_group_name()
+
+    def _preview_parameter_value(self, parameter_name: str, scope: str) -> float:
+        if not parameter_name:
+            return 0.0
+        values = self._preview_parameter_values(scope)
+        if parameter_name in values:
+            return float(values[parameter_name])
+        return self._preview_parameter_default_value(parameter_name)
+
+    def _preview_state_value(self, group_name: str) -> str:
+        if not group_name:
+            return ""
+        states = self._preview_gamesync_state.get("states", {})
+        if isinstance(states, dict):
+            value = str(states.get(group_name, "")).strip()
+            if value:
+                return value
+        return self._preview_default_state_name(group_name)
+
+    def _preview_switch_value(self, group_name: str) -> str:
+        if not group_name:
+            return ""
+        switches = self._preview_gamesync_state.get("switches", {})
+        if isinstance(switches, dict):
+            value = str(switches.get(group_name, "")).strip()
+            if value:
+                return value
+        return self._preview_default_switch_name(group_name)
+
+    def _load_preview_gamesync_editor(self) -> None:
+        self._preview_gamesync_loading = True
+        parameter_name = self._preview_selected_parameter_name()
+        parameter_scope = self._preview_selected_parameter_scope()
+        state_group = self._preview_selected_state_group()
+        switch_group = self._preview_selected_switch_group()
+        self._preview_gamesync_state["selected_parameter_name"] = parameter_name
+        self._preview_gamesync_state["selected_parameter_scope"] = parameter_scope
+        self._preview_gamesync_state["selected_state_group"] = state_group
+        self._preview_gamesync_state["selected_switch_group"] = switch_group
+        self._set_combo_box_values(self.preview_parameter_name_combo, self._preview_definition_names("game_parameters"), parameter_name)
+        self._set_combo_box_values(self.preview_parameter_scope_combo, ["Global", "Emitter"], parameter_scope)
+        minimum, maximum = self._preview_parameter_limits(parameter_name)
+        parameter_value = self._preview_parameter_value(parameter_name, parameter_scope)
+        self.preview_parameter_value_spin.blockSignals(True)
+        self.preview_parameter_value_spin.setRange(minimum, maximum)
+        self.preview_parameter_value_spin.setValue(parameter_value)
+        self.preview_parameter_value_spin.blockSignals(False)
+        self.preview_parameter_slider.setEnabled(bool(parameter_name))
+        self._sync_preview_parameter_transport_value(parameter_name, parameter_value)
+        self._set_combo_box_values(self.preview_state_group_combo, self._preview_definition_names("state_groups"), state_group)
+        self._set_combo_box_values(self.preview_state_name_combo, self._preview_states_for_group(state_group), self._preview_state_value(state_group))
+        self._set_combo_box_values(self.preview_switch_group_combo, self._preview_definition_names("switch_groups"), switch_group)
+        self._set_combo_box_values(self.preview_switch_name_combo, self._preview_switches_for_group(switch_group), self._preview_switch_value(switch_group))
+        self.set_preview_gamesync_enabled(self._active_event_id is not None)
+        self._preview_gamesync_loading = False
+
+    def _handle_preview_parameter_selection_changed(self) -> None:
+        if self._preview_gamesync_loading:
+            return
+        self._preview_gamesync_state["selected_parameter_name"] = self.preview_parameter_name_combo.currentText().strip()
+        self._preview_gamesync_state["selected_parameter_scope"] = self.preview_parameter_scope_combo.currentText().strip() or "Emitter"
+        self._load_preview_gamesync_editor()
+        self.previewGameSyncChanged.emit()
+
+    def _handle_preview_parameter_value_changed(self) -> None:
+        if self._preview_gamesync_loading:
+            return
+        parameter_name = self.preview_parameter_name_combo.currentText().strip()
+        if not parameter_name:
+            return
+        scope = self.preview_parameter_scope_combo.currentText().strip() or "Emitter"
+        value = float(self.preview_parameter_value_spin.value())
+        self._preview_parameter_values(scope)[parameter_name] = value
+        self._sync_preview_parameter_transport_value(parameter_name, value)
+        self.previewGameSyncChanged.emit()
+
+    def _preview_parameter_slider_preview(self, slider_value: int) -> None:
+        parameter_name = self.preview_parameter_name_combo.currentText().strip()
+        if not parameter_name:
+            self.preview_parameter_current_label.setText("RTPC -")
+            return
+        self.preview_parameter_current_label.setText(
+            self._format_preview_parameter_value_text(self._preview_parameter_value_from_slider(parameter_name, slider_value))
+        )
+
+    def _handle_preview_parameter_slider_changed(self, slider_value: int) -> None:
+        if self._preview_gamesync_loading:
+            return
+        parameter_name = self.preview_parameter_name_combo.currentText().strip()
+        if not parameter_name:
+            return
+        self.preview_parameter_value_spin.setValue(self._preview_parameter_value_from_slider(parameter_name, slider_value))
+
+    def _handle_preview_state_group_changed(self) -> None:
+        if self._preview_gamesync_loading:
+            return
+        group_name = self.preview_state_group_combo.currentText().strip()
+        self._preview_gamesync_state["selected_state_group"] = group_name
+        if group_name:
+            states = self._preview_gamesync_state.get("states", {})
+            if isinstance(states, dict) and not str(states.get(group_name, "")).strip():
+                states[group_name] = self._preview_default_state_name(group_name)
+        self._load_preview_gamesync_editor()
+        self.previewGameSyncChanged.emit()
+
+    def _handle_preview_state_value_changed(self) -> None:
+        if self._preview_gamesync_loading:
+            return
+        group_name = self.preview_state_group_combo.currentText().strip()
+        if not group_name:
+            return
+        states = self._preview_gamesync_state.get("states", {})
+        if isinstance(states, dict):
+            states[group_name] = self.preview_state_name_combo.currentText().strip()
+        self.previewGameSyncChanged.emit()
+
+    def _handle_preview_switch_group_changed(self) -> None:
+        if self._preview_gamesync_loading:
+            return
+        group_name = self.preview_switch_group_combo.currentText().strip()
+        self._preview_gamesync_state["selected_switch_group"] = group_name
+        if group_name:
+            switches = self._preview_gamesync_state.get("switches", {})
+            if isinstance(switches, dict) and not str(switches.get(group_name, "")).strip():
+                switches[group_name] = self._preview_default_switch_name(group_name)
+        self._load_preview_gamesync_editor()
+        self.previewGameSyncChanged.emit()
+
+    def _handle_preview_switch_value_changed(self) -> None:
+        if self._preview_gamesync_loading:
+            return
+        group_name = self.preview_switch_group_combo.currentText().strip()
+        if not group_name:
+            return
+        switches = self._preview_gamesync_state.get("switches", {})
+        if isinstance(switches, dict):
+            switches[group_name] = self.preview_switch_name_combo.currentText().strip()
+        self.previewGameSyncChanged.emit()
+
+    def current_preview_gamesync_context_data(self) -> dict[str, object]:
+        if not self._preview_gamesync_loading:
+            self._preview_gamesync_state["selected_parameter_name"] = self.preview_parameter_name_combo.currentText().strip()
+            self._preview_gamesync_state["selected_parameter_scope"] = self.preview_parameter_scope_combo.currentText().strip() or "Emitter"
+            self._preview_gamesync_state["selected_state_group"] = self.preview_state_group_combo.currentText().strip()
+            self._preview_gamesync_state["selected_switch_group"] = self.preview_switch_group_combo.currentText().strip()
+        return {
+            "global_parameters": dict(self._preview_gamesync_state.get("global_parameters", {})),
+            "emitter_parameters": dict(self._preview_gamesync_state.get("emitter_parameters", {})),
+            "states": dict(self._preview_gamesync_state.get("states", {})),
+            "switches": dict(self._preview_gamesync_state.get("switches", {})),
+            "selected_parameter_name": str(self._preview_gamesync_state.get("selected_parameter_name", "")),
+            "selected_parameter_scope": str(self._preview_gamesync_state.get("selected_parameter_scope", "Emitter")),
+            "selected_state_group": str(self._preview_gamesync_state.get("selected_state_group", "")),
+            "selected_switch_group": str(self._preview_gamesync_state.get("selected_switch_group", "")),
+        }
+
+    def current_gamesync_form_data(self) -> dict[str, object]:
+        self._sync_gamesync_editor_to_state("game_parameters")
+        self._sync_gamesync_editor_to_state("state_groups")
+        self._sync_gamesync_editor_to_state("switch_groups")
+        return {
+            "game_parameters": [dict(entry) for entry in self._gamesync_models["game_parameters"]],
+            "state_groups": [
+                {
+                    **dict(entry),
+                    "states": list(entry.get("states", [])),
+                }
+                for entry in self._gamesync_models["state_groups"]
+            ],
+            "switch_groups": [
+                {
+                    **dict(entry),
+                    "switches": list(entry.get("switches", [])),
+                }
+                for entry in self._gamesync_models["switch_groups"]
+            ],
+        }
+
+    def _gamesync_workspace_list_widget(self, key: str) -> QListWidget:
+        return {
+            "game_parameters": self.gamesync_parameter_workspace_list,
+            "state_groups": self.gamesync_state_workspace_list,
+            "switch_groups": self.gamesync_switch_workspace_list,
+        }[key]
+
+    def _gamesync_selected_row(self, key: str) -> int:
+        return self._gamesync_workspace_list_widget(key).currentRow()
+
+    def _load_gamesync_editor(self, key: str) -> None:
+        entries = self._gamesync_models.get(key, [])
+        row = self._gamesync_selected_row(key)
+        has_selection = 0 <= row < len(entries)
+        self._loading_gamesync = True
+        if key == "game_parameters":
+            self.gamesync_parameter_remove_button.setEnabled(has_selection)
+            if not has_selection:
+                self.gamesync_parameter_name_edit.clear()
+                self.gamesync_parameter_default_spin.setValue(0.0)
+                self.gamesync_parameter_min_spin.setValue(0.0)
+                self.gamesync_parameter_max_spin.setValue(100.0)
+                self.gamesync_parameter_notes_edit.clear()
+            else:
+                entry = entries[row]
+                self.gamesync_parameter_name_edit.setText(str(entry.get("name", "")))
+                self.gamesync_parameter_default_spin.setValue(float(entry.get("default_value", 0.0)))
+                self.gamesync_parameter_min_spin.setValue(float(entry.get("min_value", 0.0)))
+                self.gamesync_parameter_max_spin.setValue(float(entry.get("max_value", 100.0)))
+                self.gamesync_parameter_notes_edit.setPlainText(str(entry.get("notes", "")))
+        elif key == "state_groups":
+            self.gamesync_state_remove_button.setEnabled(has_selection)
+            if not has_selection:
+                self.gamesync_state_name_edit.clear()
+                self.gamesync_state_value_list.clear()
+                self.gamesync_state_values_edit.clear()
+                self.gamesync_state_default_edit.clear()
+                self.gamesync_state_value_volume_spin.setValue(0.0)
+                self.gamesync_state_value_pitch_spin.setValue(0)
+                self.gamesync_state_value_mute_check.setChecked(False)
+                self.gamesync_state_value_notes_edit.clear()
+                self.gamesync_state_notes_edit.clear()
+            else:
+                entry = entries[row]
+                self.gamesync_state_name_edit.setText(str(entry.get("name", "")))
+                self.gamesync_state_default_edit.setText(str(entry.get("default_state", "")))
+                self.gamesync_state_notes_edit.setPlainText(str(entry.get("notes", "")))
+            self._refresh_gamesync_child_values("state_groups")
+            self._load_gamesync_child_value_editor("state_groups")
+        else:
+            self.gamesync_switch_remove_button.setEnabled(has_selection)
+            if not has_selection:
+                self.gamesync_switch_name_edit.clear()
+                self.gamesync_switch_value_list.clear()
+                self.gamesync_switch_values_edit.clear()
+                self.gamesync_switch_default_edit.clear()
+                self.gamesync_switch_value_volume_spin.setValue(0.0)
+                self.gamesync_switch_value_pitch_spin.setValue(0)
+                self.gamesync_switch_value_mute_check.setChecked(False)
+                self.gamesync_switch_value_notes_edit.clear()
+                self.gamesync_switch_use_rtpc_check.setChecked(False)
+                self.gamesync_switch_mapped_parameter_edit.clear()
+                self.gamesync_switch_notes_edit.clear()
+            else:
+                entry = entries[row]
+                self.gamesync_switch_name_edit.setText(str(entry.get("name", "")))
+                self.gamesync_switch_default_edit.setText(str(entry.get("default_switch", "")))
+                self.gamesync_switch_use_rtpc_check.setChecked(bool(entry.get("use_game_parameter", False)))
+                self.gamesync_switch_mapped_parameter_edit.setText(str(entry.get("mapped_game_parameter", "")))
+                self.gamesync_switch_notes_edit.setPlainText(str(entry.get("notes", "")))
+            self._refresh_gamesync_child_values("switch_groups")
+            self._load_gamesync_child_value_editor("switch_groups")
+        self._loading_gamesync = False
+
+    def _sync_gamesync_editor_to_state(self, key: str) -> None:
+        entries = self._gamesync_models.get(key, [])
+        row = self._gamesync_selected_row(key)
+        if row < 0 or row >= len(entries):
+            return
+        if key == "game_parameters":
+            min_value = float(self.gamesync_parameter_min_spin.value())
+            max_value = float(self.gamesync_parameter_max_spin.value())
+            if max_value < min_value:
+                min_value, max_value = max_value, min_value
+            default_value = min(max(float(self.gamesync_parameter_default_spin.value()), min_value), max_value)
+            entries[row] = {
+                "name": self.gamesync_parameter_name_edit.text().strip() or str(entries[row].get("name", "GameParameter")),
+                "default_value": default_value,
+                "min_value": min_value,
+                "max_value": max_value,
+                "notes": self.gamesync_parameter_notes_edit.toPlainText().strip(),
+            }
+        elif key == "state_groups":
+            self._sync_gamesync_child_value_editor_to_state(key)
+            states = [str(value) for value in entries[row].get("states", []) if str(value).strip()]
+            state_effects = self._normalized_gamesync_child_effects(entries[row].get("state_effects", {}))
+            default_state = self.gamesync_state_default_edit.text().strip()
+            if default_state and default_state.casefold() not in {value.casefold() for value in states}:
+                states.append(default_state)
+            entries[row] = {
+                "name": self.gamesync_state_name_edit.text().strip() or str(entries[row].get("name", "StateGroup")),
+                "states": states,
+                "default_state": default_state or (states[0] if states else ""),
+                "state_effects": {name: payload for name, payload in state_effects.items() if name in states},
+                "notes": self.gamesync_state_notes_edit.toPlainText().strip(),
+            }
+        else:
+            self._sync_gamesync_child_value_editor_to_state(key)
+            switches = [str(value) for value in entries[row].get("switches", []) if str(value).strip()]
+            switch_effects = self._normalized_gamesync_child_effects(entries[row].get("switch_effects", {}))
+            default_switch = self.gamesync_switch_default_edit.text().strip()
+            if default_switch and default_switch.casefold() not in {value.casefold() for value in switches}:
+                switches.append(default_switch)
+            entries[row] = {
+                "name": self.gamesync_switch_name_edit.text().strip() or str(entries[row].get("name", "SwitchGroup")),
+                "switches": switches,
+                "default_switch": default_switch or (switches[0] if switches else ""),
+                "use_game_parameter": self.gamesync_switch_use_rtpc_check.isChecked(),
+                "mapped_game_parameter": self.gamesync_switch_mapped_parameter_edit.text().strip(),
+                "switch_effects": {name: payload for name, payload in switch_effects.items() if name in switches},
+                "notes": self.gamesync_switch_notes_edit.toPlainText().strip(),
+            }
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+
+    def _gamesync_child_value_list_widget(self, key: str) -> QListWidget:
+        return {
+            "state_groups": self.gamesync_state_value_list,
+            "switch_groups": self.gamesync_switch_value_list,
+        }[key]
+
+    def _gamesync_child_value_edit(self, key: str) -> QLineEdit:
+        return {
+            "state_groups": self.gamesync_state_values_edit,
+            "switch_groups": self.gamesync_switch_values_edit,
+        }[key]
+
+    def _gamesync_child_value_keys(self, key: str) -> tuple[str, str]:
+        return {
+            "state_groups": ("states", "Default"),
+            "switch_groups": ("switches", "Default"),
+        }[key]
+
+    def _gamesync_child_effect_key(self, key: str) -> str:
+        return {
+            "state_groups": "state_effects",
+            "switch_groups": "switch_effects",
+        }[key]
+
+    def _gamesync_child_effect_controls(self, key: str) -> tuple[QDoubleSpinBox, QSpinBox, QCheckBox, QPlainTextEdit]:
+        return {
+            "state_groups": (
+                self.gamesync_state_value_volume_spin,
+                self.gamesync_state_value_pitch_spin,
+                self.gamesync_state_value_mute_check,
+                self.gamesync_state_value_notes_edit,
+            ),
+            "switch_groups": (
+                self.gamesync_switch_value_volume_spin,
+                self.gamesync_switch_value_pitch_spin,
+                self.gamesync_switch_value_mute_check,
+                self.gamesync_switch_value_notes_edit,
+            ),
+        }[key]
+
+    def _gamesync_child_effect_summary(self, payload: dict[str, object]) -> str:
+        parts: list[str] = []
+        volume_db = float(payload.get("volume_db", 0.0))
+        pitch_cents = int(payload.get("pitch_cents", 0))
+        is_muted = bool(payload.get("is_muted", False))
+        if volume_db:
+            parts.append(f"Vol {volume_db:+.1f}dB")
+        if pitch_cents:
+            parts.append(f"Pitch {pitch_cents:+d}")
+        if is_muted:
+            parts.append("Mute")
+        return " | ".join(parts)
+
+    def _refresh_gamesync_child_values(self, key: str) -> None:
+        list_widget = self._gamesync_child_value_list_widget(key)
+        entries = self._gamesync_models.get(key, [])
+        row = self._gamesync_selected_row(key)
+        value_key, _default_name = self._gamesync_child_value_keys(key)
+        effect_key = self._gamesync_child_effect_key(key)
+        values = list(entries[row].get(value_key, [])) if 0 <= row < len(entries) else []
+        effect_map = self._normalized_gamesync_child_effects(entries[row].get(effect_key, {})) if 0 <= row < len(entries) else {}
+        current_row = list_widget.currentRow()
+        list_widget.blockSignals(True)
+        list_widget.clear()
+        for value in values:
+            effect_summary = self._gamesync_child_effect_summary(effect_map.get(str(value), {}))
+            item = QListWidgetItem(str(value) if not effect_summary else f"{value}  [{effect_summary}]")
+            item.setData(Qt.ItemDataRole.UserRole, str(value))
+            list_widget.addItem(item)
+        if values:
+            list_widget.setCurrentRow(min(max(current_row, 0), len(values) - 1))
+        list_widget.blockSignals(False)
+
+    def _load_gamesync_child_value_editor(self, key: str) -> None:
+        list_widget = self._gamesync_child_value_list_widget(key)
+        editor = self._gamesync_child_value_edit(key)
+        volume_spin, pitch_spin, mute_check, notes_edit = self._gamesync_child_effect_controls(key)
+        row = list_widget.currentRow()
+        has_selection = row >= 0 and row < list_widget.count()
+        parent_row = self._gamesync_selected_row(key)
+        effect_key = self._gamesync_child_effect_key(key)
+        effect_map = self._normalized_gamesync_child_effects(
+            self._gamesync_models.get(key, [])[parent_row].get(effect_key, {})
+        ) if 0 <= parent_row < len(self._gamesync_models.get(key, [])) else {}
+        child_name = str(list_widget.item(row).data(Qt.ItemDataRole.UserRole) or "") if has_selection else ""
+        effect_payload = effect_map.get(child_name, self._gamesync_child_effect_payload({}))
+        if key == "state_groups":
+            self.gamesync_state_value_remove_button.setEnabled(has_selection)
+        else:
+            self.gamesync_switch_value_remove_button.setEnabled(has_selection)
+        editor.setEnabled(has_selection)
+        volume_spin.setEnabled(has_selection)
+        pitch_spin.setEnabled(has_selection)
+        mute_check.setEnabled(has_selection)
+        notes_edit.setEnabled(has_selection)
+        editor.blockSignals(True)
+        editor.setText(child_name)
+        editor.blockSignals(False)
+        volume_spin.blockSignals(True)
+        volume_spin.setValue(float(effect_payload.get("volume_db", 0.0)))
+        volume_spin.blockSignals(False)
+        pitch_spin.blockSignals(True)
+        pitch_spin.setValue(int(effect_payload.get("pitch_cents", 0)))
+        pitch_spin.blockSignals(False)
+        mute_check.blockSignals(True)
+        mute_check.setChecked(bool(effect_payload.get("is_muted", False)))
+        mute_check.blockSignals(False)
+        notes_edit.blockSignals(True)
+        notes_edit.setPlainText(str(effect_payload.get("notes", "")))
+        notes_edit.blockSignals(False)
+
+    def _sync_gamesync_child_value_editor_to_state(self, key: str) -> None:
+        entries = self._gamesync_models.get(key, [])
+        row = self._gamesync_selected_row(key)
+        if row < 0 or row >= len(entries):
+            return
+        list_widget = self._gamesync_child_value_list_widget(key)
+        child_row = list_widget.currentRow()
+        value_key, _default_name = self._gamesync_child_value_keys(key)
+        effect_key = self._gamesync_child_effect_key(key)
+        default_key = "default_state" if key == "state_groups" else "default_switch"
+        volume_spin, pitch_spin, mute_check, notes_edit = self._gamesync_child_effect_controls(key)
+        values = [str(value) for value in entries[row].get(value_key, [])]
+        if child_row < 0 or child_row >= len(values):
+            return
+        previous_value = values[child_row]
+        updated_value = self._gamesync_child_value_edit(key).text().strip()
+        if not updated_value:
+            return
+        values[child_row] = updated_value
+        entries[row][value_key] = self._normalized_name_list_from_text(", ".join(values))
+        effect_map = self._normalized_gamesync_child_effects(entries[row].get(effect_key, {}))
+        if previous_value != updated_value and previous_value in effect_map:
+            effect_map[updated_value] = effect_map.pop(previous_value)
+        effect_map[updated_value] = {
+            "volume_db": float(volume_spin.value()),
+            "pitch_cents": int(pitch_spin.value()),
+            "is_muted": bool(mute_check.isChecked()),
+            "notes": notes_edit.toPlainText().strip(),
+        }
+        entries[row][effect_key] = {name: payload for name, payload in effect_map.items() if name in entries[row][value_key]}
+        if str(entries[row].get(default_key, "")).strip() == previous_value:
+            entries[row][default_key] = updated_value
+        self._refresh_gamesync_child_values(key)
+
+    def _create_gamesync_child_value(self, key: str) -> None:
+        self._sync_gamesync_editor_to_state(key)
+        entries = self._gamesync_models.get(key, [])
+        row = self._gamesync_selected_row(key)
+        if row < 0 or row >= len(entries):
+            return
+        value_key, default_name = self._gamesync_child_value_keys(key)
+        effect_key = self._gamesync_child_effect_key(key)
+        values = [str(value) for value in entries[row].get(value_key, [])]
+        index = 1
+        existing = {value.casefold() for value in values}
+        while f"{default_name}{index}".casefold() in existing:
+            index += 1
+        child_name = f"{default_name}{index}"
+        values.append(child_name)
+        entries[row][value_key] = values
+        effect_map = self._normalized_gamesync_child_effects(entries[row].get(effect_key, {}))
+        effect_map[child_name] = self._gamesync_child_effect_payload({})
+        entries[row][effect_key] = effect_map
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+        self._refresh_gamesync_child_values(key)
+        self._gamesync_child_value_list_widget(key).setCurrentRow(len(values) - 1)
+        self._load_gamesync_child_value_editor(key)
+
+    def _remove_gamesync_child_value(self, key: str) -> None:
+        entries = self._gamesync_models.get(key, [])
+        row = self._gamesync_selected_row(key)
+        if row < 0 or row >= len(entries):
+            return
+        list_widget = self._gamesync_child_value_list_widget(key)
+        child_row = list_widget.currentRow()
+        value_key, _default_name = self._gamesync_child_value_keys(key)
+        effect_key = self._gamesync_child_effect_key(key)
+        default_key = "default_state" if key == "state_groups" else "default_switch"
+        values = [str(value) for value in entries[row].get(value_key, [])]
+        if child_row < 0 or child_row >= len(values):
+            return
+        removed_value = values[child_row]
+        del values[child_row]
+        entries[row][value_key] = values
+        effect_map = self._normalized_gamesync_child_effects(entries[row].get(effect_key, {}))
+        effect_map.pop(removed_value, None)
+        entries[row][effect_key] = effect_map
+        if str(entries[row].get(default_key, "")).strip() == removed_value:
+            entries[row][default_key] = values[0] if values else ""
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+        self._refresh_gamesync_child_values(key)
+        if values:
+            list_widget.setCurrentRow(min(child_row, len(values) - 1))
+        self._load_gamesync_child_value_editor(key)
+        self._emit_gamesync_changed()
+
+    def _commit_gamesync_child_value(self, key: str) -> None:
+        if self._loading_gamesync:
+            return
+        self._sync_gamesync_child_value_editor_to_state(key)
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+        self._refresh_gamesync_child_values(key)
+        self.gameSyncChanged.emit()
+
+    def _create_gamesync_item(self, key: str) -> None:
+        self._sync_gamesync_editor_to_state(key)
+        entries = self._gamesync_models[key]
+        base_name = {
+            "game_parameters": "GameParameter",
+            "state_groups": "StateGroup",
+            "switch_groups": "SwitchGroup",
+        }[key]
+        existing = {str(entry.get("name", "")).casefold() for entry in entries}
+        index = 1
+        while f"{base_name}{index}".casefold() in existing:
+            index += 1
+        if key == "game_parameters":
+            entries.append({"name": f"{base_name}{index}", "default_value": 0.0, "min_value": 0.0, "max_value": 100.0, "notes": ""})
+        elif key == "state_groups":
+            entries.append({"name": f"{base_name}{index}", "states": [], "default_state": "", "state_effects": {}, "notes": ""})
+        else:
+            entries.append(
+                {
+                    "name": f"{base_name}{index}",
+                    "switches": [],
+                    "default_switch": "",
+                    "use_game_parameter": False,
+                    "mapped_game_parameter": "",
+                    "switch_effects": {},
+                    "notes": "",
+                }
+            )
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+        self._gamesync_workspace_list_widget(key).setCurrentRow(len(entries) - 1)
+        self._load_gamesync_editor(key)
+        self._emit_gamesync_changed()
+
+    def _remove_gamesync_item(self, key: str) -> None:
+        entries = self._gamesync_models[key]
+        row = self._gamesync_selected_row(key)
+        if row < 0 or row >= len(entries):
+            return
+        del entries[row]
+        self._refresh_gamesync_entries_from_models()
+        self._refresh_gamesync_views()
+        if entries:
+            self._gamesync_workspace_list_widget(key).setCurrentRow(min(row, len(entries) - 1))
+        self._load_gamesync_editor(key)
+        self._emit_gamesync_changed()
+
+    def set_gamesync_entries(self, entries: dict[str, list[dict[str, object]]]) -> None:
+        self._gamesync_entries = {
+            "game_parameters": list(entries.get("game_parameters", [])),
+            "state_groups": list(entries.get("state_groups", [])),
+            "switch_groups": list(entries.get("switch_groups", [])),
+        }
+        self._refresh_gamesync_views()
+
+    def _gamesync_filtered_entries(self, key: str, query: str = "") -> list[dict[str, object]]:
+        entries = list(self._gamesync_entries.get(key, []))
+        normalized = query.strip().casefold()
+        if not normalized:
+            return entries
+        filtered: list[dict[str, object]] = []
+        for entry in entries:
+            haystack = " ".join(
+                [
+                    str(entry.get("name", "")),
+                    str(entry.get("summary", "")),
+                    str(entry.get("detail", "")),
+                ]
+            ).casefold()
+            if normalized in haystack:
+                filtered.append(entry)
+        return filtered
+
+    def _refresh_gamesync_list_widget(self, list_widget: QListWidget, entries: list[dict[str, object]], empty_label: str) -> None:
+        current_name = ""
+        current_item = list_widget.currentItem()
+        if current_item is not None:
+            payload = current_item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(payload, dict):
+                current_name = str(payload.get("name", "")).strip()
+
+        list_widget.blockSignals(True)
+        list_widget.clear()
+        for entry in entries:
+            item = QListWidgetItem(str(entry.get("name", "未命名对象")))
+            item.setToolTip(f"{entry.get('summary', '')}\n{entry.get('detail', '')}".strip())
+            item.setData(Qt.ItemDataRole.UserRole, entry)
+            list_widget.addItem(item)
+        if list_widget.count() == 0:
+            placeholder = QListWidgetItem(empty_label)
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+            list_widget.addItem(placeholder)
+        else:
+            selected_row = 0
+            if current_name:
+                for index in range(list_widget.count()):
+                    payload = list_widget.item(index).data(Qt.ItemDataRole.UserRole)
+                    if isinstance(payload, dict) and str(payload.get("name", "")).strip() == current_name:
+                        selected_row = index
+                        break
+            list_widget.setCurrentRow(selected_row)
+        list_widget.blockSignals(False)
+
+    def _update_gamesync_detail_label(self, list_widget: QListWidget, detail_label: QLabel, empty_label: str) -> None:
+        item = list_widget.currentItem()
+        if item is None:
+            detail_label.setText(empty_label)
+            return
+        payload = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict):
+            detail_label.setText(empty_label)
+            return
+        name = str(payload.get("name", "")).strip() or "未命名对象"
+        summary = str(payload.get("summary", "")).strip()
+        detail = str(payload.get("detail", "")).strip()
+        detail_label.setText(f"{name}\n{summary}\n\n{detail}".strip())
+
+    def _update_gamesync_browser_status(self) -> None:
+        tab_key_map = {
+            0: (self.gamesync_parameter_browser_list, "当前还没有 Game Parameter。"),
+            1: (self.gamesync_state_browser_list, "当前还没有 State Group。"),
+            2: (self.gamesync_switch_browser_list, "当前还没有 Switch Group。"),
+        }
+        list_widget, empty_label = tab_key_map.get(self.gamesync_browser_tabs.currentIndex(), (self.gamesync_parameter_browser_list, "当前还没有 GameSync 定义。"))
+        item = list_widget.currentItem()
+        payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        total_count = sum(len(self._gamesync_entries.get(key, [])) for key in ("game_parameters", "state_groups", "switch_groups"))
+        self.gamesync_browser_summary_label.setText(
+            f"GameSync 浏览页当前汇总 {total_count} 个项目级对象，可作为 phase3 authoring 与 Schema v2 的前置入口。"
+        )
+        if not isinstance(payload, dict):
+            self.gamesync_browser_status_label.setText(empty_label)
+            return
+        self.gamesync_browser_status_label.setText(
+            f"{payload.get('name', '-')}\n{payload.get('summary', '')}\n{payload.get('detail', '')}"
+        )
+
+    def _refresh_gamesync_views(self) -> None:
+        browser_query = self.tree_filter_edit.text() if self._active_explorer_page_key() == "gamesync" else ""
+        self._refresh_gamesync_list_widget(
+            self.gamesync_parameter_browser_list,
+            self._gamesync_filtered_entries("game_parameters", browser_query),
+            "当前还没有 Game Parameter。",
+        )
+        self._refresh_gamesync_list_widget(
+            self.gamesync_state_browser_list,
+            self._gamesync_filtered_entries("state_groups", browser_query),
+            "当前还没有 State Group。",
+        )
+        self._refresh_gamesync_list_widget(
+            self.gamesync_switch_browser_list,
+            self._gamesync_filtered_entries("switch_groups", browser_query),
+            "当前还没有 Switch Group。",
+        )
+        self._refresh_gamesync_list_widget(
+            self.gamesync_parameter_workspace_list,
+            self._gamesync_filtered_entries("game_parameters"),
+            "当前还没有 Game Parameter。",
+        )
+        self._refresh_gamesync_list_widget(
+            self.gamesync_state_workspace_list,
+            self._gamesync_filtered_entries("state_groups"),
+            "当前还没有 State Group。",
+        )
+        self._refresh_gamesync_list_widget(
+            self.gamesync_switch_workspace_list,
+            self._gamesync_filtered_entries("switch_groups"),
+            "当前还没有 Switch Group。",
+        )
+        self._update_gamesync_detail_label(
+            self.gamesync_parameter_browser_list,
+            self.gamesync_parameter_browser_detail_label,
+            "当前还没有 Game Parameter。",
+        )
+        self._update_gamesync_detail_label(
+            self.gamesync_state_browser_list,
+            self.gamesync_state_browser_detail_label,
+            "当前还没有 State Group。",
+        )
+        self._update_gamesync_detail_label(
+            self.gamesync_switch_browser_list,
+            self.gamesync_switch_browser_detail_label,
+            "当前还没有 Switch Group。",
+        )
+        self._update_gamesync_detail_label(
+            self.gamesync_parameter_workspace_list,
+            self.gamesync_parameter_workspace_detail_label,
+            "当前还没有 Game Parameter。",
+        )
+        self._update_gamesync_detail_label(
+            self.gamesync_state_workspace_list,
+            self.gamesync_state_workspace_detail_label,
+            "当前还没有 State Group。",
+        )
+        self._update_gamesync_detail_label(
+            self.gamesync_switch_workspace_list,
+            self.gamesync_switch_workspace_detail_label,
+            "当前还没有 Switch Group。",
+        )
+        total_parameters = len(self._gamesync_entries.get("game_parameters", []))
+        total_states = len(self._gamesync_entries.get("state_groups", []))
+        total_switches = len(self._gamesync_entries.get("switch_groups", []))
+        self.gamesync_overview_total_label.setText(
+            f"Game Parameters {total_parameters} | State Groups {total_states} | Switch Groups {total_switches}"
+        )
+        self.gamesync_overview_detail_label.setText(
+            "phase3 当前先把项目级对象和浏览入口接入工程模型；下一步再把它们映射到事件、总线、导出与 runtime。"
+            if total_parameters or total_states or total_switches
+            else "当前工程还没有任何 GameSync 定义。可先从项目级对象开始，逐步补齐 RTPC / State / Switch authoring。"
+        )
+        self._update_gamesync_browser_status()
+
+    def _rtpc_binding_payload(self, binding: RtpcBindingModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(binding, RtpcBindingModel):
+            return {
+                "parameter_name": binding.parameter_name,
+                "target": binding.target,
+                "scope": binding.scope,
+                "curve_points": [
+                    {
+                        "input_value": float(point.input_value),
+                        "output_value": float(point.output_value),
+                        "interpolation": point.interpolation,
+                    }
+                    for point in binding.curve_points
+                ],
+                "notes": binding.notes,
+            }
+        return {
+            "parameter_name": str(binding.get("parameter_name", "")).strip(),
+            "target": str(binding.get("target", "EventVolumeDb")).strip() or "EventVolumeDb",
+            "scope": str(binding.get("scope", "Global")).strip() or "Global",
+            "curve_points": self._copy_curve_point_payloads(binding.get("curve_points", [])),
+            "notes": str(binding.get("notes", "")),
+        }
+
+    def _state_override_payload(self, override: StateOverrideModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(override, StateOverrideModel):
+            return {
+                "group_name": override.group_name,
+                "state_name": override.state_name,
+                "volume_db": float(override.volume_db),
+                "pitch_cents": int(override.pitch_cents),
+                "is_muted": bool(override.is_muted),
+                "notes": override.notes,
+            }
+        return {
+            "group_name": str(override.get("group_name", "")).strip(),
+            "state_name": str(override.get("state_name", "")).strip(),
+            "volume_db": float(override.get("volume_db", 0.0)),
+            "pitch_cents": int(override.get("pitch_cents", 0)),
+            "is_muted": bool(override.get("is_muted", False)),
+            "notes": str(override.get("notes", "")),
+        }
+
+    def _switch_variant_payload(self, variant: SwitchVariantModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(variant, SwitchVariantModel):
+            return {
+                "group_name": variant.group_name,
+                "switch_name": variant.switch_name,
+                "clip_ids": list(variant.clip_ids),
+                "notes": variant.notes,
+            }
+        return {
+            "group_name": str(variant.get("group_name", "")).strip(),
+            "switch_name": str(variant.get("switch_name", "")).strip(),
+            "clip_ids": self._normalized_name_list_from_text(", ".join(str(value) for value in variant.get("clip_ids", []))),
+            "notes": str(variant.get("notes", "")),
+        }
+
+    def _refresh_named_payload_list(
+        self,
+        list_widget: QListWidget,
+        payloads: list[dict[str, object]],
+        *,
+        name_builder,
+        empty_text: str,
+    ) -> None:
+        current_text = ""
+        current_item = list_widget.currentItem()
+        if current_item is not None:
+            payload = current_item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(payload, dict):
+                current_text = str(name_builder(payload))
+        list_widget.blockSignals(True)
+        list_widget.clear()
+        if not payloads:
+            placeholder = QListWidgetItem(empty_text)
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+            list_widget.addItem(placeholder)
+            list_widget.blockSignals(False)
+            return
+        selected_row = 0
+        for index, payload in enumerate(payloads):
+            title = str(name_builder(payload)).strip() or empty_text
+            item = QListWidgetItem(title)
+            item.setData(Qt.ItemDataRole.UserRole, payload)
+            list_widget.addItem(item)
+            if current_text and title == current_text:
+                selected_row = index
+        list_widget.setCurrentRow(selected_row)
+        list_widget.blockSignals(False)
+
+    def _refresh_event_binding_views(self) -> None:
+        self._refresh_named_payload_list(
+            self.event_rtpc_list,
+            self._event_rtpc_bindings,
+            name_builder=lambda payload: str(payload.get("parameter_name", "")).strip() or "未命名 RTPC",
+            empty_text="当前还没有 RTPC 绑定。",
+        )
+        self._refresh_named_payload_list(
+            self.event_state_list,
+            self._event_state_overrides,
+            name_builder=lambda payload: f"{payload.get('group_name', '-')}/{payload.get('state_name', '-')}",
+            empty_text="当前还没有 State Override。",
+        )
+        self._refresh_named_payload_list(
+            self.event_switch_list,
+            self._event_switch_variants,
+            name_builder=lambda payload: f"{payload.get('group_name', '-')}/{payload.get('switch_name', '-')}",
+            empty_text="当前还没有 Switch Variant。",
+        )
+
+    def _load_event_binding_editor(self, kind: str) -> None:
+        self._loading_event = True
+        if kind == "rtpc":
+            row = self.event_rtpc_list.currentRow()
+            has_selection = 0 <= row < len(self._event_rtpc_bindings)
+            self.event_rtpc_remove_button.setEnabled(has_selection)
+            payload = self._event_rtpc_bindings[row] if has_selection else self._default_event_rtpc_binding_payload()
+            self._set_combo_box_values(self.event_rtpc_parameter_edit, self._available_game_parameter_names(), str(payload.get("parameter_name", "")))
+            self.event_rtpc_target_combo.setCurrentText(str(payload.get("target", "EventVolumeDb")))
+            self.event_rtpc_scope_combo.setCurrentText(str(payload.get("scope", "Global")))
+            self._refresh_event_rtpc_curve_editor_ranges()
+            self._set_curve_table_points(self.event_rtpc_curve_table, payload.get("curve_points", []))
+            self._sync_curve_interpolation_combo(self.event_rtpc_curve_table, self.event_rtpc_interpolation_combo)
+            self._sync_curve_point_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin)
+            self.event_rtpc_notes_edit.setPlainText(str(payload.get("notes", "")))
+        elif kind == "state":
+            row = self.event_state_list.currentRow()
+            has_selection = 0 <= row < len(self._event_state_overrides)
+            self.event_state_remove_button.setEnabled(has_selection)
+            payload = self._event_state_overrides[row] if has_selection else self._state_override_payload({})
+            self._set_combo_box_values(self.event_state_group_edit, self._available_state_group_names(), str(payload.get("group_name", "")))
+            self._refresh_event_state_name_options(str(payload.get("state_name", "")))
+            self.event_state_volume_spin.setValue(float(payload.get("volume_db", 0.0)))
+            self.event_state_pitch_spin.setValue(int(payload.get("pitch_cents", 0)))
+            self.event_state_mute_check.setChecked(bool(payload.get("is_muted", False)))
+            self.event_state_notes_edit.setPlainText(str(payload.get("notes", "")))
+        else:
+            row = self.event_switch_list.currentRow()
+            has_selection = 0 <= row < len(self._event_switch_variants)
+            self.event_switch_remove_button.setEnabled(has_selection)
+            payload = self._event_switch_variants[row] if has_selection else self._switch_variant_payload({})
+            self._set_combo_box_values(self.event_switch_group_edit, self._available_switch_group_names(), str(payload.get("group_name", "")))
+            self._refresh_event_switch_name_options(str(payload.get("switch_name", "")))
+            self.event_switch_clip_ids_edit.setText(", ".join(str(value) for value in payload.get("clip_ids", [])))
+            self.event_switch_notes_edit.setPlainText(str(payload.get("notes", "")))
+        self._loading_event = False
+
+    def _sync_event_binding_editor_to_state(self, kind: str) -> None:
+        if kind == "rtpc":
+            row = self.event_rtpc_list.currentRow()
+            if row < 0 or row >= len(self._event_rtpc_bindings):
+                return
+            self._event_rtpc_bindings[row] = {
+                "parameter_name": self.event_rtpc_parameter_edit.currentText().strip(),
+                "target": self.event_rtpc_target_combo.currentText(),
+                "scope": self.event_rtpc_scope_combo.currentText(),
+                "curve_points": self._curve_table_points(self.event_rtpc_curve_table),
+                "notes": self.event_rtpc_notes_edit.toPlainText().strip(),
+            }
+        elif kind == "state":
+            row = self.event_state_list.currentRow()
+            if row < 0 or row >= len(self._event_state_overrides):
+                return
+            self._event_state_overrides[row] = {
+                "group_name": self.event_state_group_edit.currentText().strip(),
+                "state_name": self.event_state_name_edit.currentText().strip(),
+                "volume_db": float(self.event_state_volume_spin.value()),
+                "pitch_cents": int(self.event_state_pitch_spin.value()),
+                "is_muted": self.event_state_mute_check.isChecked(),
+                "notes": self.event_state_notes_edit.toPlainText().strip(),
+            }
+        else:
+            row = self.event_switch_list.currentRow()
+            if row < 0 or row >= len(self._event_switch_variants):
+                return
+            self._event_switch_variants[row] = {
+                "group_name": self.event_switch_group_edit.currentText().strip(),
+                "switch_name": self.event_switch_name_edit.currentText().strip(),
+                "clip_ids": self._normalized_name_list_from_text(self.event_switch_clip_ids_edit.text()),
+                "notes": self.event_switch_notes_edit.toPlainText().strip(),
+            }
+        self._refresh_event_binding_views()
+
+    def _create_event_binding(self, kind: str) -> None:
+        self._sync_event_binding_editor_to_state(kind)
+        if kind == "rtpc":
+            self._event_rtpc_bindings.append(self._default_event_rtpc_binding_payload())
+            self._refresh_event_binding_views()
+            self.event_rtpc_list.setCurrentRow(len(self._event_rtpc_bindings) - 1)
+        elif kind == "state":
+            self._event_state_overrides.append(self._default_event_state_override_payload())
+            self._refresh_event_binding_views()
+            self.event_state_list.setCurrentRow(len(self._event_state_overrides) - 1)
+        else:
+            self._event_switch_variants.append(self._default_event_switch_variant_payload())
+            self._refresh_event_binding_views()
+            self.event_switch_list.setCurrentRow(len(self._event_switch_variants) - 1)
+        self._load_event_binding_editor(kind)
+        self._emit_event_properties_changed()
+
+    def _remove_event_binding(self, kind: str) -> None:
+        if kind == "rtpc":
+            row = self.event_rtpc_list.currentRow()
+            if row < 0 or row >= len(self._event_rtpc_bindings):
+                return
+            del self._event_rtpc_bindings[row]
+            self._refresh_event_binding_views()
+            if self._event_rtpc_bindings:
+                self.event_rtpc_list.setCurrentRow(min(row, len(self._event_rtpc_bindings) - 1))
+        elif kind == "state":
+            row = self.event_state_list.currentRow()
+            if row < 0 or row >= len(self._event_state_overrides):
+                return
+            del self._event_state_overrides[row]
+            self._refresh_event_binding_views()
+            if self._event_state_overrides:
+                self.event_state_list.setCurrentRow(min(row, len(self._event_state_overrides) - 1))
+        else:
+            row = self.event_switch_list.currentRow()
+            if row < 0 or row >= len(self._event_switch_variants):
+                return
+            del self._event_switch_variants[row]
+            self._refresh_event_binding_views()
+            if self._event_switch_variants:
+                self.event_switch_list.setCurrentRow(min(row, len(self._event_switch_variants) - 1))
+        self._load_event_binding_editor(kind)
+        self._emit_event_properties_changed()
+
+    def _load_bus_binding_editors(self, bus_config: dict[str, object] | None) -> None:
+        self._loading_event = True
+        rtpc_bindings = list(bus_config.get("rtpc_bindings", [])) if isinstance(bus_config, dict) else []
+        state_overrides = list(bus_config.get("state_overrides", [])) if isinstance(bus_config, dict) else []
+        self._refresh_named_payload_list(
+            self.bus_rtpc_list,
+            rtpc_bindings,
+            name_builder=lambda payload: str(payload.get("parameter_name", "")).strip() or "未命名 RTPC",
+            empty_text="当前 Bus 还没有 RTPC。",
+        )
+        self._refresh_named_payload_list(
+            self.bus_state_list,
+            state_overrides,
+            name_builder=lambda payload: f"{payload.get('group_name', '-')}/{payload.get('state_name', '-')}",
+            empty_text="当前 Bus 还没有 State Override。",
+        )
+        if rtpc_bindings and self.bus_rtpc_list.currentRow() >= 0:
+            payload = rtpc_bindings[self.bus_rtpc_list.currentRow()]
+            self.bus_rtpc_parameter_edit.setText(str(payload.get("parameter_name", "")))
+            self.bus_rtpc_target_combo.setCurrentText(str(payload.get("target", "BusVolumeDb")))
+            self.bus_rtpc_scope_combo.setCurrentText(str(payload.get("scope", "Global")))
+            self._refresh_bus_rtpc_curve_editor_ranges()
+            self._set_curve_table_points(self.bus_rtpc_curve_table, payload.get("curve_points", []))
+            self._sync_curve_interpolation_combo(self.bus_rtpc_curve_table, self.bus_rtpc_interpolation_combo)
+            self._sync_curve_point_controls(self.bus_rtpc_curve_table, self.bus_rtpc_selected_input_spin, self.bus_rtpc_selected_output_spin)
+            self.bus_rtpc_notes_edit.setPlainText(str(payload.get("notes", "")))
+        else:
+            self.bus_rtpc_parameter_edit.clear()
+            self.bus_rtpc_target_combo.setCurrentText("BusVolumeDb")
+            self.bus_rtpc_scope_combo.setCurrentText("Global")
+            self._refresh_bus_rtpc_curve_editor_ranges()
+            self._set_curve_table_points(
+                self.bus_rtpc_curve_table,
+                self._default_curve_point_payloads(
+                    self._rtpc_input_range(self.bus_rtpc_parameter_edit.text()),
+                    self._rtpc_output_range(self.bus_rtpc_target_combo.currentText()),
+                ),
+            )
+            self._sync_curve_interpolation_combo(self.bus_rtpc_curve_table, self.bus_rtpc_interpolation_combo)
+            self._sync_curve_point_controls(self.bus_rtpc_curve_table, self.bus_rtpc_selected_input_spin, self.bus_rtpc_selected_output_spin)
+            self.bus_rtpc_notes_edit.clear()
+        if state_overrides and self.bus_state_list.currentRow() >= 0:
+            payload = state_overrides[self.bus_state_list.currentRow()]
+            self.bus_state_group_edit.setText(str(payload.get("group_name", "")))
+            self.bus_state_name_edit.setText(str(payload.get("state_name", "")))
+            self.bus_state_volume_spin.setValue(float(payload.get("volume_db", 0.0)))
+            self.bus_state_pitch_spin.setValue(int(payload.get("pitch_cents", 0)))
+            self.bus_state_mute_check.setChecked(bool(payload.get("is_muted", False)))
+            self.bus_state_notes_edit.setPlainText(str(payload.get("notes", "")))
+        else:
+            self.bus_state_group_edit.clear()
+            self.bus_state_name_edit.clear()
+            self.bus_state_volume_spin.setValue(0.0)
+            self.bus_state_pitch_spin.setValue(0)
+            self.bus_state_mute_check.setChecked(False)
+            self.bus_state_notes_edit.clear()
+        self.bus_rtpc_remove_button.setEnabled(bool(rtpc_bindings))
+        self.bus_state_remove_button.setEnabled(bool(state_overrides))
+        self._loading_event = False
+
+    def _sync_bus_binding_editor_to_state(self, bus_config: dict[str, object] | None) -> None:
+        if not isinstance(bus_config, dict):
+            return
+        rtpc_bindings = list(bus_config.get("rtpc_bindings", []))
+        state_overrides = list(bus_config.get("state_overrides", []))
+        rtpc_row = self.bus_rtpc_list.currentRow()
+        if 0 <= rtpc_row < len(rtpc_bindings):
+            rtpc_bindings[rtpc_row] = {
+                "parameter_name": self.bus_rtpc_parameter_edit.text().strip(),
+                "target": self.bus_rtpc_target_combo.currentText(),
+                "scope": self.bus_rtpc_scope_combo.currentText(),
+                "curve_points": self._curve_table_points(self.bus_rtpc_curve_table),
+                "notes": self.bus_rtpc_notes_edit.toPlainText().strip(),
+            }
+        state_row = self.bus_state_list.currentRow()
+        if 0 <= state_row < len(state_overrides):
+            state_overrides[state_row] = {
+                "group_name": self.bus_state_group_edit.text().strip(),
+                "state_name": self.bus_state_name_edit.text().strip(),
+                "volume_db": float(self.bus_state_volume_spin.value()),
+                "pitch_cents": int(self.bus_state_pitch_spin.value()),
+                "is_muted": self.bus_state_mute_check.isChecked(),
+                "notes": self.bus_state_notes_edit.toPlainText().strip(),
+            }
+        bus_config["rtpc_bindings"] = rtpc_bindings
+        bus_config["state_overrides"] = state_overrides
+
+    def _add_current_bus_binding(self, kind: str) -> None:
+        row = self._selected_project_bus_index()
+        if row < 0:
+            return
+        current_config = self._project_bus_configs[row]
+        self._sync_bus_binding_editor_to_state(current_config)
+        if kind == "rtpc":
+            current_config.setdefault("rtpc_bindings", []).append(self._default_bus_rtpc_binding_payload())
+            self._load_bus_binding_editors(current_config)
+            self.bus_rtpc_list.setCurrentRow(len(current_config.get("rtpc_bindings", [])) - 1)
+        else:
+            current_config.setdefault("state_overrides", []).append(self._state_override_payload({}))
+            self._load_bus_binding_editors(current_config)
+            self.bus_state_list.setCurrentRow(len(current_config.get("state_overrides", [])) - 1)
+        self._emit_project_settings_changed()
+
+    def _remove_current_bus_binding(self, kind: str) -> None:
+        row = self._selected_project_bus_index()
+        if row < 0:
+            return
+        current_config = self._project_bus_configs[row]
+        collection_key = "rtpc_bindings" if kind == "rtpc" else "state_overrides"
+        list_widget = self.bus_rtpc_list if kind == "rtpc" else self.bus_state_list
+        bindings = list(current_config.get(collection_key, []))
+        binding_row = list_widget.currentRow()
+        if binding_row < 0 or binding_row >= len(bindings):
+            return
+        del bindings[binding_row]
+        current_config[collection_key] = bindings
+        self._load_bus_binding_editors(current_config)
+        if bindings:
+            list_widget.setCurrentRow(min(binding_row, len(bindings) - 1))
+        self._emit_project_settings_changed()
 
     def _update_source_browser_status(self) -> None:
         entry = self.source_tree.current_source_entry()
@@ -7763,6 +10484,26 @@ class MainWindow(QMainWindow):
             (self.inline_bus_open_parent_button, load_app_icon("navigate_parent")),
             (self.project_bus_focus_audio_button, load_app_icon("audio")),
             (self.command_button, load_app_icon("focus_panel")),
+            (self.gamesync_parameter_add_button, load_app_icon("rtpc")),
+            (self.gamesync_parameter_remove_button, load_app_icon("delete")),
+            (self.gamesync_state_add_button, load_app_icon("state")),
+            (self.gamesync_state_remove_button, load_app_icon("delete")),
+            (self.gamesync_switch_add_button, load_app_icon("switch")),
+            (self.gamesync_switch_remove_button, load_app_icon("delete")),
+            (self.event_rtpc_add_button, load_app_icon("rtpc")),
+            (self.event_rtpc_remove_button, load_app_icon("delete")),
+            (self.event_rtpc_add_point_button, load_app_icon("curve")),
+            (self.event_rtpc_remove_point_button, load_app_icon("delete")),
+            (self.event_state_add_button, load_app_icon("state")),
+            (self.event_state_remove_button, load_app_icon("delete")),
+            (self.event_switch_add_button, load_app_icon("switch")),
+            (self.event_switch_remove_button, load_app_icon("delete")),
+            (self.bus_rtpc_add_button, load_app_icon("rtpc")),
+            (self.bus_rtpc_remove_button, load_app_icon("delete")),
+            (self.bus_rtpc_add_point_button, load_app_icon("curve")),
+            (self.bus_rtpc_remove_point_button, load_app_icon("delete")),
+            (self.bus_state_add_button, load_app_icon("state")),
+            (self.bus_state_remove_button, load_app_icon("delete")),
         ]
         for button, icon in icon_pairs:
             if not icon.isNull():
@@ -7821,6 +10562,7 @@ class MainWindow(QMainWindow):
             "resources": load_app_icon("content"),
             "events": load_app_icon("event"),
             "buses": load_app_icon("bus"),
+            "gamesync": load_app_icon("curve"),
             "validation": load_app_icon("validate"),
             "build": load_app_icon("generate"),
             "results": load_app_icon("report"),
@@ -7913,6 +10655,17 @@ class MainWindow(QMainWindow):
             #PreviewMetricsFrame {{
                 background: transparent;
                 border: none;
+            }}
+            #PreviewRtpcTransportFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #1f2a34, stop:1 #253441);
+                border: 1px solid #4a6076;
+                border-radius: {group_radius}px;
+            }}
+            #PreviewGameSyncModesFrame {{
+                background-color: #1d252d;
+                border: 1px solid #445160;
+                border-radius: {group_radius}px;
             }}
             #PreviewMetricColumn {{
                 background-color: #1e242b;
@@ -8268,6 +11021,45 @@ class MainWindow(QMainWindow):
                 background-color: #493721;
                 border-color: #d9aa69;
                 color: #fff0d9;
+            }}
+            QLabel[role="previewTransportCaption"] {{
+                color: #8ca4ba;
+                font-size: {object_type_size}px;
+                font-weight: 700;
+            }}
+            QLabel[role="previewTransportReadout"] {{
+                background-color: #1a232b;
+                border: 1px solid #5d7890;
+                border-radius: {radius}px;
+                color: #eff7ff;
+                padding: 2px 8px;
+                font-weight: 700;
+            }}
+            QSlider::groove:horizontal {{
+                height: 6px;
+                border-radius: 3px;
+                background: #0f151a;
+                border: 1px solid #34414d;
+            }}
+            QSlider::sub-page:horizontal {{
+                border-radius: 3px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #6099c7, stop:1 #89c0e8);
+            }}
+            QSlider::add-page:horizontal {{
+                border-radius: 3px;
+                background: #253240;
+            }}
+            QSlider::handle:horizontal {{
+                width: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+                background: #dceaf7;
+                border: 1px solid #5d7ea1;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: #f2f8fd;
+                border-color: #8fb6de;
             }}
             QLabel[role="previewMetricHeading"] {{
                 color: #8aa4bf;

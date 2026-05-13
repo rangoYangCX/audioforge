@@ -33,6 +33,12 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     private readonly Dictionary<string, AudioClip> _processedClips = new Dictionary<string, AudioClip>();
     private readonly Dictionary<string, AudioForgeRuntimeState> _states = new Dictionary<string, AudioForgeRuntimeState>();
     private readonly Dictionary<string, AudioForgeBusState> _buses = new Dictionary<string, AudioForgeBusState>();
+    private readonly Dictionary<string, AudioForgeGameParameterConfig> _gameParameterConfigs = new Dictionary<string, AudioForgeGameParameterConfig>();
+    private readonly Dictionary<string, AudioForgeStateGroupConfig> _stateGroupConfigs = new Dictionary<string, AudioForgeStateGroupConfig>();
+    private readonly Dictionary<string, AudioForgeSwitchGroupConfig> _switchGroupConfigs = new Dictionary<string, AudioForgeSwitchGroupConfig>();
+    private readonly Dictionary<string, float> _globalGameParameters = new Dictionary<string, float>();
+    private readonly Dictionary<string, string> _globalStates = new Dictionary<string, string>();
+    private readonly Dictionary<string, AudioForgeEmitterContext> _emitters = new Dictionary<string, AudioForgeEmitterContext>();
     private readonly List<AudioForgeDebugEventRecord> _debugEventRecords = new List<AudioForgeDebugEventRecord>();
     private readonly List<AudioForgeDebugBusRecord> _debugBusRecords = new List<AudioForgeDebugBusRecord>();
     private readonly System.Random _random = new System.Random();
@@ -40,6 +46,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     private IAudioForgeResourceProvider _resourceProvider;
     private IAudioForgeResourceProvider _resourceProviderOverride;
     private bool _isInitializing;
+    private int _emitterSequence;
 
     public static AudioForgeRuntime Instance { get; private set; }
     public bool IsReady { get; private set; }
@@ -76,6 +83,44 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         return _buses.ContainsKey(NormalizeBusName(busName));
     }
 
+    public bool HasGameParameter(string name)
+    {
+        return !string.IsNullOrWhiteSpace(name) && _gameParameterConfigs.ContainsKey(name.Trim());
+    }
+
+    public bool HasStateGroup(string groupName)
+    {
+        return !string.IsNullOrWhiteSpace(groupName) && _stateGroupConfigs.ContainsKey(groupName.Trim());
+    }
+
+    public bool HasSwitchGroup(string groupName)
+    {
+        return !string.IsNullOrWhiteSpace(groupName) && _switchGroupConfigs.ContainsKey(groupName.Trim());
+    }
+
+    public AudioForgeEmitterHandle RegisterEmitter(GameObject gameObject)
+    {
+        _emitterSequence += 1;
+        string emitterId = "Emitter_" + _emitterSequence;
+        var context = new AudioForgeEmitterContext
+        {
+            EmitterId = emitterId,
+            BoundGameObject = gameObject,
+        };
+        _emitters[emitterId] = context;
+        return new AudioForgeEmitterHandle { EmitterId = emitterId, BoundGameObject = gameObject };
+    }
+
+    public void UnregisterEmitter(AudioForgeEmitterHandle emitter)
+    {
+        if (emitter == null || string.IsNullOrWhiteSpace(emitter.EmitterId))
+        {
+            return;
+        }
+
+        _emitters.Remove(emitter.EmitterId);
+    }
+
     public int GetRegisteredEventCount()
     {
         return _events.Count;
@@ -108,6 +153,115 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     public string GetResourceProviderName()
     {
         return _resourceProvider == null ? "Uninitialized" : _resourceProvider.GetType().Name;
+    }
+
+    public void SetGlobalGameParameter(string name, float value)
+    {
+        AudioForgeGameParameterConfig config;
+        if (!TryGetGameParameterConfig(name, out config))
+        {
+            return;
+        }
+
+        _globalGameParameters[config.Name] = ClampGameParameterValue(config, value);
+        RefreshBusVolumes(masterBusName);
+    }
+
+    public void SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)
+    {
+        AudioForgeGameParameterConfig config;
+        AudioForgeEmitterContext context;
+        if (!TryGetGameParameterConfig(name, out config) || !TryResolveEmitterContext(emitter, out context))
+        {
+            return;
+        }
+
+        context.LocalGameParameters[config.Name] = ClampGameParameterValue(config, value);
+        RefreshBusVolumes(masterBusName);
+    }
+
+    public float GetGlobalGameParameter(string name)
+    {
+        AudioForgeGameParameterConfig config;
+        if (!TryGetGameParameterConfig(name, out config))
+        {
+            return 0f;
+        }
+
+        float value;
+        return _globalGameParameters.TryGetValue(config.Name, out value) ? value : config.DefaultValue;
+    }
+
+    public float GetGameParameter(string name, AudioForgeEmitterHandle emitter)
+    {
+        AudioForgeGameParameterConfig config;
+        if (!TryGetGameParameterConfig(name, out config))
+        {
+            return 0f;
+        }
+
+        AudioForgeEmitterContext context;
+        float value;
+        if (TryResolveEmitterContext(emitter, out context) && context.LocalGameParameters.TryGetValue(config.Name, out value))
+        {
+            return value;
+        }
+
+        return GetGlobalGameParameter(config.Name);
+    }
+
+    public void SetState(string groupName, string stateName)
+    {
+        AudioForgeStateGroupConfig config;
+        if (!TryGetStateGroupConfig(groupName, out config))
+        {
+            return;
+        }
+
+        _globalStates[config.Name] = string.IsNullOrWhiteSpace(stateName) ? config.DefaultState : stateName.Trim();
+        RefreshBusVolumes(masterBusName);
+    }
+
+    public string GetState(string groupName)
+    {
+        AudioForgeStateGroupConfig config;
+        if (!TryGetStateGroupConfig(groupName, out config))
+        {
+            return string.Empty;
+        }
+
+        string value;
+        return _globalStates.TryGetValue(config.Name, out value) ? value : config.DefaultState;
+    }
+
+    public void SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)
+    {
+        AudioForgeSwitchGroupConfig config;
+        AudioForgeEmitterContext context;
+        if (!TryGetSwitchGroupConfig(groupName, out config) || !TryResolveEmitterContext(emitter, out context))
+        {
+            return;
+        }
+
+        context.LocalSwitches[config.Name] = string.IsNullOrWhiteSpace(switchName) ? config.DefaultSwitch : switchName.Trim();
+    }
+
+    public string GetSwitch(string groupName, AudioForgeEmitterHandle emitter)
+    {
+        AudioForgeSwitchGroupConfig config;
+        if (!TryGetSwitchGroupConfig(groupName, out config))
+        {
+            return string.Empty;
+        }
+
+        AudioForgeEmitterContext context;
+        string value;
+        if (TryResolveEmitterContext(emitter, out context) && context.LocalSwitches.TryGetValue(config.Name, out value))
+        {
+            return value;
+        }
+
+        return ResolveMappedSwitch(config, emitter);
     }
 
     /// <summary>
@@ -206,7 +360,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
     public float GetEffectiveBusVolume(string busName)
     {
-        return ComputeEffectiveVolume(1f, busName);
+        return ComputeEffectiveVolume(1f, busName, (AudioForgeEmitterHandle)null);
     }
 
     public bool HasCustomBusMixerBinding(string busName)
@@ -264,17 +418,27 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
     public Coroutine Play(string eventId)
     {
-        return StartCoroutine(PlayEvent(eventId, null, 0f));
+        return StartCoroutine(PlayEvent(eventId, null, null, 0f));
     }
 
     public Coroutine Play(string eventId, AudioSource overrideSource)
     {
-        return StartCoroutine(PlayEvent(eventId, overrideSource, 0f));
+        return StartCoroutine(PlayEvent(eventId, null, overrideSource, 0f));
     }
 
     public Coroutine Play(string eventId, AudioSource overrideSource, float localEventVolumeDbOffset)
     {
-        return StartCoroutine(PlayEvent(eventId, overrideSource, localEventVolumeDbOffset));
+        return StartCoroutine(PlayEvent(eventId, null, overrideSource, localEventVolumeDbOffset));
+    }
+
+    public Coroutine Play(string eventId, AudioForgeEmitterHandle emitter)
+    {
+        return StartCoroutine(PlayEvent(eventId, emitter, null, 0f));
+    }
+
+    public Coroutine Play(string eventId, AudioForgeEmitterHandle emitter, AudioSource overrideSource, float localEventVolumeDbOffset)
+    {
+        return StartCoroutine(PlayEvent(eventId, emitter, overrideSource, localEventVolumeDbOffset));
     }
 
     public IEnumerator Initialize()
@@ -300,6 +464,38 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         AudioForgeDatabase database = AudioForgeJsonAdapter.Parse(json);
         _runtimeAudioFormat = string.IsNullOrWhiteSpace(database.RuntimeAudioFormat) ? "ogg" : database.RuntimeAudioFormat;
         _resourceProvider = _resourceProviderOverride ?? CreateDefaultResourceProvider();
+
+        foreach (AudioForgeGameParameterConfig parameter in database.GameParameters)
+        {
+            if (parameter == null || string.IsNullOrWhiteSpace(parameter.Name))
+            {
+                continue;
+            }
+            parameter.Name = parameter.Name.Trim();
+            _gameParameterConfigs[parameter.Name] = parameter;
+            _globalGameParameters[parameter.Name] = ClampGameParameterValue(parameter, parameter.DefaultValue);
+        }
+
+        foreach (AudioForgeStateGroupConfig group in database.StateGroups)
+        {
+            if (group == null || string.IsNullOrWhiteSpace(group.Name))
+            {
+                continue;
+            }
+            group.Name = group.Name.Trim();
+            _stateGroupConfigs[group.Name] = group;
+            _globalStates[group.Name] = group.DefaultState;
+        }
+
+        foreach (AudioForgeSwitchGroupConfig group in database.SwitchGroups)
+        {
+            if (group == null || string.IsNullOrWhiteSpace(group.Name))
+            {
+                continue;
+            }
+            group.Name = group.Name.Trim();
+            _switchGroupConfigs[group.Name] = group;
+        }
 
         EnsureBus(masterBusName);
         foreach (AudioForgeBusConfig busConfig in database.BusConfigs)
@@ -327,6 +523,16 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
         foreach (AudioForgeEventConfig eventConfig in database.Events)
         {
+            if (eventConfig.DefaultClipIds.Count == 0)
+            {
+                foreach (AudioForgeClipConfig clip in eventConfig.Clips)
+                {
+                    if (clip != null && !string.IsNullOrEmpty(clip.ClipId))
+                    {
+                        eventConfig.DefaultClipIds.Add(clip.ClipId);
+                    }
+                }
+            }
             _events[eventConfig.EventId] = eventConfig;
             _states[eventConfig.EventId] = new AudioForgeRuntimeState();
             EnsureBus(eventConfig.Bus);
@@ -339,10 +545,20 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
     public IEnumerator PlayEvent(string eventId, AudioSource audioSource)
     {
-        return PlayEvent(eventId, audioSource, 0f);
+        return PlayEvent(eventId, null, audioSource, 0f);
     }
 
     public IEnumerator PlayEvent(string eventId, AudioSource audioSource, float localEventVolumeDbOffset)
+    {
+        return PlayEvent(eventId, null, audioSource, localEventVolumeDbOffset);
+    }
+
+    public IEnumerator PlayEvent(string eventId, AudioForgeEmitterHandle emitter)
+    {
+        return PlayEvent(eventId, emitter, null, 0f);
+    }
+
+    public IEnumerator PlayEvent(string eventId, AudioForgeEmitterHandle emitter, AudioSource audioSource, float localEventVolumeDbOffset)
     {
         AudioForgeEventConfig eventConfig;
         if (!IsReady || !_events.TryGetValue(eventId, out eventConfig))
@@ -350,6 +566,9 @@ public sealed class AudioForgeRuntime : MonoBehaviour
             AppendDebugEventRecord(eventId, null, null, "rejected", "runtime_not_ready_or_event_missing", 0f, 0, 0, false, false);
             yield break;
         }
+
+        AudioForgeEmitterContext emitterContext = null;
+        TryResolveEmitterContext(emitter, out emitterContext);
 
         float now = Time.time;
         AudioForgeRuntimeState state = _states[eventId];
@@ -374,7 +593,19 @@ public sealed class AudioForgeRuntime : MonoBehaviour
             }
         }
 
-        AudioForgeClipConfig clipConfig = SelectClip(eventConfig, state);
+        float resolvedVolumeDb = eventConfig.VolumeDb + GetUnityEventVolumeOffsetDb(eventId) + localEventVolumeDbOffset;
+        int resolvedPitchCents = eventConfig.PitchCents;
+        bool isMuted = false;
+        ApplyActiveGameSyncEffects(emitter, ref resolvedVolumeDb, ref resolvedPitchCents, ref isMuted);
+        ApplyStateOverrides(eventConfig.StateOverrides, ref resolvedVolumeDb, ref resolvedPitchCents, ref isMuted);
+        ApplyRtpcBindings(eventConfig.RtpcBindings, emitter, ref resolvedVolumeDb, ref resolvedPitchCents);
+        if (isMuted)
+        {
+            AppendDebugEventRecord(eventId, null, eventConfig.Bus, "rejected", "muted_by_state_override", resolvedVolumeDb, resolvedPitchCents, state.ComboStep, false, false);
+            yield break;
+        }
+
+        AudioForgeClipConfig clipConfig = SelectClip(eventConfig, state, ResolveEventCandidateClips(eventConfig, emitter));
         if (clipConfig == null)
         {
             AppendDebugEventRecord(eventId, null, eventConfig.Bus, "rejected", "clip_selection_failed", 0f, 0, state.ComboStep, false, false);
@@ -400,9 +631,8 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         int comboStep = ResolveComboStep(eventConfig, state, now);
-        float eventVolumeDbOffset = GetUnityEventVolumeOffsetDb(eventId) + localEventVolumeDbOffset;
-        float volumeDb = eventConfig.VolumeDb + eventVolumeDbOffset + RandomRange(eventConfig.VolumeRandMinDb, eventConfig.VolumeRandMaxDb);
-        int pitchCents = eventConfig.PitchCents + RandomRangeInt(eventConfig.PitchRandMinCents, eventConfig.PitchRandMaxCents);
+        float volumeDb = resolvedVolumeDb + RandomRange(eventConfig.VolumeRandMinDb, eventConfig.VolumeRandMaxDb);
+        int pitchCents = resolvedPitchCents + RandomRangeInt(eventConfig.PitchRandMinCents, eventConfig.PitchRandMaxCents);
         if (eventConfig.PlayMode == "Combo")
         {
             pitchCents += comboStep * eventConfig.ComboPitchStepCents;
@@ -418,12 +648,15 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
         AudioForgeActiveVoice voice = new AudioForgeActiveVoice();
         voice.Source = source;
+        voice.EventId = eventId;
+        voice.EmitterId = emitterContext != null ? emitterContext.EmitterId : string.Empty;
         voice.BusName = busState.Name;
         voice.ManagedByPool = audioSource == null;
         voice.StartedAtTime = now;
         voice.BaseVolume = Mathf.Max(0f, Mathf.Pow(10f, volumeDb / 20f));
+        voice.BasePitchCents = pitchCents;
 
-        ConfigureSourceForPlayback(source, playbackClip, voice.BaseVolume, pitchCents, busState, usingReferencePitchClip);
+        ConfigureSourceForPlayback(source, playbackClip, voice.BaseVolume, pitchCents, busState, usingReferencePitchClip, emitter);
         RegisterVoice(state, busState, voice);
 
         state.LastClipId = clipConfig.ClipId;
@@ -539,6 +772,13 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
         _processedClips.Clear();
         _states.Clear();
+        _gameParameterConfigs.Clear();
+        _stateGroupConfigs.Clear();
+        _switchGroupConfigs.Clear();
+        _globalGameParameters.Clear();
+        _globalStates.Clear();
+        _emitters.Clear();
+        _emitterSequence = 0;
         _debugEventRecords.Clear();
         _debugBusRecords.Clear();
 
@@ -658,6 +898,244 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         return null;
+    }
+
+    private bool TryResolveEmitterContext(AudioForgeEmitterHandle emitter, out AudioForgeEmitterContext context)
+    {
+        return TryResolveEmitterContext(emitter != null ? emitter.EmitterId : string.Empty, out context);
+    }
+
+    private bool TryResolveEmitterContext(string emitterId, out AudioForgeEmitterContext context)
+    {
+        context = null;
+        if (string.IsNullOrWhiteSpace(emitterId))
+        {
+            return false;
+        }
+        return _emitters.TryGetValue(emitterId, out context);
+    }
+
+    private bool TryGetGameParameterConfig(string name, out AudioForgeGameParameterConfig config)
+    {
+        config = null;
+        return !string.IsNullOrWhiteSpace(name) && _gameParameterConfigs.TryGetValue(name.Trim(), out config);
+    }
+
+    private bool TryGetStateGroupConfig(string name, out AudioForgeStateGroupConfig config)
+    {
+        config = null;
+        return !string.IsNullOrWhiteSpace(name) && _stateGroupConfigs.TryGetValue(name.Trim(), out config);
+    }
+
+    private bool TryGetSwitchGroupConfig(string name, out AudioForgeSwitchGroupConfig config)
+    {
+        config = null;
+        return !string.IsNullOrWhiteSpace(name) && _switchGroupConfigs.TryGetValue(name.Trim(), out config);
+    }
+
+    private float ClampGameParameterValue(AudioForgeGameParameterConfig config, float value)
+    {
+        return config == null ? value : Mathf.Clamp(value, config.MinValue, config.MaxValue);
+    }
+
+    private string ResolveMappedSwitch(AudioForgeSwitchGroupConfig group, AudioForgeEmitterHandle emitter)
+    {
+        if (group == null)
+        {
+            return string.Empty;
+        }
+        if (group.UseGameParameter && !string.IsNullOrWhiteSpace(group.MappedGameParameter) && group.Thresholds.Count > 0)
+        {
+            float parameterValue = GetGameParameter(group.MappedGameParameter, emitter);
+            for (int index = 0; index < group.Thresholds.Count; index += 1)
+            {
+                AudioForgeSwitchThresholdConfig threshold = group.Thresholds[index];
+                if (threshold != null && parameterValue >= threshold.MinValue && parameterValue <= threshold.MaxValue)
+                {
+                    return threshold.SwitchName;
+                }
+            }
+        }
+        return group.DefaultSwitch;
+    }
+
+    private List<AudioForgeClipConfig> ResolveEventCandidateClips(AudioForgeEventConfig eventConfig, AudioForgeEmitterHandle emitter)
+    {
+        var clipsById = new Dictionary<string, AudioForgeClipConfig>();
+        for (int index = 0; index < eventConfig.Clips.Count; index += 1)
+        {
+            AudioForgeClipConfig clip = eventConfig.Clips[index];
+            if (clip != null && !string.IsNullOrEmpty(clip.ClipId))
+            {
+                clipsById[clip.ClipId] = clip;
+            }
+        }
+
+        for (int index = 0; index < eventConfig.SwitchVariants.Count; index += 1)
+        {
+            AudioForgeSwitchVariantConfig variant = eventConfig.SwitchVariants[index];
+            if (variant == null || string.IsNullOrWhiteSpace(variant.GroupName))
+            {
+                continue;
+            }
+            if (!string.Equals(GetSwitch(variant.GroupName, emitter), variant.SwitchName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var matchedClips = new List<AudioForgeClipConfig>();
+            for (int clipIndex = 0; clipIndex < variant.ClipIds.Count; clipIndex += 1)
+            {
+                AudioForgeClipConfig matchedClip;
+                if (clipsById.TryGetValue(variant.ClipIds[clipIndex], out matchedClip))
+                {
+                    matchedClips.Add(matchedClip);
+                }
+            }
+            if (matchedClips.Count > 0)
+            {
+                return matchedClips;
+            }
+        }
+
+        var defaultClips = new List<AudioForgeClipConfig>();
+        for (int index = 0; index < eventConfig.DefaultClipIds.Count; index += 1)
+        {
+            AudioForgeClipConfig clip;
+            if (clipsById.TryGetValue(eventConfig.DefaultClipIds[index], out clip))
+            {
+                defaultClips.Add(clip);
+            }
+        }
+        return defaultClips.Count > 0 ? defaultClips : new List<AudioForgeClipConfig>(eventConfig.Clips);
+    }
+
+    private void ApplyStateOverrides(List<AudioForgeStateOverrideConfig> overrides, ref float volumeDb, ref int pitchCents, ref bool isMuted)
+    {
+        for (int index = 0; index < overrides.Count; index += 1)
+        {
+            AudioForgeStateOverrideConfig item = overrides[index];
+            if (item == null || string.IsNullOrWhiteSpace(item.GroupName))
+            {
+                continue;
+            }
+            if (!string.Equals(GetState(item.GroupName), item.StateName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            volumeDb += item.VolumeDb;
+            pitchCents += item.PitchCents;
+            isMuted = isMuted || item.IsMuted;
+        }
+    }
+
+    private void ApplyActiveGameSyncEffects(AudioForgeEmitterHandle emitter, ref float volumeDb, ref int pitchCents, ref bool isMuted)
+    {
+        foreach (KeyValuePair<string, AudioForgeStateGroupConfig> pair in _stateGroupConfigs)
+        {
+            AudioForgeGameSyncEffectConfig effect = ResolveGameSyncEffect(pair.Value != null ? pair.Value.StateEffects : null, GetState(pair.Key));
+            if (effect != null)
+            {
+                ApplyGameSyncEffect(effect, ref volumeDb, ref pitchCents, ref isMuted);
+            }
+        }
+
+        foreach (KeyValuePair<string, AudioForgeSwitchGroupConfig> pair in _switchGroupConfigs)
+        {
+            AudioForgeGameSyncEffectConfig effect = ResolveGameSyncEffect(pair.Value != null ? pair.Value.SwitchEffects : null, GetSwitch(pair.Key, emitter));
+            if (effect != null)
+            {
+                ApplyGameSyncEffect(effect, ref volumeDb, ref pitchCents, ref isMuted);
+            }
+        }
+    }
+
+    private static void ApplyGameSyncEffect(AudioForgeGameSyncEffectConfig effect, ref float volumeDb, ref int pitchCents, ref bool isMuted)
+    {
+        volumeDb += effect.VolumeDb;
+        pitchCents += effect.PitchCents;
+        isMuted = isMuted || effect.IsMuted;
+    }
+
+    private static AudioForgeGameSyncEffectConfig ResolveGameSyncEffect(List<AudioForgeGameSyncEffectConfig> effects, string valueName)
+    {
+        if (effects == null || string.IsNullOrWhiteSpace(valueName))
+        {
+            return null;
+        }
+
+        for (int index = 0; index < effects.Count; index += 1)
+        {
+            AudioForgeGameSyncEffectConfig effect = effects[index];
+            if (effect != null && string.Equals(effect.ValueName, valueName, StringComparison.Ordinal))
+            {
+                return effect;
+            }
+        }
+
+        return null;
+    }
+
+    private void ApplyRtpcBindings(List<AudioForgeRtpcBindingConfig> bindings, AudioForgeEmitterHandle emitter, ref float volumeDb, ref int pitchCents)
+    {
+        for (int index = 0; index < bindings.Count; index += 1)
+        {
+            AudioForgeRtpcBindingConfig binding = bindings[index];
+            if (binding == null || string.IsNullOrWhiteSpace(binding.ParameterName))
+            {
+                continue;
+            }
+            float resolvedValue = EvaluateRtpcBinding(binding, emitter);
+            if (string.Equals(binding.Target, "EventPitchCents", StringComparison.Ordinal))
+            {
+                pitchCents += Mathf.RoundToInt(resolvedValue);
+            }
+            else
+            {
+                volumeDb += resolvedValue;
+            }
+        }
+    }
+
+    private float EvaluateRtpcBinding(AudioForgeRtpcBindingConfig binding, AudioForgeEmitterHandle emitter)
+    {
+        float inputValue = string.Equals(binding.Scope, "Emitter", StringComparison.Ordinal)
+            ? GetGameParameter(binding.ParameterName, emitter)
+            : GetGlobalGameParameter(binding.ParameterName);
+        return EvaluateCurve(binding.CurvePoints, inputValue);
+    }
+
+    private float EvaluateCurve(List<AudioForgeCurvePointConfig> points, float inputValue)
+    {
+        if (points == null || points.Count == 0)
+        {
+            return 0f;
+        }
+        if (points.Count == 1)
+        {
+            return points[0].OutputValue;
+        }
+        List<AudioForgeCurvePointConfig> ordered = new List<AudioForgeCurvePointConfig>(points);
+        ordered.Sort(delegate(AudioForgeCurvePointConfig left, AudioForgeCurvePointConfig right) { return left.InputValue.CompareTo(right.InputValue); });
+        if (inputValue <= ordered[0].InputValue)
+        {
+            return ordered[0].OutputValue;
+        }
+        for (int index = 0; index < ordered.Count - 1; index += 1)
+        {
+            AudioForgeCurvePointConfig current = ordered[index];
+            AudioForgeCurvePointConfig next = ordered[index + 1];
+            if (inputValue > next.InputValue)
+            {
+                continue;
+            }
+            if (string.Equals(current.Interpolation, "Constant", StringComparison.Ordinal))
+            {
+                return current.OutputValue;
+            }
+            float t = Mathf.InverseLerp(current.InputValue, next.InputValue, inputValue);
+            return Mathf.Lerp(current.OutputValue, next.OutputValue, t);
+        }
+        return ordered[ordered.Count - 1].OutputValue;
     }
 
     private string NormalizeBusName(string busName)
@@ -811,7 +1289,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     /// 将最终 Clip、音量和音高应用到 AudioSource。
     /// 如果已经使用了保时长变调后的参考 Clip，这里保持 pitch 为 1。
     /// </summary>
-    private void ConfigureSourceForPlayback(AudioSource source, AudioClip audioClip, float baseVolume, int pitchCents, AudioForgeBusState busState, bool usingReferencePitchClip)
+    private void ConfigureSourceForPlayback(AudioSource source, AudioClip audioClip, float baseVolume, int pitchCents, AudioForgeBusState busState, bool usingReferencePitchClip, AudioForgeEmitterHandle emitter)
     {
         source.clip = audioClip;
         source.pitch = usingReferencePitchClip ? 1f : Mathf.Pow(2f, pitchCents / 1200f);
@@ -821,7 +1299,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         {
             source.outputAudioMixerGroup = busState.OutputMixerGroup;
         }
-        source.volume = ComputeEffectiveVolume(baseVolume, busState.Name);
+        source.volume = ComputeEffectiveVolume(baseVolume, busState.Name, emitter);
     }
 
     private void RegisterVoice(AudioForgeRuntimeState state, AudioForgeBusState busState, AudioForgeActiveVoice voice)
@@ -838,27 +1316,27 @@ public sealed class AudioForgeRuntime : MonoBehaviour
     /// 统一处理 Random / Sequence / Combo 的片段选择。
     /// Combo 当前只改变音高步进，不改变选片语义。
     /// </summary>
-    private AudioForgeClipConfig SelectClip(AudioForgeEventConfig eventConfig, AudioForgeRuntimeState state)
+    private AudioForgeClipConfig SelectClip(AudioForgeEventConfig eventConfig, AudioForgeRuntimeState state, List<AudioForgeClipConfig> availableClips)
     {
-        if (eventConfig.Clips.Count == 0)
+        if (availableClips == null || availableClips.Count == 0)
         {
             return null;
         }
 
         if (eventConfig.PlayMode == "Sequence")
         {
-            int index = state.SequenceIndex % eventConfig.Clips.Count;
-            state.SequenceIndex = (index + 1) % eventConfig.Clips.Count;
-            return eventConfig.Clips[index];
+            int index = state.SequenceIndex % availableClips.Count;
+            state.SequenceIndex = (index + 1) % availableClips.Count;
+            return availableClips[index];
         }
 
-        List<AudioForgeClipConfig> candidates = new List<AudioForgeClipConfig>(eventConfig.Clips);
+        List<AudioForgeClipConfig> candidates = new List<AudioForgeClipConfig>(availableClips);
         if (eventConfig.AvoidImmediateRepeat && !string.IsNullOrEmpty(state.LastClipId) && candidates.Count > 1)
         {
             candidates.RemoveAll(delegate(AudioForgeClipConfig clip) { return clip.ClipId == state.LastClipId; });
             if (candidates.Count == 0)
             {
-                candidates = new List<AudioForgeClipConfig>(eventConfig.Clips);
+                candidates = new List<AudioForgeClipConfig>(availableClips);
             }
         }
 
@@ -947,7 +1425,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
             if (voice.Source.isPlaying)
             {
-                voice.Source.volume = ComputeEffectiveVolume(voice.BaseVolume, voice.BusName);
+                voice.Source.volume = ComputeEffectiveVolume(voice.BaseVolume, voice.BusName, voice.EmitterId);
                 continue;
             }
 
@@ -1062,7 +1540,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
                 AudioForgeActiveVoice voice = state.ActiveVoices[index];
                 if (voice != null && voice.Source != null && IsBusAffectedByRoute(voice.BusName, busName, true))
                 {
-                    voice.Source.volume = ComputeEffectiveVolume(voice.BaseVolume, voice.BusName);
+                    voice.Source.volume = ComputeEffectiveVolume(voice.BaseVolume, voice.BusName, voice.EmitterId);
                 }
             }
         }
@@ -1101,7 +1579,18 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
     }
 
-    private float ComputeEffectiveVolume(float baseVolume, string busName)
+    private float ComputeEffectiveVolume(float baseVolume, string busName, string emitterId)
+    {
+        AudioForgeEmitterContext emitterContext = null;
+        TryResolveEmitterContext(emitterId, out emitterContext);
+        return ComputeEffectiveVolume(
+            baseVolume,
+            busName,
+            emitterContext != null ? new AudioForgeEmitterHandle { EmitterId = emitterContext.EmitterId, BoundGameObject = emitterContext.BoundGameObject } : null
+        );
+    }
+
+    private float ComputeEffectiveVolume(float baseVolume, string busName, AudioForgeEmitterHandle emitter)
     {
         float gain = baseVolume * Mathf.Clamp01(unityMasterVolume);
         string currentBus = NormalizeBusName(busName);
@@ -1114,12 +1603,18 @@ public sealed class AudioForgeRuntime : MonoBehaviour
                 break;
             }
 
-            if (busState.IsMuted)
+            float volumeDbOffset = 0f;
+            int unusedPitchCents = 0;
+            bool isMuted = busState.IsMuted;
+            ApplyStateOverrides(busState.StateOverrides, ref volumeDbOffset, ref unusedPitchCents, ref isMuted);
+            ApplyRtpcBindings(busState.RtpcBindings, emitter, ref volumeDbOffset, ref unusedPitchCents);
+            if (isMuted)
             {
                 return 0f;
             }
 
             gain *= busState.Volume;
+            gain *= Mathf.Max(0f, Mathf.Pow(10f, volumeDbOffset / 20f));
             gain *= Mathf.Clamp01(busState.UnityVolume);
             if (currentBus == masterBusName)
             {

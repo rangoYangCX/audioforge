@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from audioforge.app.models.audio_project import AudioProject, ClipModel, ValidationIssue, effective_event_clips
+from audioforge.app.models.audio_project import AudioProject, ClipModel, EventModel, GameParameterModel, RtpcBindingModel, StateGroupModel, StateOverrideModel, SwitchGroupModel, SwitchVariantModel, ValidationIssue, effective_event_clips
 from audioforge.app.services.audio_processor import AudioProcessor
 from audioforge.app.utils.constants import (
     DEFAULT_AUDIO_MANIFEST_FILENAME,
@@ -89,6 +89,194 @@ class ExportResult:
 class RuntimeExporter:
     def __init__(self) -> None:
         self.audio_processor = AudioProcessor()
+
+    def _serialize_curve_points(self, binding: RtpcBindingModel) -> list[dict[str, object]]:
+        return [
+            {
+                "InputValue": float(point.input_value),
+                "OutputValue": float(point.output_value),
+                "Interpolation": point.interpolation,
+            }
+            for point in binding.curve_points
+        ]
+
+    def _serialize_rtpc_bindings(self, bindings: list[RtpcBindingModel]) -> list[dict[str, object]]:
+        return [
+            {
+                "ParameterName": binding.parameter_name,
+                "Target": binding.target,
+                "Scope": binding.scope,
+                "CurvePoints": self._serialize_curve_points(binding),
+                "Notes": binding.notes,
+            }
+            for binding in bindings
+            if binding.parameter_name.strip()
+        ]
+
+    def _serialize_state_overrides(self, overrides: list[StateOverrideModel]) -> list[dict[str, object]]:
+        return [
+            {
+                "GroupName": override.group_name,
+                "StateName": override.state_name,
+                "VolumeDb": float(override.volume_db),
+                "PitchCents": int(override.pitch_cents),
+                "IsMuted": bool(override.is_muted),
+                "Notes": override.notes,
+            }
+            for override in overrides
+            if override.group_name.strip() and override.state_name.strip()
+        ]
+
+    def _serialize_switch_variants(self, variants: list[SwitchVariantModel]) -> list[dict[str, object]]:
+        return [
+            {
+                "GroupName": variant.group_name,
+                "SwitchName": variant.switch_name,
+                "ClipIds": list(variant.clip_ids),
+                "Notes": variant.notes,
+            }
+            for variant in variants
+            if variant.group_name.strip() and variant.switch_name.strip() and variant.clip_ids
+        ]
+
+    def _serialize_game_parameters(self, project: AudioProject) -> list[dict[str, object]]:
+        return [
+            {
+                "Name": parameter.name,
+                "DefaultValue": float(parameter.default_value),
+                "MinValue": float(parameter.min_value),
+                "MaxValue": float(parameter.max_value),
+                "Description": parameter.notes,
+            }
+            for parameter in project.game_parameters
+            if parameter.name.strip()
+        ]
+
+    def _serialize_state_groups(self, project: AudioProject) -> list[dict[str, object]]:
+        return [
+            {
+                "Name": group.name,
+                "DefaultState": group.default_state,
+                "States": list(group.states),
+                "StateEffects": [
+                    {
+                        "StateName": state_name,
+                        "VolumeDb": float(effect.volume_db),
+                        "PitchCents": int(effect.pitch_cents),
+                        "IsMuted": bool(effect.is_muted),
+                        "Notes": effect.notes,
+                    }
+                    for state_name, effect in group.state_effects.items()
+                    if state_name.strip()
+                ],
+                "Notes": group.notes,
+            }
+            for group in project.state_groups
+            if group.name.strip()
+        ]
+
+    def _switch_thresholds(self, group: SwitchGroupModel, project: AudioProject) -> list[dict[str, object]]:
+        if not group.use_game_parameter or not group.mapped_game_parameter or not group.switches:
+            return []
+        parameter = next((entry for entry in project.game_parameters if entry.name == group.mapped_game_parameter), None)
+        if parameter is None:
+            return []
+        total = len(group.switches)
+        if total <= 0:
+            return []
+        step = (parameter.max_value - parameter.min_value) / max(1, total)
+        thresholds: list[dict[str, object]] = []
+        current_min = parameter.min_value
+        for index, switch_name in enumerate(group.switches):
+            current_max = parameter.max_value if index == total - 1 else parameter.min_value + step * (index + 1)
+            thresholds.append(
+                {
+                    "SwitchName": switch_name,
+                    "MinValue": float(current_min),
+                    "MaxValue": float(current_max),
+                }
+            )
+            current_min = current_max
+        return thresholds
+
+    def _serialize_switch_groups(self, project: AudioProject) -> list[dict[str, object]]:
+        return [
+            {
+                "Name": group.name,
+                "DefaultSwitch": group.default_switch,
+                "Switches": list(group.switches),
+                "UseGameParameter": bool(group.use_game_parameter),
+                "MappedGameParameter": group.mapped_game_parameter,
+                "Thresholds": self._switch_thresholds(group, project),
+                "SwitchEffects": [
+                    {
+                        "SwitchName": switch_name,
+                        "VolumeDb": float(effect.volume_db),
+                        "PitchCents": int(effect.pitch_cents),
+                        "IsMuted": bool(effect.is_muted),
+                        "Notes": effect.notes,
+                    }
+                    for switch_name, effect in group.switch_effects.items()
+                    if switch_name.strip()
+                ],
+                "Notes": group.notes,
+            }
+            for group in project.switch_groups
+            if group.name.strip()
+        ]
+
+    def _event_runtime_clips(self, event: EventModel) -> list[ClipModel]:
+        default_clips = effective_event_clips(event)
+        default_ids = [clip.id for clip in default_clips]
+        variant_ids = [clip_id for variant in event.switch_variants for clip_id in variant.clip_ids]
+        if not variant_ids:
+            return default_clips
+        id_to_clip = {clip.id: clip for clip in event.clips}
+        ordered_ids: list[str] = []
+        for clip_id in [*default_ids, *variant_ids]:
+            if clip_id in id_to_clip and clip_id not in ordered_ids:
+                ordered_ids.append(clip_id)
+        return [id_to_clip[clip_id] for clip_id in ordered_ids]
+
+    def _serialize_event_payload(self, event: EventModel) -> dict[str, object]:
+        runtime_clips = self._event_runtime_clips(event)
+        default_clips = effective_event_clips(event)
+        payload: dict[str, object] = {
+            "Bus": event.bus,
+            "PlayMode": event.play_mode,
+            "AvoidImmediateRepeat": event.avoid_immediate_repeat,
+            "VolumeDb": event.volume_db,
+            "VolumeRandDb": [event.volume_rand_min_db, event.volume_rand_max_db],
+            "PitchCents": event.pitch_cents,
+            "PitchRandCents": [event.pitch_rand_min_cents, event.pitch_rand_max_cents],
+            "MaxInstances": event.max_instances,
+            "CooldownSeconds": event.cooldown_seconds,
+            "StealPolicy": event.steal_policy,
+            "LoadPolicy": event.load_policy,
+            "DefaultClipIds": [clip.id for clip in default_clips],
+            "Clips": [
+                {
+                    "ClipId": clip.id,
+                    "AssetKey": clip.asset_key,
+                    "Weight": clip.weight,
+                    "TrimStartMs": clip.trim_start_ms,
+                    "TrimEndMs": clip.trim_end_ms,
+                    "FadeInMs": clip.fade_in_ms,
+                    "FadeOutMs": clip.fade_out_ms,
+                    "LoopStartMs": clip.loop_start_ms,
+                    "LoopEndMs": clip.loop_end_ms,
+                }
+                for clip in runtime_clips
+            ],
+            "RtpcBindings": self._serialize_rtpc_bindings(event.rtpc_bindings),
+            "StateOverrides": self._serialize_state_overrides(event.state_overrides),
+            "SwitchVariants": self._serialize_switch_variants(event.switch_variants),
+        }
+        if event.play_mode == "Combo":
+            payload["ComboPitchStepCents"] = event.combo_pitch_step_cents
+            payload["ComboResetSeconds"] = event.combo_reset_seconds
+            payload["ComboMaxStep"] = event.combo_max_step
+        return payload
 
     def export(
         self,
@@ -328,39 +516,7 @@ class RuntimeExporter:
         events: dict[str, object] = {}
         for event_id in sorted(project.events):
             event = project.events[event_id]
-            runtime_clips = effective_event_clips(event)
-            payload: dict[str, object] = {
-                "Bus": event.bus,
-                "PlayMode": event.play_mode,
-                "AvoidImmediateRepeat": event.avoid_immediate_repeat,
-                "VolumeDb": event.volume_db,
-                "VolumeRandDb": [event.volume_rand_min_db, event.volume_rand_max_db],
-                "PitchCents": event.pitch_cents,
-                "PitchRandCents": [event.pitch_rand_min_cents, event.pitch_rand_max_cents],
-                "MaxInstances": event.max_instances,
-                "CooldownSeconds": event.cooldown_seconds,
-                "StealPolicy": event.steal_policy,
-                "LoadPolicy": event.load_policy,
-                "Clips": [
-                    {
-                        "ClipId": clip.id,
-                        "AssetKey": clip.asset_key,
-                        "Weight": clip.weight,
-                        "TrimStartMs": clip.trim_start_ms,
-                        "TrimEndMs": clip.trim_end_ms,
-                        "FadeInMs": clip.fade_in_ms,
-                        "FadeOutMs": clip.fade_out_ms,
-                        "LoopStartMs": clip.loop_start_ms,
-                        "LoopEndMs": clip.loop_end_ms,
-                    }
-                    for clip in runtime_clips
-                ],
-            }
-            if event.play_mode == "Combo":
-                payload["ComboPitchStepCents"] = event.combo_pitch_step_cents
-                payload["ComboResetSeconds"] = event.combo_reset_seconds
-                payload["ComboMaxStep"] = event.combo_max_step
-            events[event_id] = payload
+            events[event_id] = self._serialize_event_payload(event)
 
         return {
             "SchemaVersion": SCHEMA_VERSION,
@@ -368,7 +524,17 @@ class RuntimeExporter:
             "ProjectName": project.name,
             "RuntimeAudioFormat": project.settings.runtime_audio_format.lower(),
             "Buses": list(project.settings.buses),
-            "BusConfigs": [config.to_dict() for config in project.settings.bus_configs],
+            "BusConfigs": [
+                {
+                    **config.to_dict(),
+                    "RtpcBindings": self._serialize_rtpc_bindings(config.rtpc_bindings),
+                    "StateOverrides": self._serialize_state_overrides(config.state_overrides),
+                }
+                for config in project.settings.bus_configs
+            ],
+            "GameParameters": self._serialize_game_parameters(project),
+            "StateGroups": self._serialize_state_groups(project),
+            "SwitchGroups": self._serialize_switch_groups(project),
             "Events": events,
         }
 
@@ -412,7 +578,7 @@ class RuntimeExporter:
             "ProjectVersion": project.project_version,
             "SchemaVersion": SCHEMA_VERSION,
             "EventCount": len(project.events),
-            "ClipCount": sum(len(effective_event_clips(event)) for event in project.events.values()),
+            "ClipCount": sum(len(self._event_runtime_clips(event)) for event in project.events.values()),
             "ErrorCount": sum(1 for issue in issues if issue.severity == "Error"),
             "WarningCount": sum(1 for issue in issues if issue.severity == "Warning"),
             "ExportedFiles": [path.name for path in exported_files],
@@ -428,7 +594,7 @@ class RuntimeExporter:
         clip_by_asset_key: dict[str, ClipModel] = {}
 
         for event_id, event in project.events.items():
-            for clip in effective_event_clips(event):
+            for clip in self._event_runtime_clips(event):
                 asset_key = clip.asset_key
                 owners.setdefault(asset_key, set()).add(event_id)
                 source_path = Path(clip.source_path) if clip.source_path else None

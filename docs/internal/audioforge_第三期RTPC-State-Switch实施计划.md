@@ -8,6 +8,17 @@
 
 phase3 的目标不是只补一个编辑器面板，也不是在现有事件字段上继续叠加零散参数，而是补上一层项目级控制模型，使 AudioForge 首次具备更接近 Wwise 的运行时控制表达能力。
 
+## 当前状态更新
+
+2026-05-13 当前主线已完成以下落地：
+
+1. 工程模型、导出器与 `.afproj` 序列化已支持项目级 Game Parameter、State Group、Switch Group，以及事件/总线级 RTPC、State、Switch 绑定。
+2. `SchemaVersion = 2` 已进入当前导出链路，Unity runtime / validation 已同步支持 v2 初始化与 v1 兼容。
+3. 工具端已落地 GameSync 工作区、State/Switch 子项效果编辑、RTPC 图形曲线编辑器和试听中心 GameSync 控件。
+4. Unity runtime 已具备 emitter context、State/Switch/RTPC API、Switch Variant 选片、child effects 应用与 smoke 验证。
+
+因此本文档后续更多用于解释阶段拆分、边界和剩余工作，而不是说明“是否开始做 phase3”。
+
 ## 结论先行
 
 - RTPC：按连续 Game Parameter 处理，用于实时驱动属性。
@@ -41,20 +52,22 @@ phase2 已完成以下交付：
 - Source Binding 弹窗与 `Enabled` / `Active` 编辑闭环。
 - `PlayMode = OneShot`。
 - Unity UPM SDK 输出。
-- 当前 Unity runtime 继续消费 `SchemaVersion = 1` 的 `AudioData.json`。
+- 当前 Unity runtime 继续兼容 `SchemaVersion = 1` 的 `AudioData.json`。
 
-当前运行时仍只有：
+当前主线额外已具备：
 
-- `BusConfigs`
-- `Events`
-- 事件级播放模式、权重、冷却、实例数、Combo、音量和音高随机
+- `SchemaVersion = 2`
+- `GameParameters` / `StateGroups` / `SwitchGroups`
+- Event `RtpcBindings` / `StateOverrides` / `SwitchVariants` / `DefaultClipIds`
+- Bus `RtpcBindings` / `StateOverrides`
+- emitter / game object 作用域与 Game Sync 求值层
 
-当前没有：
+当前仍待继续增强：
 
-- 项目级 Game Parameter 表
-- State Group / Switch Group 表
-- emitter / game object 作用域
-- Game Sync 求值层
+- active voice 持续调制
+- State 过渡插值
+- 更复杂的 Switch Container 层级
+- 更完整的场景侧实播自动化签收
 
 ## 设计原则
 
