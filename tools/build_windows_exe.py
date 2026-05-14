@@ -3,9 +3,27 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from audioforge.app.utils.constants import APP_VERSION
+
+
+def _promote_built_directory(built_dir: Path, release_root: Path) -> None:
+    if not built_dir.exists():
+        raise FileNotFoundError(f"Built directory does not exist: {built_dir}")
+
+    for attempt in range(3):
+        try:
+            built_dir.replace(release_root)
+            return
+        except PermissionError:
+            if attempt == 2:
+                break
+            time.sleep(0.5 * (attempt + 1))
+
+    shutil.copytree(built_dir, release_root)
+    shutil.rmtree(built_dir, ignore_errors=True)
 
 
 def main() -> int:
@@ -50,7 +68,7 @@ def main() -> int:
     built_dir = dist_root / "AudioForge"
     if release_root.exists():
         shutil.rmtree(release_root)
-    built_dir.rename(release_root)
+    _promote_built_directory(built_dir, release_root)
     archive_path = dist_root / f"AudioForge-{APP_VERSION}-windows.zip"
     if archive_path.exists():
         archive_path.unlink()

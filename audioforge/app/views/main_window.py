@@ -7,7 +7,7 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
-from PySide6.QtCore import QByteArray, QItemSelectionModel, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QItemSelectionModel, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -591,6 +591,9 @@ class MainWindow(QMainWindow):
     removeClipsRequested = Signal(list)
     assignSourceAssetsToCurrentAudioRequested = Signal(list, bool)
     assignSourceAssetsToAudioRequested = Signal(str, list, bool)
+    removeSourceAssetsFromCurrentAudioRequested = Signal(list)
+    removeSourceAssetsFromRegistryRequested = Signal(list)
+    deleteSourceFilesRequested = Signal(list)
     audioSourceBindingEnabledChangedRequested = Signal(str, str, bool)
     audioSourceBindingActiveChangedRequested = Signal(str, str, bool)
     bulkWeightRequested = Signal(int)
@@ -619,8 +622,6 @@ class MainWindow(QMainWindow):
         self._audio_bindings_popup: AudioBindingsPopup | None = None
         self._audio_source_binding_feedback_event_id = ""
         self._audio_source_binding_feedback_message = ""
-        self.resize(*DEFAULT_WINDOW_SIZE)
-        self.setMinimumSize(1180, 760)
         self._loading_event = False
         self._close_handler = None
         self._ui_scale = 1.0
@@ -686,6 +687,8 @@ class MainWindow(QMainWindow):
         self._event_state_overrides: list[dict[str, object]] = []
         self._event_switch_variants: list[dict[str, object]] = []
         self._current_event_source_paths: list[str] = []
+
+        self._apply_adaptive_top_level_defaults(self, DEFAULT_WINDOW_SIZE, (1180, 760))
 
         self.tree = EventTreeWidget()
         self.tree_filter_edit = QLineEdit()
@@ -2210,7 +2213,7 @@ class MainWindow(QMainWindow):
         self.explorer_window = DetachedToolWindow()
         self.explorer_window.setWindowTitle(f"{APP_NAME} - 工程浏览器")
         self.explorer_window.setWindowIcon(load_app_icon("app"))
-        self.explorer_window.resize(460, 820)
+        self._apply_adaptive_top_level_defaults(self.explorer_window, (460, 820), (360, 480))
         explorer_window_layout = QVBoxLayout(self.explorer_window)
         explorer_window_layout.setContentsMargins(8, 8, 8, 8)
         explorer_window_layout.setSpacing(8)
@@ -2287,6 +2290,79 @@ class MainWindow(QMainWindow):
         if not isinstance(encoded_geometry, str) or not encoded_geometry:
             return
         widget.restoreGeometry(QByteArray.fromBase64(encoded_geometry.encode("ascii")))
+        self._constrain_window_to_available_geometry(widget)
+
+    def _screen_available_geometry(self, widget: QWidget | None = None) -> QRect:
+        screen = None
+        if widget is not None:
+            screen = widget.screen()
+        if screen is None:
+            screen = self.screen()
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, DEFAULT_WINDOW_SIZE[0], DEFAULT_WINDOW_SIZE[1])
+        available = screen.availableGeometry()
+        if available.isValid() and available.width() > 0 and available.height() > 0:
+            return available
+        return QRect(0, 0, DEFAULT_WINDOW_SIZE[0], DEFAULT_WINDOW_SIZE[1])
+
+    def _adaptive_top_level_sizes(
+        self,
+        default_size: tuple[int, int] | QSize,
+        base_minimum_size: tuple[int, int] | QSize,
+        *,
+        available_geometry: QRect | None = None,
+    ) -> tuple[QSize, QSize]:
+        available = available_geometry if available_geometry is not None else self._screen_available_geometry()
+        default_qsize = default_size if isinstance(default_size, QSize) else QSize(int(default_size[0]), int(default_size[1]))
+        minimum_qsize = base_minimum_size if isinstance(base_minimum_size, QSize) else QSize(int(base_minimum_size[0]), int(base_minimum_size[1]))
+
+        min_width = min(minimum_qsize.width(), max(640, int(available.width() * 0.64)))
+        min_height = min(minimum_qsize.height(), max(520, int(available.height() * 0.64)))
+        adaptive_minimum = QSize(min_width, min_height)
+
+        target_width = min(default_qsize.width(), max(min_width, int(available.width() * 0.94)))
+        target_height = min(default_qsize.height(), max(min_height, int(available.height() * 0.94)))
+        adaptive_size = QSize(target_width, target_height)
+        return adaptive_minimum, adaptive_size
+
+    def _fit_top_level_geometry(self, geometry: QRect, available_geometry: QRect, minimum_size: QSize) -> QRect:
+        if not geometry.isValid() or geometry.width() <= 0 or geometry.height() <= 0:
+            return QRect(available_geometry.topLeft(), minimum_size)
+
+        width = min(max(minimum_size.width(), geometry.width()), available_geometry.width())
+        height = min(max(minimum_size.height(), geometry.height()), available_geometry.height())
+        max_x = available_geometry.left() + max(0, available_geometry.width() - width)
+        max_y = available_geometry.top() + max(0, available_geometry.height() - height)
+        x = min(max(geometry.x(), available_geometry.left()), max_x)
+        y = min(max(geometry.y(), available_geometry.top()), max_y)
+        return QRect(x, y, width, height)
+
+    def _apply_adaptive_top_level_defaults(
+        self,
+        widget: QWidget,
+        default_size: tuple[int, int] | QSize,
+        base_minimum_size: tuple[int, int] | QSize,
+    ) -> None:
+        adaptive_minimum, adaptive_size = self._adaptive_top_level_sizes(
+            default_size,
+            base_minimum_size,
+            available_geometry=self._screen_available_geometry(widget),
+        )
+        widget.setMinimumSize(adaptive_minimum)
+        widget.resize(adaptive_size)
+        self._constrain_window_to_available_geometry(widget)
+
+    def _constrain_window_to_available_geometry(self, widget: QWidget) -> None:
+        available = self._screen_available_geometry(widget)
+        current_minimum = widget.minimumSizeHint()
+        minimum_width = max(widget.minimumWidth(), current_minimum.width(), 1)
+        minimum_height = max(widget.minimumHeight(), current_minimum.height(), 1)
+        constrained_minimum = QSize(min(minimum_width, available.width()), min(minimum_height, available.height()))
+        widget.setMinimumSize(constrained_minimum)
+        target_geometry = self._fit_top_level_geometry(widget.geometry(), available, constrained_minimum)
+        widget.setGeometry(target_geometry)
 
     def _build_top_app_bar(self) -> QFrame:
         bar = QFrame()
@@ -4034,7 +4110,7 @@ class MainWindow(QMainWindow):
     def _build_settings_dialog(self) -> None:
         self.settings_dialog = QDialog(self)
         self.settings_dialog.setWindowTitle("设置")
-        self.settings_dialog.resize(760, 620)
+        self._apply_adaptive_top_level_defaults(self.settings_dialog, (760, 620), (520, 360))
 
         intro_label = QLabel("把低频的应用级控制集中收纳到这里，避免工程首页堆叠。")
         intro_label.setWordWrap(True)
@@ -4077,6 +4153,7 @@ class MainWindow(QMainWindow):
         dialog_layout.addLayout(footer_layout)
 
     def open_settings_dialog(self) -> None:
+        self._constrain_window_to_available_geometry(self.settings_dialog)
         self.settings_dialog.show()
         self.settings_dialog.raise_()
         self.settings_dialog.activateWindow()
@@ -4714,6 +4791,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._constrain_window_to_available_geometry(self)
         self._apply_splitter_resize_defaults()
         self._schedule_layout_flush()
         if self._explorer_detached and not self.explorer_window.isVisible():
@@ -4846,6 +4924,7 @@ class MainWindow(QMainWindow):
     def show_detached_explorer(self) -> None:
         if not self._explorer_detached:
             return
+        self._constrain_window_to_available_geometry(self.explorer_window)
         self.explorer_window.show()
         self.explorer_window.raise_()
         self.explorer_window.activateWindow()
@@ -5324,7 +5403,7 @@ class MainWindow(QMainWindow):
     def _append_selected_source_to_current_audio(self) -> None:
         source_entries = self.source_tree.selected_source_entries()
         if not source_entries:
-            self.report_detail_label.setText("当前没有选中的源音频。")
+            self.show_context_feedback("当前没有选中的源音频。")
             return
         source_paths = [
             str(entry.get("source_path", "")).strip()
@@ -5334,7 +5413,28 @@ class MainWindow(QMainWindow):
         if not source_paths:
             return
         self.assignSourceAssetsToCurrentAudioRequested.emit(source_paths, False)
-        self.report_detail_label.setText(f"已请求向当前 Audio 追加 {len(source_paths)} 条源音频。")
+        self.show_context_feedback(f"已请求向当前 Audio 追加 {len(source_paths)} 条源音频。")
+
+    def _request_remove_selected_sources_from_current_audio(self) -> None:
+        source_paths = self.source_tree.selected_source_paths()
+        if not source_paths:
+            self.show_context_feedback("当前没有选中的源音频。")
+            return
+        self.removeSourceAssetsFromCurrentAudioRequested.emit(source_paths)
+
+    def _request_remove_selected_sources_from_registry(self) -> None:
+        source_paths = self.source_tree.selected_source_paths()
+        if not source_paths:
+            self.show_context_feedback("当前没有选中的源音频。")
+            return
+        self.removeSourceAssetsFromRegistryRequested.emit(source_paths)
+
+    def _request_delete_selected_source_files(self) -> None:
+        source_paths = self.source_tree.selected_source_paths()
+        if not source_paths:
+            self.show_context_feedback("当前没有选中的源音频。")
+            return
+        self.deleteSourceFilesRequested.emit(source_paths)
 
     def _append_selected_source_to_current_event(self) -> None:
         self._append_selected_source_to_current_audio()
@@ -5342,22 +5442,20 @@ class MainWindow(QMainWindow):
     def _locate_selected_source_reference_audio(self) -> None:
         entry = self.source_tree.current_source_entry()
         if not entry:
-            self.report_detail_label.setText("当前没有选中的源音频。")
+            self.show_context_feedback("当前没有选中的源音频。")
             return
-        source_path = str(entry.get("source_path", "")).strip()
         target_audio_id = ""
-        if source_path and source_path in set(self._current_event_source_paths) and self._active_audio_id:
-            target_audio_id = self._active_audio_id
+        audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
+        current_audio_id = self.audio_tree.current_audio_id() or self._active_audio_id or ""
+        if current_audio_id and current_audio_id in audio_ids:
+            target_audio_id = current_audio_id
+        elif audio_ids:
+            target_audio_id = audio_ids[0]
         if not target_audio_id:
-            audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
-            if audio_ids:
-                target_audio_id = audio_ids[0]
-        if not target_audio_id:
-            self.report_detail_label.setText("当前源音频没有可跳转的引用 Audio。")
+            self.show_context_feedback("当前源音频没有可跳转的引用 Audio。")
             return
         self.reportTargetRequested.emit("audio", target_audio_id)
-        self.report_detail_label.setText(f"已定位引用 Audio：{target_audio_id}")
-        self.report_detail_label.setToolTip(target_audio_id)
+        self.show_context_feedback(f"已定位引用 Audio：{target_audio_id}", target_audio_id)
 
     def _locate_selected_audio_reference_event(self) -> None:
         entry = self.current_audio_browser_entry()
@@ -5394,21 +5492,51 @@ class MainWindow(QMainWindow):
             self.report_detail_label.setText(f"已定位当前 Audio：{current_audio_id}")
             self.report_detail_label.setToolTip(current_audio_id)
 
+    def _select_source_context_menu_target(self, position) -> None:
+        item = self.source_tree.itemAt(position)
+        if item is None:
+            return
+        if not item.isSelected():
+            self.source_tree.blockSignals(True)
+            self.source_tree.clearSelection()
+            self.source_tree.setCurrentItem(item)
+            item.setSelected(True)
+            self.source_tree.blockSignals(False)
+            self._update_source_browser_status()
+            return
+        self.source_tree.setCurrentItem(item)
+
+    def _select_audio_context_menu_target(self, position) -> None:
+        item = self.audio_tree.itemAt(position)
+        if item is None:
+            return
+        self.audio_tree.setCurrentItem(item)
+        item.setSelected(True)
+
     def _show_source_tree_context_menu(self, position) -> None:
+        self._select_source_context_menu_target(position)
         menu = QMenu(self)
         locate_action = menu.addAction("定位源文件")
         copy_action = menu.addAction("复制源路径")
         locate_event_action = menu.addAction("定位引用 Audio")
         add_to_audio_action = menu.addAction("追加到 Audio")
+        menu.addSeparator()
+        remove_from_audio_action = menu.addAction("从当前 Audio 移除绑定")
+        remove_from_registry_action = menu.addAction("从项目注册表移除")
+        delete_file_action = menu.addAction("从磁盘删除源文件")
 
         selected_entries = self.source_tree.selected_source_entries()
         selected_paths = [str(entry.get("source_path", "")).strip() for entry in selected_entries if str(entry.get("source_path", "")).strip()]
         has_selection = bool(selected_entries)
         has_paths = bool(selected_paths)
+        has_current_audio = bool(self.audio_tree.current_audio_id())
         locate_action.setEnabled(has_paths)
         copy_action.setEnabled(has_paths)
         locate_event_action.setEnabled(has_selection)
-        add_to_audio_action.setEnabled(has_paths and bool(self._active_event_id))
+        add_to_audio_action.setEnabled(has_paths and has_current_audio)
+        remove_from_audio_action.setEnabled(has_paths and has_current_audio)
+        remove_from_registry_action.setEnabled(has_paths)
+        delete_file_action.setEnabled(has_paths)
 
         action = menu.exec(self.source_tree.viewport().mapToGlobal(position))
         if action == locate_action:
@@ -5419,6 +5547,46 @@ class MainWindow(QMainWindow):
             self._locate_selected_source_reference_audio()
         elif action == add_to_audio_action:
             self._append_selected_source_to_current_audio()
+        elif action == remove_from_audio_action:
+            self._request_remove_selected_sources_from_current_audio()
+        elif action == remove_from_registry_action:
+            self._request_remove_selected_sources_from_registry()
+        elif action == delete_file_action:
+            self._request_delete_selected_source_files()
+
+    def _show_audio_tree_context_menu(self, position) -> None:
+        self._select_audio_context_menu_target(position)
+        entry = self.current_audio_browser_entry()
+        menu = QMenu(self)
+        rename_action = menu.addAction("重命名 Audio")
+        delete_action = menu.addAction("删除 Audio")
+        copy_action = menu.addAction("复制 Audio 标识")
+        property_action = menu.addAction("打开属性编辑器")
+        locate_event_action = menu.addAction("定位引用 Event")
+        open_bindings_action = menu.addAction("打开 Audio 绑定")
+        has_entry = entry is not None
+        has_events = bool(entry and entry.get("event_ids"))
+        rename_action.setEnabled(has_entry)
+        delete_action.setEnabled(has_entry)
+        copy_action.setEnabled(has_entry)
+        property_action.setEnabled(has_entry)
+        locate_event_action.setEnabled(has_events)
+        open_bindings_action.setEnabled(has_entry)
+
+        action = menu.exec(self.audio_tree.viewport().mapToGlobal(position))
+        if action == rename_action:
+            self.renameSelectedRequested.emit()
+        elif action == delete_action:
+            self.deleteSelectedRequested.emit()
+        elif action == copy_action:
+            self._handle_copy_shortcut()
+        elif action == property_action:
+            self.set_active_property_category("音频属性")
+            self.bus_combo.setFocus()
+        elif action == locate_event_action:
+            self._locate_selected_audio_reference_event()
+        elif action == open_bindings_action:
+            self._open_selected_audio_bindings()
 
     def _sync_event_mode_ui(self) -> None:
         is_combo_mode = self._current_play_mode() == "Combo"
@@ -5537,6 +5705,9 @@ class MainWindow(QMainWindow):
     def _active_explorer_page_key(self) -> str:
         page_keys = {0: "buses", 1: "sources", 2: "audios", 3: "events", 4: "gamesync"}
         return page_keys.get(self.explorer_tabs.currentIndex(), "events")
+
+    def current_explorer_page_key(self) -> str:
+        return self._active_explorer_page_key()
 
     def _sync_explorer_browser_state(self) -> None:
         placeholder_map = {
@@ -8047,6 +8218,83 @@ class MainWindow(QMainWindow):
         result = QMessageBox.question(self, APP_NAME, label)
         return result == QMessageBox.StandardButton.Yes
 
+    def confirm_delete_audio(self, audio_id: str, referenced_event_ids: list[str]) -> bool:
+        if not referenced_event_ids:
+            return self.confirm_delete(f"确认删除 Audio“{audio_id}”？")
+
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle(APP_NAME)
+        message_box.setIcon(QMessageBox.Icon.Warning)
+        message_box.setText(
+            f"Audio“{audio_id}”当前仍被 {len(referenced_event_ids)} 个 Event 引用。\n删除 Audio 需要同时删除这些引用 Event。"
+        )
+        message_box.setInformativeText("确认后会级联删除引用它的 Event，并从 Audio 树移除该 AudioObject。")
+        delete_button = message_box.addButton(
+            f"删除 Audio 与 {len(referenced_event_ids)} 个引用 Event",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        message_box.addButton(QMessageBox.StandardButton.Cancel)
+        message_box.exec()
+        return message_box.clickedButton() is delete_button
+
+    def ask_source_delete_action(
+        self,
+        source_count: int,
+        *,
+        allow_remove_from_audio: bool,
+        allow_remove_from_registry: bool,
+        allow_delete_files: bool,
+    ) -> str | None:
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle(APP_NAME)
+        message_box.setIcon(QMessageBox.Icon.Warning)
+        message_box.setText(f"已选择 {source_count} 条源音频。请选择删除方式。")
+        message_box.setInformativeText(
+            "从当前 Audio 移除绑定只影响当前 AudioObject；从项目注册表移除只清理未引用注册项；从磁盘删除源文件会让引用它们的条目标记为缺失。"
+        )
+        remove_binding_button = message_box.addButton("从当前 Audio 移除绑定", QMessageBox.ButtonRole.ActionRole)
+        remove_registry_button = message_box.addButton("从项目注册表移除", QMessageBox.ButtonRole.ActionRole)
+        delete_files_button = message_box.addButton("从磁盘删除源文件", QMessageBox.ButtonRole.DestructiveRole)
+        remove_binding_button.setEnabled(allow_remove_from_audio)
+        remove_registry_button.setEnabled(allow_remove_from_registry)
+        delete_files_button.setEnabled(allow_delete_files)
+        message_box.addButton(QMessageBox.StandardButton.Cancel)
+        message_box.exec()
+        clicked_button = message_box.clickedButton()
+        if clicked_button is remove_binding_button and allow_remove_from_audio:
+            return "remove_from_audio"
+        if clicked_button is remove_registry_button and allow_remove_from_registry:
+            return "remove_from_registry"
+        if clicked_button is delete_files_button and allow_delete_files:
+            return "delete_files"
+        return None
+
+    def show_context_feedback(self, text: str, tooltip: str | None = None) -> None:
+        detail_text = str(text).strip()
+        if not detail_text:
+            return
+        self.report_detail_label.setText(detail_text)
+        self.report_detail_label.setToolTip(tooltip if tooltip is not None else detail_text)
+
+    def set_explorer_action_state(
+        self,
+        *,
+        rename_enabled: bool,
+        delete_enabled: bool,
+        bulk_bus_enabled: bool,
+        rename_text: str = "重命名",
+        delete_text: str = "删除",
+        rename_tooltip: str = "",
+        delete_tooltip: str = "",
+    ) -> None:
+        self.rename_button.setEnabled(rename_enabled)
+        self.delete_button.setEnabled(delete_enabled)
+        self.bulk_event_bus_button.setEnabled(bulk_bus_enabled)
+        self.rename_button.setText(rename_text)
+        self.delete_button.setText(delete_text)
+        self.rename_button.setToolTip(rename_tooltip)
+        self.delete_button.setToolTip(delete_tooltip)
+
     def ask_audio_import_create_events(self, import_count: int) -> bool | None:
         result = QMessageBox.question(
             self,
@@ -8167,6 +8415,12 @@ class MainWindow(QMainWindow):
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
             self._request_remove_clips()
             return
+        if self._focus_is_within(self.source_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "sources"):
+            self.deleteSelectedRequested.emit()
+            return
+        if self._focus_is_within(self.audio_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "audios"):
+            self.deleteSelectedRequested.emit()
+            return
         if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
             self.deleteSelectedRequested.emit()
 
@@ -8176,10 +8430,10 @@ class MainWindow(QMainWindow):
             if payload is not None and payload[0] == "source_binding":
                 self.report_detail_label.setText("Source Binding 请在片段列表中批量重命名。")
                 return
-        if self._focus_is_within(self.audio_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "audios"):
-            self.set_active_property_category("音频属性")
-            self.bus_combo.setFocus()
+        if self._focus_is_within(self.source_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "sources"):
+            self.show_context_feedback("源音频路径重命名请在外部文件系统中处理；浏览器内暂不提供路径重命名。")
             return
+        if self._focus_is_within(self.audio_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "audios"):
             self.renameSelectedRequested.emit()
             return
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
@@ -8238,6 +8492,13 @@ class MainWindow(QMainWindow):
             return
         if self._focus_is_within(self.source_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "sources"):
             self._copy_selected_source_asset_path()
+            return
+        if self._focus_is_within(self.audio_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "audios"):
+            audio_id = self.audio_tree.current_audio_id()
+            if not audio_id:
+                return
+            QApplication.clipboard().setText(audio_id)
+            self.show_context_feedback(f"已复制 Audio 标识：{audio_id}", audio_id)
             return
         if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
             payload = self._selected_tree_payload()
@@ -8689,6 +8950,8 @@ class MainWindow(QMainWindow):
         self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
         self.source_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.source_tree.customContextMenuRequested.connect(self._show_source_tree_context_menu)
+        self.audio_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.audio_tree.customContextMenuRequested.connect(self._show_audio_tree_context_menu)
         self.source_tree.sourceSelected.connect(lambda _source_path: self._update_source_browser_status())
         self.source_tree.sourceActivated.connect(lambda _source_path: self._locate_selected_source_asset())
         self.source_tree.itemDoubleClicked.connect(lambda _item, _column: self._handle_open_shortcut())
@@ -10468,6 +10731,7 @@ class MainWindow(QMainWindow):
     def _update_source_browser_status(self) -> None:
         selected_entries = self.source_tree.selected_source_entries()
         entry = self.source_tree.current_source_entry()
+        current_audio_id = self.audio_tree.current_audio_id() or self._active_audio_id or ""
         if not selected_entries or not entry:
             self.source_browser_status_label.setText("选择一个源音频，可查看路径、引用 Audio 和缺失状态。")
             self.source_browser_locate_button.setEnabled(False)
@@ -10483,10 +10747,10 @@ class MainWindow(QMainWindow):
             state_fragments.append("文件缺失")
         if bool(entry.get("unreferenced", False)):
             state_fragments.append("当前未被 Audio 引用")
-        if source_path and source_path in set(self._current_event_source_paths):
+        audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
+        if current_audio_id and current_audio_id in audio_ids:
             state_fragments.append("当前 Audio 已绑定")
         state_text = "；".join(state_fragments) if state_fragments else "状态正常"
-        audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
         audio_preview = "、".join(audio_ids[:4]) if audio_ids else "-"
         if len(selected_entries) > 1:
             self.source_browser_status_label.setText(
@@ -10498,9 +10762,9 @@ class MainWindow(QMainWindow):
             )
         self.source_browser_locate_button.setEnabled(bool(source_path))
         self.source_browser_copy_button.setEnabled(any(str(item.get("source_path", "")).strip() for item in selected_entries))
-        self.source_browser_locate_event_button.setEnabled(bool(audio_ids) or (bool(source_path) and source_path in set(self._current_event_source_paths)))
+        self.source_browser_locate_event_button.setEnabled(bool(audio_ids))
         self.source_browser_add_to_event_button.setEnabled(
-            any(str(item.get("source_path", "")).strip() for item in selected_entries) and bool(self._active_event_id)
+            any(str(item.get("source_path", "")).strip() for item in selected_entries) and bool(current_audio_id)
         )
 
     def _locate_selected_source_asset(self) -> None:

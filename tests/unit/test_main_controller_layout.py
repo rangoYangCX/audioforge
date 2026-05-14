@@ -16,6 +16,8 @@ from audioforge.app.widgets.event_tree import encode_source_binding_token
 from PySide6.QtWidgets import QAbstractItemView
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRect
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QPushButton
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import QSplitter
@@ -1658,6 +1660,268 @@ def test_source_browser_shortcuts_and_navigation_state_follow_active_tab(monkeyp
     controller.window.close()
 
 
+def test_audio_tree_shortcut_delete_removes_selected_audio_without_deleting_unrelated_event(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    preserved_event_id = controller.current_event.id
+
+    source_path = tmp_path / "ui" / "library_only.wav"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(b"fake-wav")
+    monkeypatch.setattr(controller.window, "ask_audio_import_create_events", lambda count: False)
+
+    controller.window.audio_tree.audioFilesDropped.emit([str(source_path)], None)
+    QApplication.processEvents()
+    created_audio_id = controller.selected_audio_id
+    assert created_audio_id is not None
+
+    controller.window.explorer_tabs.setCurrentIndex(2)
+    controller.window.audio_tree.select_audio_id(created_audio_id)
+    controller.window.audio_tree.setFocus()
+    QApplication.processEvents()
+    monkeypatch.setattr(controller.window, "confirm_delete_audio", lambda audio_id, event_ids: True)
+
+    controller.window._handle_delete_shortcut()
+    QApplication.processEvents()
+
+    assert created_audio_id not in controller.project.audio_objects
+    assert preserved_event_id in controller.project.events
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_audio_tree_rename_selected_updates_audio_id_and_event_reference(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    old_audio_id = controller.current_event.audio_id
+
+    controller.window.explorer_tabs.setCurrentIndex(2)
+    controller.window.audio_tree.select_audio_id(old_audio_id)
+    QApplication.processEvents()
+    monkeypatch.setattr(controller.window, "ask_rename_value", lambda title, label, initial: "UI_Click_Audio")
+
+    controller.rename_selected()
+    QApplication.processEvents()
+
+    assert "UI_Click_Audio" in controller.project.audio_objects
+    assert old_audio_id not in controller.project.audio_objects
+    assert controller.project.events[controller.current_event.id].audio_id == "UI_Click_Audio"
+    assert controller.window.audio_tree.current_audio_id() == "UI_Click_Audio"
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_source_browser_delete_from_current_audio_removes_binding_but_keeps_event(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+    event_id = controller.current_event.id
+
+    source_a = tmp_path / "ui" / "bound_a.wav"
+    source_b = tmp_path / "ui" / "bound_b.wav"
+    for path in [source_a, source_b]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fake-wav")
+        controller.project.register_source_asset(str(path))
+    controller.current_event.clips = [
+        ClipModel(id="bound_a", source_path=str(source_a), export_path="ui/bound_a", asset_key="ui/bound_a"),
+        ClipModel(id="bound_b", source_path=str(source_b), export_path="ui/bound_b", asset_key="ui/bound_b"),
+    ]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.explorer_tabs.setCurrentIndex(1)
+    controller.window.source_tree.select_source_path(str(source_b))
+    QApplication.processEvents()
+    monkeypatch.setattr(controller.window, "ask_source_delete_action", lambda count, **kwargs: "remove_from_audio")
+    monkeypatch.setattr(controller.window, "confirm_delete", lambda label: True)
+
+    controller.delete_selected()
+    QApplication.processEvents()
+
+    assert event_id in controller.project.events
+    assert [clip.source_path for clip in controller.project.events[event_id].clips] == [str(source_a)]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_source_browser_delete_from_registry_only_removes_unreferenced_entries(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+
+    referenced_path = tmp_path / "ui" / "referenced.wav"
+    unreferenced_path = tmp_path / "ui" / "library_only.wav"
+    for path in [referenced_path, unreferenced_path]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fake-wav")
+        controller.project.register_source_asset(str(path))
+    controller.current_event.clips = [
+        ClipModel(id="referenced", source_path=str(referenced_path), export_path="ui/referenced", asset_key="ui/referenced")
+    ]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.explorer_tabs.setCurrentIndex(1)
+    controller.window.source_tree.set_selected_source_paths([str(referenced_path), str(unreferenced_path)])
+    QApplication.processEvents()
+    monkeypatch.setattr(controller.window, "ask_source_delete_action", lambda count, **kwargs: "remove_from_registry")
+    monkeypatch.setattr(controller.window, "confirm_delete", lambda label: True)
+
+    controller.delete_selected()
+    QApplication.processEvents()
+
+    assert str(referenced_path) in controller.project.asset_registry
+    assert str(unreferenced_path) not in controller.project.asset_registry
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_source_browser_delete_from_disk_marks_source_missing(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+
+    source_path = tmp_path / "ui" / "delete_me.wav"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(b"fake-wav")
+    controller.current_event.clips = [
+        ClipModel(id="delete_me", source_path=str(source_path), export_path="ui/delete_me", asset_key="ui/delete_me")
+    ]
+    controller.project.register_source_asset(str(source_path))
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.explorer_tabs.setCurrentIndex(1)
+    controller.window.source_tree.select_source_path(str(source_path))
+    QApplication.processEvents()
+    monkeypatch.setattr(controller.window, "ask_source_delete_action", lambda count, **kwargs: "delete_files")
+    monkeypatch.setattr(controller.window, "confirm_delete", lambda label: True)
+
+    controller.delete_selected()
+    QApplication.processEvents()
+
+    assert source_path.exists() is False
+    controller.window.source_tree.select_source_path(str(source_path))
+    entry = controller.window.source_tree.current_source_entry()
+    assert entry is not None
+    assert entry["missing"] is True
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_browser_primary_actions_follow_active_explorer_tab(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+
+    source_path = tmp_path / "ui" / "state.wav"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(b"fake-wav")
+    controller.project.register_source_asset(str(source_path))
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.explorer_tabs.setCurrentIndex(3)
+    QApplication.processEvents()
+    assert controller.window.rename_button.text() == "重命名"
+    assert controller.window.delete_button.text() == "删除"
+    assert controller.window.rename_button.isEnabled() is True
+
+    controller.window.explorer_tabs.setCurrentIndex(2)
+    QApplication.processEvents()
+    assert controller.window.rename_button.text() == "重命名 Audio"
+    assert controller.window.delete_button.text() == "删除 Audio"
+
+    controller.window.explorer_tabs.setCurrentIndex(1)
+    controller.window.source_tree.select_source_path(str(source_path))
+    QApplication.processEvents()
+    assert controller.window.rename_button.isEnabled() is False
+    assert controller.window.delete_button.text() == "删除源音频..."
+
+
+def test_audio_tree_context_menu_targets_clicked_audio(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+
+    source_a = tmp_path / "ui" / "ctx_a.wav"
+    source_b = tmp_path / "ui" / "ctx_b.wav"
+    for path in [source_a, source_b]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fake-wav")
+    monkeypatch.setattr(controller.window, "ask_audio_import_create_events", lambda count: False)
+    controller.window.audio_tree.audioFilesDropped.emit([str(source_a)], None)
+    QApplication.processEvents()
+    first_audio_id = controller.selected_audio_id
+    controller.window.audio_tree.audioFilesDropped.emit([str(source_b)], None)
+    QApplication.processEvents()
+    second_audio_id = controller.selected_audio_id
+    assert first_audio_id is not None and second_audio_id is not None and first_audio_id != second_audio_id
+
+    controller.window.explorer_tabs.setCurrentIndex(2)
+    controller.window.audio_tree.select_audio_id(first_audio_id)
+    QApplication.processEvents()
+
+    target_item = controller.window.audio_tree.topLevelItem(1)
+    target_position = controller.window.audio_tree.visualItemRect(target_item).center()
+    controller.window._select_audio_context_menu_target(target_position)
+    QApplication.processEvents()
+
+    assert controller.window.audio_tree.current_audio_id() == second_audio_id
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_source_tree_context_menu_targets_clicked_source(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    assert controller.current_event is not None
+
+    referenced_path = tmp_path / "ui" / "ctx_ref.wav"
+    removable_path = tmp_path / "ui" / "ctx_remove.wav"
+    for path in [referenced_path, removable_path]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fake-wav")
+        controller.project.register_source_asset(str(path))
+    controller.current_event.clips = [
+        ClipModel(id="ctx_ref", source_path=str(referenced_path), export_path="ui/ctx_ref", asset_key="ui/ctx_ref")
+    ]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.explorer_tabs.setCurrentIndex(1)
+    controller.window.source_tree.select_source_path(str(referenced_path))
+    QApplication.processEvents()
+
+    target_item = controller.window.source_tree._find_source_item(str(removable_path))
+    assert target_item is not None
+    target_position = controller.window.source_tree.visualItemRect(target_item).center()
+    controller.window._select_source_context_menu_target(target_position)
+    QApplication.processEvents()
+
+    assert controller.window.source_tree.selected_source_paths() == [str(removable_path)]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_tree_shortcuts_copy_identifier_and_open_editor(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
@@ -2227,6 +2491,50 @@ def test_controller_window_preferences_round_trip_persists_layout_snapshot(monke
     assert round_trip_preferences["named_splitter_sizes"]["CurrentBusRoutePageSplitter"] == stored_preferences["named_splitter_sizes"]["CurrentBusRoutePageSplitter"]
     assert round_trip_preferences["named_splitter_sizes"]["CurrentBusLevelPageSplitter"] == stored_preferences["named_splitter_sizes"]["CurrentBusLevelPageSplitter"]
     assert round_trip_preferences["named_splitter_sizes"]["WorkspaceSplitter"] == stored_preferences["named_splitter_sizes"]["WorkspaceSplitter"]
+
+
+def test_adaptive_top_level_sizes_shrink_for_small_resolution(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+
+    minimum_size, target_size = controller.window._adaptive_top_level_sizes(
+        (1440, 900),
+        (1180, 760),
+        available_geometry=QRect(0, 0, 1024, 768),
+    )
+
+    assert minimum_size.width() < 1180
+    assert minimum_size.height() < 760
+    assert target_size.width() <= 1024
+    assert target_size.height() <= 768
+    assert target_size.width() >= minimum_size.width()
+    assert target_size.height() >= minimum_size.height()
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_fit_top_level_geometry_clamps_to_available_screen(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+
+    fitted = controller.window._fit_top_level_geometry(
+        QRect(-180, -120, 1600, 980),
+        QRect(0, 0, 1280, 720),
+        QSize(640, 520),
+    )
+
+    assert fitted.left() >= 0
+    assert fitted.top() >= 0
+    assert fitted.width() <= 1280
+    assert fitted.height() <= 720
+    assert fitted.width() >= 640
+    assert fitted.height() >= 520
+
+    controller.is_dirty = False
+    controller.window.close()
 
 
 def test_import_audio_files_as_events_warns_when_no_supported_files(monkeypatch, tmp_path: Path) -> None:

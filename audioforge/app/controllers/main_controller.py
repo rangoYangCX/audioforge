@@ -384,6 +384,9 @@ class MainController(QObject):
         self.window.audio_tree.audioFilesDropped.connect(self.import_audio_files_to_audio)
         self.window.audio_tree.sourceAssetsDroppedToAudio.connect(lambda source_paths, audio_id: self.assign_source_assets_to_audio_object(audio_id, source_paths, replace_existing=False))
         self.window.source_tree.importFilesDropped.connect(self.import_audio_files_to_source_registry)
+        self.window.removeSourceAssetsFromCurrentAudioRequested.connect(self.remove_source_assets_from_current_audio)
+        self.window.removeSourceAssetsFromRegistryRequested.connect(self.remove_source_assets_from_registry)
+        self.window.deleteSourceFilesRequested.connect(self.delete_source_files)
         self.window.tree.eventAudioRequested.connect(self.navigate_to_event_audio)
         self.window.eventPropertiesChanged.connect(self.update_current_event_from_form)
         self.window.audioPropertiesChanged.connect(self.update_current_audio_from_form)
@@ -428,6 +431,9 @@ class MainController(QObject):
         self.window.loudnessScanRequested.connect(self.scan_project_loudness)
         self.window.reportTargetRequested.connect(self.navigate_to_report_target)
         self.window.openAudioBindingsForAudioRequested.connect(self.open_audio_bindings_for_audio)
+        self.window.source_tree.sourceSelected.connect(lambda _source_path: self._sync_browser_action_affordances())
+        self.window.audio_tree.audioSelected.connect(lambda _audio_id: self._sync_browser_action_affordances())
+        self.window.explorer_tabs.currentChanged.connect(lambda _index: self._sync_browser_action_affordances())
         self.window.logAppended.connect(self._handle_log_appended)
         self.window.diagnosticContextChanged.connect(self._publish_diagnostic_snapshot)
         self.window.validationReportUpdated.connect(self._handle_validation_report_updated)
@@ -497,6 +503,7 @@ class MainController(QObject):
         self._update_object_context()
         self._sync_build_selection_context()
         self.window.apply_navigation_state(navigation_state)
+        self._sync_browser_action_affordances()
         self._publish_diagnostic_snapshot()
 
     def _build_source_browser_entries(self) -> list[dict[str, object]]:
@@ -893,7 +900,34 @@ class MainController(QObject):
         return self.project.audio_objects.get(self.selected_audio_id)
 
     def _event_ids_for_audio(self, audio_id: str) -> list[str]:
-        return [event.id for event in self.project.events.values() if event.audio_id == audio_id]
+        return self.project.event_ids_for_audio(audio_id)
+
+    def _audio_ids_for_source(self, source_path: str) -> list[str]:
+        return self.project.audio_ids_for_source(source_path)
+
+    def _selected_audio_browser_id(self) -> str | None:
+        entry = self.window.current_audio_browser_entry()
+        if entry is not None:
+            audio_id = str(entry.get("audio_id", "")).strip()
+            if audio_id:
+                return audio_id
+        if self.selected_audio_id in self.project.audio_objects:
+            return self.selected_audio_id
+        return None
+
+    def _selected_source_paths(self) -> list[str]:
+        normalized_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for raw_path in self.window.source_tree.selected_source_paths():
+            source_path = str(raw_path).strip()
+            if not source_path:
+                continue
+            lookup_key = source_path.casefold()
+            if lookup_key in seen_paths:
+                continue
+            seen_paths.add(lookup_key)
+            normalized_paths.append(source_path)
+        return normalized_paths
 
     @property
     def current_events(self) -> list[EventModel]:
@@ -1054,6 +1088,8 @@ class MainController(QObject):
             self.selected_event_ids = []
             self.selected_audio_id = None
             self.selected_source_binding_tokens = []
+        if node_type in {"source_binding", "event", "folder"}:
+            self.window.explorer_tabs.setCurrentIndex(3)
         if node_type in {"event", "folder"}:
             self.window.tree.select_node(node_type, node_id, emit_signal=False)
         self.window.audio_tree.select_audio_id(self.selected_audio_id, emit_signal=False)
@@ -1062,6 +1098,7 @@ class MainController(QObject):
         self._sync_multi_selection_affordances()
         self._update_object_context()
         self._sync_build_selection_context()
+        self._sync_browser_action_affordances()
 
     def select_nodes(self, nodes: list[tuple[str, str]]) -> None:
         event_ids = [node_id for node_type, node_id in nodes if node_type == "event" and node_id in self.project.events]
@@ -1078,6 +1115,7 @@ class MainController(QObject):
             self.selected_audio_id = self.project.events[self.selected_event_id].audio_id if self.selected_event_id in self.project.events else None
             self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id)
             self.selected_source_binding_tokens = [encode_source_binding_token(event_id, clip_id) for event_id, clip_id in binding_pairs]
+            self.window.explorer_tabs.setCurrentIndex(3)
         elif nodes:
             folder_ids = [node_id for node_type, node_id in nodes if node_type == "folder" and node_id in self.project.folders]
             self.selected_event_ids = []
@@ -1086,11 +1124,13 @@ class MainController(QObject):
             self.selected_source_binding_tokens = []
             if folder_ids:
                 self.selected_folder_id = folder_ids[0]
+                self.window.explorer_tabs.setCurrentIndex(3)
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
         self._sync_source_binding_selection_to_clip_table()
         self._sync_multi_selection_affordances()
         self._update_object_context()
         self._sync_build_selection_context()
+        self._sync_browser_action_affordances()
 
     def navigate_to_parent(self) -> None:
         if self.selected_event_id is not None:
@@ -1134,6 +1174,7 @@ class MainController(QObject):
         self._sync_multi_selection_affordances()
         self._update_object_context()
         self._sync_build_selection_context()
+        self._sync_browser_action_affordances()
 
     def navigate_to_event_audio(self, event_id: str) -> None:
         event = self.project.events.get(event_id)
@@ -1634,6 +1675,14 @@ class MainController(QObject):
             self._refresh_ui()
 
     def rename_selected(self) -> None:
+        active_page = self.window.current_explorer_page_key()
+        if active_page == "audios":
+            self.rename_selected_audio()
+            return
+        if active_page == "sources":
+            self.window.show_context_feedback("源音频路径重命名请在外部文件系统中处理；浏览器内暂不提供路径重命名。")
+            return
+
         binding_pairs = self._resolved_source_binding_pairs()
         if binding_pairs:
             affected_event_ids = list(dict.fromkeys(event_id for event_id, _clip_id in binding_pairs))
@@ -1700,6 +1749,14 @@ class MainController(QObject):
                 self._refresh_ui()
 
     def delete_selected(self) -> None:
+        active_page = self.window.current_explorer_page_key()
+        if active_page == "audios":
+            self.delete_selected_audio()
+            return
+        if active_page == "sources":
+            self.delete_selected_sources()
+            return
+
         binding_pairs = self._resolved_source_binding_pairs()
         if binding_pairs:
             label = f"确认删除所选 {len(binding_pairs)} 个 Source Binding？"
@@ -1766,6 +1823,182 @@ class MainController(QObject):
             if self._apply_mutation("Delete Folder", mutate):
                 self.window.append_log(f"已删除文件夹：{removed_folder_id}")
                 self._refresh_ui()
+
+    def rename_selected_audio(self) -> None:
+        audio_id = self._selected_audio_browser_id()
+        if audio_id is None:
+            self.window.show_context_feedback("先在 Audio 树中选择一个 Audio Object。")
+            return
+        new_id = self.window.ask_rename_value("重命名 Audio", "Audio ID", audio_id)
+        if not new_id or new_id == audio_id:
+            return
+
+        def mutate() -> bool:
+            self.project.rename_audio_object(audio_id, new_id)
+            self.selected_audio_id = new_id
+            return True
+
+        try:
+            changed = self._apply_mutation("Rename Audio", mutate)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "重命名 Audio 失败", str(exc))
+            return
+        if changed:
+            self.window.append_log(f"已重命名 Audio：{audio_id} -> {new_id}")
+            self.window.set_active_property_category("音频属性")
+            self._refresh_ui()
+
+    def delete_selected_audio(self) -> None:
+        audio_id = self._selected_audio_browser_id()
+        if audio_id is None:
+            self.window.show_context_feedback("先在 Audio 树中选择一个 Audio Object。")
+            return
+
+        linked_event_ids = self._event_ids_for_audio(audio_id)
+        if not self.window.confirm_delete_audio(audio_id, linked_event_ids):
+            return
+
+        def mutate() -> bool:
+            removed_event_ids = set(self.project.remove_audio_object(audio_id, cascade_events=bool(linked_event_ids)))
+            if self.selected_event_id in removed_event_ids:
+                self.selected_event_id = None
+            self.selected_event_ids = [event_id for event_id in self.selected_event_ids if event_id not in removed_event_ids]
+            self.selected_source_binding_tokens = []
+            if self.selected_event_id is None and self.selected_event_ids:
+                self.selected_event_id = self.selected_event_ids[0]
+            if self.selected_event_id is not None:
+                self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id)
+            elif self.selected_folder_id not in self.project.folders:
+                self.selected_folder_id = next(iter(self.project.root_folder_ids), None)
+            if self.selected_audio_id == audio_id or self.selected_audio_id not in self.project.audio_objects:
+                self.selected_audio_id = next(iter(self.project.audio_objects), None)
+            return True
+
+        if self._apply_mutation("Delete Audio", mutate):
+            if linked_event_ids:
+                self.window.append_log(f"已删除 Audio：{audio_id}，并级联删除 {len(linked_event_ids)} 个引用 Event。")
+            else:
+                self.window.append_log(f"已删除 Audio：{audio_id}")
+            self._refresh_ui()
+
+    def delete_selected_sources(self) -> None:
+        source_paths = self._selected_source_paths()
+        if not source_paths:
+            self.window.show_context_feedback("先在源音频树中选择至少一条源音频。")
+            return
+
+        delete_action = self.window.ask_source_delete_action(
+            len(source_paths),
+            allow_remove_from_audio=bool(self._selected_audio_browser_id()),
+            allow_remove_from_registry=True,
+            allow_delete_files=True,
+        )
+        if delete_action == "remove_from_audio":
+            self.remove_source_assets_from_current_audio(source_paths)
+        elif delete_action == "remove_from_registry":
+            self.remove_source_assets_from_registry(source_paths)
+        elif delete_action == "delete_files":
+            self.delete_source_files(source_paths)
+
+    def remove_source_assets_from_current_audio(self, source_paths: list[str]) -> None:
+        audio_id = self._selected_audio_browser_id()
+        if audio_id is None:
+            self.window.show_context_feedback("先在 Audio 树中选择一个 Audio Object，再从源音频树移除绑定。")
+            return
+        audio = self.project.audio_objects.get(audio_id)
+        if audio is None:
+            self.window.show_context_feedback("当前 Audio 不存在，无法移除绑定。")
+            return
+
+        normalized_sources = {str(path).strip().casefold() for path in source_paths if str(path).strip()}
+        clip_ids_to_remove = [clip.id for clip in audio.clips if str(clip.source_path).strip().casefold() in normalized_sources]
+        if not clip_ids_to_remove:
+            self.window.show_context_feedback(f"Audio {audio_id} 当前没有命中所选源音频绑定。")
+            return
+
+        if not self.window.confirm_delete(f"确认从 Audio“{audio_id}”移除 {len(clip_ids_to_remove)} 条 Source Binding？"):
+            return
+
+        def mutate() -> bool:
+            for clip_id in clip_ids_to_remove:
+                self.project.remove_clip_from_audio_object(audio_id, clip_id)
+            self.selected_audio_id = audio_id
+            self.selected_source_binding_tokens = []
+            linked_event_ids = self._event_ids_for_audio(audio_id)
+            if linked_event_ids:
+                self.selected_event_id = linked_event_ids[0]
+                self.selected_event_ids = [linked_event_ids[0]]
+                self.selected_folder_id = self.project.find_event_folder_id(linked_event_ids[0])
+            else:
+                self.selected_event_id = None
+                self.selected_event_ids = []
+            return True
+
+        if self._apply_mutation("Remove Sources From Audio", mutate):
+            self.window.append_log(f"已从 Audio {audio_id} 移除 {len(clip_ids_to_remove)} 条源音频绑定。")
+            self._refresh_ui()
+
+    def remove_source_assets_from_registry(self, source_paths: list[str]) -> None:
+        removable_paths: list[str] = []
+        skipped_paths: list[str] = []
+        for source_path in source_paths:
+            if source_path not in self.project.asset_registry:
+                continue
+            if self._audio_ids_for_source(source_path):
+                skipped_paths.append(source_path)
+                continue
+            removable_paths.append(source_path)
+
+        if not removable_paths:
+            if skipped_paths:
+                self.window.show_context_feedback("所选源音频仍被 Audio 引用，不能从项目注册表移除。")
+            else:
+                self.window.show_context_feedback("所选源音频当前不在项目注册表中。")
+            return
+
+        label = f"确认从项目注册表移除 {len(removable_paths)} 条未引用源音频？"
+        if skipped_paths:
+            label += f"\n另有 {len(skipped_paths)} 条仍被 Audio 引用，本次会跳过。"
+        if not self.window.confirm_delete(label):
+            return
+
+        def mutate() -> bool:
+            for source_path in removable_paths:
+                self.project.remove_source_asset(source_path)
+            return True
+
+        if self._apply_mutation("Remove Source Assets From Registry", mutate):
+            self.window.append_log(f"已从项目注册表移除 {len(removable_paths)} 条源音频。")
+            if skipped_paths:
+                self.window.show_context_feedback(f"已移除 {len(removable_paths)} 条未引用源音频；跳过 {len(skipped_paths)} 条仍被 Audio 引用的项目。")
+            self._refresh_ui()
+
+    def delete_source_files(self, source_paths: list[str]) -> None:
+        existing_paths = [Path(path) for path in source_paths if str(path).strip()]
+        existing_paths = [path for path in existing_paths if path.exists() and path.is_file()]
+        if not existing_paths:
+            self.window.show_context_feedback("所选源音频文件当前不存在，无法从磁盘删除。")
+            self._refresh_ui()
+            return
+
+        if not self.window.confirm_delete(f"确认从磁盘删除 {len(existing_paths)} 条源文件？"):
+            return
+
+        deleted_paths: list[str] = []
+        failed_paths: list[str] = []
+        for path in existing_paths:
+            try:
+                path.unlink()
+            except OSError:
+                failed_paths.append(str(path))
+                continue
+            deleted_paths.append(str(path))
+
+        if deleted_paths:
+            self.window.append_log(f"已从磁盘删除 {len(deleted_paths)} 条源文件。")
+        if failed_paths:
+            self.window.show_context_feedback(f"有 {len(failed_paths)} 条源文件删除失败，请检查文件占用或权限。")
+        self._refresh_ui()
 
     def import_clips(self, file_paths: list[str]) -> None:
         event = self.current_event
@@ -1912,10 +2145,10 @@ class MainController(QObject):
             self.window.apply_navigation_state(navigation_state)
 
     def assign_source_assets_to_current_audio(self, source_paths: list[str], replace_existing: bool) -> None:
-        event = self.current_event
-        if event is None:
+        audio_id = self._selected_audio_browser_id()
+        if audio_id is None:
             return
-        self.assign_source_assets_to_audio(event.id, source_paths, replace_existing)
+        self.assign_source_assets_to_audio_object(audio_id, source_paths, replace_existing)
 
     def assign_source_assets_to_audio_object(self, audio_id: str, source_paths: list[str], replace_existing: bool) -> None:
         audio = self.project.audio_objects.get(audio_id)
@@ -3412,12 +3645,60 @@ class MainController(QObject):
 
     def _sync_multi_selection_affordances(self) -> None:
         is_multi_event_selection = len(self.selected_event_ids) > 1
-        self.window.bulk_event_bus_button.setEnabled(bool(self.selected_event_ids))
-        self.window.rename_button.setText("批量重命名" if is_multi_event_selection else "重命名")
-        self.window.delete_button.setText("批量删除" if is_multi_event_selection else "删除")
         if is_multi_event_selection:
             self.window.set_active_property_category("工程")
             self.window.set_event_details(None)
+        self._sync_browser_action_affordances()
+
+    def _sync_browser_action_affordances(self) -> None:
+        active_page = self.window.current_explorer_page_key()
+        if active_page == "audios":
+            has_audio = self._selected_audio_browser_id() is not None
+            self.window.set_explorer_action_state(
+                rename_enabled=has_audio,
+                delete_enabled=has_audio,
+                bulk_bus_enabled=False,
+                rename_text="重命名 Audio",
+                delete_text="删除 Audio",
+                rename_tooltip="重命名当前选中的 AudioObject。" if has_audio else "先在 Audio 树中选择一个 AudioObject。",
+                delete_tooltip="删除当前选中的 AudioObject；若仍被 Event 引用，会要求级联确认。" if has_audio else "先在 Audio 树中选择一个 AudioObject。",
+            )
+            return
+
+        if active_page == "sources":
+            has_sources = bool(self._selected_source_paths())
+            self.window.set_explorer_action_state(
+                rename_enabled=False,
+                delete_enabled=has_sources,
+                bulk_bus_enabled=False,
+                rename_text="重命名",
+                delete_text="删除源音频...",
+                rename_tooltip="源音频路径重命名请在外部文件系统中处理。",
+                delete_tooltip="选择删除方式：从当前 Audio 移除绑定、从项目注册表移除或从磁盘删除源文件。" if has_sources else "先在源音频树中选择至少一条源音频。",
+            )
+            return
+
+        if active_page != "events":
+            self.window.set_explorer_action_state(
+                rename_enabled=False,
+                delete_enabled=False,
+                bulk_bus_enabled=False,
+                rename_tooltip="当前浏览页没有可重命名对象。",
+                delete_tooltip="当前浏览页没有可删除对象。",
+            )
+            return
+
+        has_target = bool(self.selected_source_binding_tokens or self.selected_event_ids or self.selected_event_id or self.selected_folder_id)
+        is_multi_event_selection = len(self.selected_event_ids) > 1
+        self.window.set_explorer_action_state(
+            rename_enabled=has_target,
+            delete_enabled=has_target,
+            bulk_bus_enabled=bool(self.selected_event_ids),
+            rename_text="批量重命名" if is_multi_event_selection else "重命名",
+            delete_text="批量删除" if is_multi_event_selection else "删除",
+            rename_tooltip="重命名当前选中的事件、文件夹或片段绑定。" if has_target else "先在工程浏览器中选择一个对象。",
+            delete_tooltip="删除当前选中的事件、文件夹或片段绑定。" if has_target else "先在工程浏览器中选择一个对象。",
+        )
 
     def _selected_events_bus_summary(self) -> str:
         bus_names = sorted({event.bus for event in self.current_events})

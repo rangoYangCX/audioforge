@@ -687,8 +687,7 @@ class EventModel:
         self.audio.switch_variants = value
 
 
-def normalize_event_binding_states(event: EventModel) -> None:
-    audio = event.audio
+def normalize_audio_binding_states(audio: AudioObjectModel) -> None:
     if not audio.clips:
         return
 
@@ -713,6 +712,10 @@ def normalize_event_binding_states(event: EventModel) -> None:
     has_any_active = any(bool(clip.active) for clip in enabled_clips)
     for clip in audio.clips:
         clip.active = bool(clip.enabled and (clip.active or not has_any_active))
+
+
+def normalize_event_binding_states(event: EventModel) -> None:
+    normalize_audio_binding_states(event.audio)
 
 
 def effective_event_clips(event: EventModel) -> list[ClipModel]:
@@ -898,6 +901,63 @@ class AudioProject:
         self.touch()
         return audio
 
+    def event_ids_for_audio(self, audio_id: str) -> list[str]:
+        normalized_audio_id = str(audio_id).strip()
+        if not normalized_audio_id:
+            return []
+        return [event.id for event in self.events.values() if event.audio_id == normalized_audio_id]
+
+    def audio_ids_for_source(self, source_path: str) -> list[str]:
+        normalized_source_path = str(source_path).strip()
+        if not normalized_source_path:
+            return []
+        audio_ids: list[str] = []
+        seen_audio_ids: set[str] = set()
+        for audio_id, audio in self.audio_objects.items():
+            if audio_id in seen_audio_ids:
+                continue
+            if any(str(clip.source_path).strip() == normalized_source_path for clip in audio.clips):
+                seen_audio_ids.add(audio_id)
+                audio_ids.append(audio_id)
+        return audio_ids
+
+    def rename_audio_object(self, old_id: str, new_id: str) -> None:
+        normalized_old_id = str(old_id).strip()
+        normalized_new_id = str(new_id).strip()
+        if normalized_old_id not in self.audio_objects:
+            raise KeyError(normalized_old_id)
+        if not normalized_new_id:
+            raise ValueError("Audio ID cannot be empty")
+        if normalized_old_id == normalized_new_id:
+            return
+        if normalized_new_id in self.audio_objects:
+            raise ValueError(f"Audio ID already exists: {normalized_new_id}")
+
+        audio = self.audio_objects.pop(normalized_old_id)
+        audio.id = normalized_new_id
+        self.audio_objects[normalized_new_id] = audio
+        for event in self.events.values():
+            if event.audio_id != normalized_old_id:
+                continue
+            event.audio_id = normalized_new_id
+            event.audio = audio
+        self.touch()
+
+    def remove_audio_object(self, audio_id: str, *, cascade_events: bool = False) -> list[str]:
+        normalized_audio_id = str(audio_id).strip()
+        if normalized_audio_id not in self.audio_objects:
+            raise KeyError(normalized_audio_id)
+
+        linked_event_ids = self.event_ids_for_audio(normalized_audio_id)
+        if linked_event_ids and not cascade_events:
+            raise ValueError(f"Audio {normalized_audio_id} is still referenced by events: {', '.join(linked_event_ids)}")
+
+        for event_id in list(linked_event_ids):
+            self.remove_event(event_id)
+        del self.audio_objects[normalized_audio_id]
+        self.touch()
+        return linked_event_ids
+
     def add_event(self, folder_id: str, event: EventModel) -> None:
         normalize_event_binding_states(event)
         event.audio_id = str(event.audio.id).strip() or str(event.audio_id).strip() or new_id("audio")
@@ -1040,6 +1100,28 @@ class AudioProject:
                 normalized = str(clip.source_path).strip()
                 if normalized and normalized not in self.asset_registry:
                     self.asset_registry[normalized] = AssetRegistryEntry(source_path=normalized)
+
+    def remove_clip_from_audio_object(self, audio_id: str, clip_id: str) -> None:
+        normalized_audio_id = str(audio_id).strip()
+        if normalized_audio_id not in self.audio_objects:
+            raise KeyError(normalized_audio_id)
+        audio = self.audio_objects[normalized_audio_id]
+        audio.clips = [clip for clip in audio.clips if clip.id != clip_id]
+        normalize_audio_binding_states(audio)
+        for event in self.events.values():
+            if event.audio_id == normalized_audio_id:
+                normalize_event_binding_states(event)
+        self.touch()
+
+    def remove_source_asset(self, source_path: str, *, force: bool = False) -> None:
+        normalized_source_path = str(source_path).strip()
+        if not normalized_source_path:
+            raise ValueError("Source path cannot be empty")
+        if not force and self.audio_ids_for_source(normalized_source_path):
+            raise ValueError(f"Source asset is still referenced: {normalized_source_path}")
+        if normalized_source_path in self.asset_registry:
+            del self.asset_registry[normalized_source_path]
+            self.touch()
 
     def remove_clip_from_event(self, event_id: str, clip_id: str) -> None:
         event = self.events[event_id]
