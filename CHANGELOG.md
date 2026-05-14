@@ -12,7 +12,11 @@
 
 ## [Unreleased]
 
-- 暂无未发布变更。
+- 工程保存改为可迁移模式：保存 `.afproj` 时会把引用到的源音频收纳进同名工程目录 `ProjectName/Sources/`，文件内统一写相对路径；重新打开时再解析回绝对路径，便于整包迁移后继续编辑、试听与构建。
+- 相对 `ExportRoot` 的解析现改为以工程文件位置为锚点，而不是当前进程工作目录，避免工程迁移后构建落到错误目录。
+- mac 启动现补齐 Qt 高 DPI 配置与 `Fusion` 样式兜底，降低 `.app` 在 Retina / mac 原生样式下出现比例异常的概率。
+- `PlaybackService` 现为 `pygame.mixer` 增加多档初始化兜底、sample rate 变化重初始化和空 channel 失败提示，避免 mac 上“看起来触发了试听、实际上没分配到播放通道”的静默失败。
+- `tools/build_macos_app.py` 现显式收集 `pygame`、`numpy`、`scipy`、`soundfile` 运行库，降低 mac 打包后本地试听依赖缺失的问题。
 
 ## [0.09.1] - 2026-05-14
 

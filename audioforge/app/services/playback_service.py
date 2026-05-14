@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -31,11 +32,22 @@ class ActivePreviewVoice:
 class PlaybackService:
     def __init__(self) -> None:
         self._initialized = False
+        self._initialized_frequency: int | None = None
+        self._initialization_error = ""
         self._renderer = PreviewAudioRenderer()
         self._active_voices: dict[str, list[ActivePreviewVoice]] = {}
 
     def is_available(self) -> bool:
         return pygame is not None and np is not None and self._renderer.is_available()
+
+    def availability_reason(self) -> str:
+        if pygame is None or np is None:
+            return "pygame 或 numpy 不可用。"
+        if not self._renderer.is_available():
+            return "scipy 或 soundfile 不可用。"
+        if self._initialization_error:
+            return self._initialization_error
+        return ""
 
     def play_file(
         self,
@@ -53,7 +65,8 @@ class PlaybackService:
         fade_out_ms: int = 0,
     ) -> str:
         if not self.is_available():
-            return "pygame、numpy、scipy 或 soundfile 不可用；真实试听不可用。"
+            reason = self.availability_reason() or "pygame、numpy、scipy 或 soundfile 不可用；真实试听不可用。"
+            return f"真实试听不可用：{reason}"
 
         try:
             rendered = self._renderer.render_file(
@@ -74,10 +87,18 @@ class PlaybackService:
         if rendered.audio_data.size == 0:
             return "Preview render produced empty audio."
 
-        self._ensure_initialized(rendered.sample_rate)
-        sound = pygame.sndarray.make_sound((rendered.audio_data * 32767.0).astype(np.int16, copy=False))
+        try:
+            self._ensure_initialized(rendered.sample_rate)
+        except Exception as exc:
+            self._initialization_error = str(exc)
+            return f"真实试听不可用：{exc}"
+
+        sample_buffer = np.ascontiguousarray((rendered.audio_data * 32767.0).astype(np.int16, copy=False))
+        sound = pygame.sndarray.make_sound(sample_buffer)
         sound.set_volume(self._db_to_linear(volume_db))
         channel = sound.play()
+        if channel is None:
+            return "真实试听失败：未分配到可用播放通道。"
         self._cleanup_finished_voices()
         if event_id and channel is not None:
             self._active_voices.setdefault(event_id, []).append(
@@ -192,10 +213,40 @@ class PlaybackService:
                 self._active_voices.pop(event_id, None)
 
     def _ensure_initialized(self, sample_rate: int) -> None:
-        if self._initialized:
+        if self._initialized and self._initialized_frequency == sample_rate:
             return
-        pygame.mixer.init(frequency=sample_rate, size=-16, channels=2)
-        self._initialized = True
+
+        if self._initialized:
+            try:
+                pygame.mixer.quit()
+            except Exception:
+                pass
+            self._initialized = False
+            self._initialized_frequency = None
+
+        attempts = [
+            {"frequency": sample_rate, "size": -16, "channels": 2, "buffer": 512},
+            {"frequency": sample_rate, "size": -16, "channels": 2, "buffer": 1024},
+        ]
+        if sample_rate != 44100:
+            attempts.append({"frequency": 44100, "size": -16, "channels": 2, "buffer": 1024})
+        if sys.platform == "darwin":
+            attempts.append({"frequency": 48000, "size": -16, "channels": 2, "buffer": 2048})
+
+        errors: list[str] = []
+        for options in attempts:
+            try:
+                pygame.mixer.init(**options)
+                self._initialized = True
+                self._initialized_frequency = int(options["frequency"])
+                self._initialization_error = ""
+                return
+            except Exception as exc:
+                errors.append(
+                    f"freq={options['frequency']} buffer={options['buffer']} failed: {exc}"
+                )
+
+        raise RuntimeError("pygame mixer 初始化失败；" + " | ".join(errors))
 
     def _cleanup_finished_voices(self) -> None:
         for event_id, voices in list(self._active_voices.items()):

@@ -8,7 +8,7 @@
 
 ## 第一步：导入运行时代码
 
-1. 打开生成后的 `AudioForgeUnityPackage-<version>/`，确认目录根部存在 `package.json`、`README.md`、`Runtime/`、`Editor/` 和 `Documentation~/`。
+1. 打开生成后的 `AudioForgeUnityPackage-<version>/`。
 2. 将整个包目录放进 Unity 项目的 `Packages/` 下，或在 `Packages/manifest.json` 中以本地路径方式引用当前目录。
 3. 等 Unity 完成包解析与脚本编译，确认 Console 没有红色编译错误。
 
@@ -42,7 +42,6 @@
 - 如果要接项目自己的业务代码：看 `../Examples/AudioForgeRuntimeLocatorExample.cs`。
 - 如果要替换默认 `StreamingAssets` 加载方案：先看 `../Examples/AudioForgeResourcesProviderExample.cs`，再看 `../Examples/AudioForgeRuntimeInstallerExample.cs`。
 - 如果要核对字段语义和运行时边界：读 `Canonical/UnitySDK对接规范.md`。
-- 如果要核对包目录、版本映射和 canonical 文档入口：读 `Canonical/UnitySDK输出规范.md`。
 
 ## 最低验收标准
 

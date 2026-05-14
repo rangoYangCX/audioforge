@@ -2715,6 +2715,27 @@ def test_build_project_handles_export_failure(monkeypatch) -> None:
     controller.window.close()
 
 
+def test_build_project_resolves_relative_export_root_from_project_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.file_path = str(tmp_path / "portable.afproj")
+    controller.project.settings.export_root = "./Export"
+    captured: dict[str, Path] = {}
+
+    def capture_start(project, export_root, build_request) -> None:
+        captured["export_root"] = export_root
+
+    monkeypatch.setattr(controller, "_start_build_worker", capture_start)
+
+    controller.build_project()
+
+    assert captured["export_root"] == (tmp_path / "Export").resolve(strict=False)
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_tree_preview_actions_and_preview_strip_replace_bottom_transport_card(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 

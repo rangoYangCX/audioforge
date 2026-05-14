@@ -4,15 +4,13 @@ AudioForge Unity 端对接开发文档
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
 > 当前文档同步日期：2026-05-14。
-> 当前工具版本：AudioForge 0.09.1。
+> 当前工具版本：AudioForge 0.09.0。
 
 0.1 版本增量
 
 - 2026-05-14 0.09.0 契约更新：导出契约已升级为 `SchemaVersion = 3`，顶层正式输出 `AudioObjects`，事件只保留动作层字段和 `AudioId`，不再导出嵌套 `Audio` 或扁平镜像字段。
 - 2026-05-14 0.09.0 运行时更新：Unity runtime、JSON 适配器与全链路检查已统一改为直接消费 `AudioObjects + Events[AudioId]`；缺失 `AudioId` 或缺失目标 `AudioObject` 会被视为契约错误。
 - 2026-05-14 0.09.0 工作流更新：编辑器当前已把 Audio 树升级为一等对象面，源音频树引用统计切到“引用 Audio 数”，外部导入规则收口为事件树 / Audio 树 / 源音频树三条路径。
-- 2026-05-14 0.09.1 交付规范更新：新增 `docs/UnitySDK输出规范.md`，后续 Unity SDK 统一按 `com.audioforge.runtime` UPM 根目录结构输出，包内 `Documentation~/Docs/Canonical/` 也会同步附带该规范副本。
-- 2026-05-14 0.09.1 打包更新：Windows 桌面发布目录现在会内嵌 `SDK/com.audioforge.runtime/`，Unity 程序可以直接拿这份本地包做 `Packages/` 接入。
 - 2026-05-13 phase3 对接补充：State / Switch 当前支持子项级 child effects，导出会写出 `StateEffects` / `SwitchEffects`，Unity runtime 与 validation 已同步消费。
 - 2026-05-13 phase3 体验补充：工具端现已提供 GameSync 工作区、试听中心 GameSync 控件和 transport 风格 RTPC 调参条；这些属于 authoring / preview 层增强，但其底层字段已经进入当前运行时契约。
 - 2026-05-12 0.07.0 交付更新：包内文档与仓库主文档都新增了“一期到当前变化总览”，Unity 对接时可以先快速判断本次交付相对一期新增了什么。
@@ -41,7 +39,7 @@ AudioForge Unity 端对接开发文档
 
 - 当前相对第一期，运行时层真正需要 Unity 程序关注的不再只有 `OneShot`；当前还新增了 `SchemaVersion = 3`、项目级 `AudioObjects`、项目级 Game Sync 定义、Audio/总线级 Game Sync 绑定、emitter context 与 child effects。
 - 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置；这些 editor-only 状态本身仍不会原样写进导出，但其过滤后的结果与 GameSync 绑定会进入当前 `AudioData.json`。
-- 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Documentation~/Docs/一期对比变化总览.md`。
+- 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
 - 当前仓库附带的 Unity 参考运行时代码已经能够消费新版导出结果；如果项目内是自研 runtime，则需要同步补齐 v2 解析、Game Sync API 与 emitter 作用域。
 
 0.3 当前 GameSync 口径
@@ -65,27 +63,25 @@ AudioForge Unity 端对接开发文档
 
 1. 先通读本文档，明确边界、输入输出和最小验收标准。
 2. 再阅读 `CHANGELOG.md`，确认当前版本相对上一版到底改了什么。
-3. 再阅读 `docs/UnitySDK输出规范.md`，明确当前 SDK 包根目录、版本映射和文档入口长什么样。
-4. 再阅读 `unity_package/README.md`，明确独立包与验证镜像的维护边界。
-5. 再阅读 `unity_package/Docs/README.md` 和 `unity_package/Docs/QuickStart.md`，按交付包视角完成最小接入。
-6. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
-7. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
+3. 再阅读 `unity_package/README.md`，明确独立包与验证镜像的维护边界。
+4. 再阅读 `unity_package/Docs/README.md` 和 `unity_package/Docs/QuickStart.md`，按交付包视角完成最小接入。
+5. 然后阅读 `unity_validation/README.md`，按空项目验证步骤跑通最小链路。
+6. 最后根据需要查阅 `开发文档.md` 了解工具端背景与产品边界。
 
 本期交接的核心原则只有一条：Unity 端只依赖导出产物，不依赖工具源码，不读取 `.afproj`，也不要求在 Unity 项目中嵌入 Python 运行环境。
 
 2. 你会收到什么
 
-当前建议交接以下目录和文件：
+第一期建议交接以下目录和文件：
 
 - `<你的实际导出目录>/AudioData.json`
 - `<你的实际导出目录>/AudioManifest.json`
 - `<你的实际导出目录>/BuildReport.json`
 - `<你的实际导出目录>/AudioEventID.cs`
 - `<你的实际导出目录>/Assets/**`
-- `dist/AudioForgeUnityPackage-<version>/`
-- `dist/AudioForgeUnityPackage-<version>.zip`
-- `reports/internal_release_smoke/release_signoff.md`
-- `reports/internal_release_smoke/checks/full_chain_report.md`
+- `unity_package/Assets/AudioForgeRuntime/**`
+- `unity_validation/README.md`
+- `unity_package/README.md`
 
 如果希望像 Wwise 集成包一样直接给 Unity 程序一个版本化压缩包，可直接执行：
 
@@ -93,14 +89,14 @@ AudioForge Unity 端对接开发文档
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
 
-2026-05-14 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、Game Sync API、emitter context、child effects smoke，以及正式的 Event / AudioObject 职责拆层；同时这次已补上显式的 UPM SDK 输出规范。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.09.1/`。
+2026-05-14 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、Game Sync API、emitter context、child effects smoke，以及正式的 Event / AudioObject 职责拆层。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.09.0/`。
 
 自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
 
-- `Documentation~/Docs/README.md` 与 `Documentation~/Docs/QuickStart.md`：包内阅读入口与最短接入路径。
-- `Documentation~/Docs/Canonical/`：从仓库主文档同步进包内的 canonical 对接文档副本。
-- `Documentation~/Examples/`：带注释的示范代码文件，方便 Unity 程序按需复制和改造。
-- `Documentation~/Verification/`：当前机器验证报告与签收摘要，便于交接时说明“这包是怎么验过的”。
+- `Docs/README.md` 与 `Docs/QuickStart.md`：包内阅读入口与最短接入路径。
+- `Docs/Canonical/`：从仓库主文档同步进包内的 canonical 对接文档副本。
+- `Examples/`：带注释的示范代码文件，方便 Unity 程序按需复制和改造。
+- `Verification/`：当前机器验证报告与签收摘要，便于交接时说明“这包是怎么验过的”。
 
 推荐直接交给 Unity 程序同学的不是裸目录，而是：
 
@@ -115,14 +111,9 @@ AudioForge Unity 端对接开发文档
 推荐放入 Unity 工程后的目标结构：
 
 ```text
-Packages/
-	com.audioforge.runtime/
-		package.json
-		README.md
-		Runtime/
-		Editor/
-		Documentation~/
 Assets/
+	AudioForgeRuntime/
+		Scripts/
 	StreamingAssets/
 		AudioForge/
 			AudioData.json
@@ -135,24 +126,22 @@ Assets/
 
 ```text
 AudioForgeUnityPackage-<version>/
-	package.json
+	Assets/
+		AudioForgeRuntime/
+	Docs/
+		README.md
+		QuickStart.md
+		Canonical/
+	Examples/
+	Verification/
 	README.md
-	Runtime/
-	Editor/
-	Documentation~/
-		Docs/
-			README.md
-			QuickStart.md
-			Canonical/
-		Examples/
-		Verification/
 ```
 
 当前仓库根目录 `Export/` 样例里，默认可直接拿来验证的事件枚举已同步为：`sfx_level_check_02`、`sfx_level_check_03`、`sfx_tile_hint_02`、`sfx_tile_undo_02`、`sfx_tile_undo_03`。当前 Unity 运行时代码统一维护在 `unity_package`，`unity_validation` 里的 `AudioForgeBootstrap` / `AudioForgeEventPlayer` 镜像也已对齐到 `sfx_level_check_02`，避免空项目验证仍指向旧样例事件。
 
 如果你只是要拿仓库里的最新机器验证样例做联调，优先使用 `reports/internal_release_smoke/export/` 下的导出物，而不是把仓库根目录 `Export/` 误当成唯一基线来源。
 
-如果 Unity 同学已经拿到了之前生成的包，旧代码通常仍可继续对接；但建议至少同步阅读 0.09.1 的对接文档、SDK 输出规范和一期对比总览，确认 Event / AudioObject 边界、`AudioId` 引用关系、`OneShot` 语义和有效 Clip 集合理解一致。
+如果 Unity 同学已经拿到了之前生成的包，旧代码通常仍可继续对接；但建议至少同步阅读 0.09.0 的对接文档和一期对比总览，确认 Event / AudioObject 边界、`AudioId` 引用关系、`OneShot` 语义和有效 Clip 集合理解一致。
 
 3. 工具端与 Unity 端边界
 

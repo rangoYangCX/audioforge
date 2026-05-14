@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,7 @@ import pytest
 from audioforge.app.models.audio_project import CurvePointModel, GameParameterModel, RtpcBindingModel, StateGroupModel, StateOverrideModel, SwitchGroupModel, SwitchVariantModel
 from audioforge.app.services.project_serializer import ProjectSerializer
 
-from tests.helpers import build_sample_project
+from tests.helpers import build_sample_project, write_wav_fixture
 
 
 def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: Path) -> None:
@@ -79,7 +81,10 @@ def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: P
     assert "AudioObjects" in raw_payload
     assert raw_payload["Events"]["UiClick"]["audio_id"] == project.events["UiClick"].audio_id
     assert raw_payload["AudioObjects"][project.events["UiClick"].audio_id]["bus"] == "UI"
-    assert loaded.events["UiClick"].clips[0].source_path == str(wav_path)
+    loaded_clip_path = Path(loaded.events["UiClick"].clips[0].source_path)
+    assert loaded_clip_path.exists()
+    assert loaded_clip_path.name == wav_path.name
+    assert loaded_clip_path != wav_path
     assert loaded.events["UiClick"].clips[0].asset_key == "ui/click_primary"
     assert loaded.events["UiClick"].audio_id in loaded.audio_objects
     assert loaded.events["UiClick"].audio.bus == "UI"
@@ -89,7 +94,7 @@ def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: P
     assert loaded.settings.bus_configs[-1].name == "UI"
     assert loaded.settings.bus_configs[-1].parent_bus == "SFX"
     assert loaded.settings.bus_configs[-1].volume_db == 2.5
-    assert str(wav_path) in loaded.asset_registry
+    assert any(Path(path).exists() and Path(path).name == wav_path.name for path in loaded.asset_registry)
     assert len(loaded.game_parameters) == 1
     assert loaded.game_parameters[0].name == "PlayerSpeed"
     assert loaded.state_groups[0].default_state == "Explore"
@@ -129,3 +134,43 @@ def test_project_serializer_preserves_existing_file_when_atomic_replace_fails(tm
 
     assert project_path.read_text(encoding="utf-8") == original_payload
     assert temp_path.exists() is False
+
+
+def test_project_serializer_migrates_sources_into_project_folder_and_loads_after_move(tmp_path: Path) -> None:
+    external_root = tmp_path / "external"
+    save_root = tmp_path / "portable"
+    project, wav_path = build_sample_project(external_root)
+    extra_source = write_wav_fixture(external_root / "library" / "ambient.wav", frequency_hz=330.0)
+    project.register_source_asset(str(extra_source))
+
+    serializer = ProjectSerializer()
+    project_path = save_root / "sample.afproj"
+
+    serializer.save(project, project_path)
+
+    payload = json.loads(project_path.read_text(encoding="utf-8"))
+    saved_clip_path = payload["AudioObjects"][project.events["UiClick"].audio_id]["clips"][0]["source_path"]
+    saved_asset_paths = list(payload["Assets"].keys())
+
+    assert not Path(saved_clip_path).is_absolute()
+    assert all(not Path(asset_path).is_absolute() for asset_path in saved_asset_paths)
+
+    internal_clip_path = Path(project.events["UiClick"].clips[0].source_path)
+    internal_extra_path = next(Path(path) for path in project.asset_registry if path.endswith("ambient.wav"))
+    assert internal_clip_path.exists()
+    assert internal_extra_path.exists()
+    assert os.path.commonpath([str(internal_clip_path), str(project_path.with_suffix(""))]) == str(project_path.with_suffix(""))
+
+    moved_root = tmp_path / "moved"
+    moved_root.mkdir(parents=True, exist_ok=True)
+    moved_project_path = moved_root / project_path.name
+    shutil.move(str(project_path), moved_project_path)
+    shutil.move(str(project_path.with_suffix("")), moved_root / project_path.with_suffix("").name)
+
+    loaded = serializer.load(moved_project_path)
+
+    loaded_clip_path = Path(loaded.events["UiClick"].clips[0].source_path)
+    assert loaded_clip_path.exists()
+    assert loaded_clip_path == moved_project_path.with_suffix("") / "Sources" / loaded_clip_path.relative_to(moved_project_path.with_suffix("") / "Sources")
+    assert any(Path(path).exists() and Path(path).name == "ambient.wav" for path in loaded.asset_registry)
+    assert loaded.events["UiClick"].clips[0].source_path != str(wav_path)

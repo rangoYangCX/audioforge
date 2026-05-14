@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import re
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -266,6 +267,8 @@ class MainController(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.application = QApplication.instance() or QApplication([])
+        if sys.platform == "darwin":
+            self.application.setStyle("Fusion")
         self.window = MainWindow()
         self.window.set_close_handler(self._handle_close_request)
         self.serializer = ProjectSerializer()
@@ -1064,6 +1067,15 @@ class MainController(QObject):
         self.window.append_log(f"已另存工程：{save_path}")
         self._refresh_ui()
         return True
+
+    def _resolve_project_relative_path(self, raw_path: str) -> Path:
+        normalized = str(raw_path).strip() or str(DEFAULT_EXPORT_ROOT)
+        candidate = Path(normalized)
+        if candidate.is_absolute():
+            return candidate
+        if self.project.file_path:
+            return (Path(self.project.file_path).resolve().parent / candidate).resolve(strict=False)
+        return (Path.cwd() / candidate).resolve(strict=False)
 
     def select_node(self, node_type: str, node_id: str) -> None:
         if node_type == "source_binding":
@@ -4131,9 +4143,7 @@ class MainController(QObject):
         self.window.show_report_tab(2)
         self._publish_diagnostic_snapshot()
 
-        export_root = Path(self.project.settings.export_root)
-        if not export_root.is_absolute():
-            export_root = Path.cwd() / export_root
+        export_root = self._resolve_project_relative_path(self.project.settings.export_root)
         self._active_build_scope_label = requested_scope_label
         self._active_build_export_root = export_root
         self._start_build_worker(project_snapshot, export_root, build_request)
@@ -4150,9 +4160,7 @@ class MainController(QObject):
             self._set_build_diagnostic_summary("构建计划不可用。", message, status="warning")
             self._publish_diagnostic_snapshot()
             return
-        export_root = Path(self.project.settings.export_root)
-        if not export_root.is_absolute():
-            export_root = Path.cwd() / export_root
+        export_root = self._resolve_project_relative_path(self.project.settings.export_root)
         try:
             plan = self.exporter.plan_export(self.project, export_root, build_request)
             plan_summary, plan_detail = self._format_build_plan_summary(plan)
@@ -4248,7 +4256,7 @@ class MainController(QObject):
     @Slot(str, object)
     def _handle_build_failure(self, error_message: str, plan: ExportPlan | None) -> None:
         requested_scope_label = self._active_build_scope_label or "当前构建"
-        export_root = self._active_build_export_root or Path(self.project.settings.export_root)
+        export_root = self._active_build_export_root or self._resolve_project_relative_path(self.project.settings.export_root)
         logger.error(
             "Build failed scope=%s export_root=%s error=%s",
             requested_scope_label,

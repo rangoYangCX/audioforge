@@ -8,24 +8,7 @@ from pathlib import Path
 from audioforge.app.utils.constants import APP_VERSION
 
 
-def main() -> int:
-    if sys.platform != "darwin":
-        print("macOS package build must be run on a macOS host.", file=sys.stderr)
-        return 1
-
-    workspace = Path(__file__).resolve().parents[1]
-    dist_root = workspace / "dist"
-    build_root = workspace / "build"
-    release_root = dist_root / f"AudioForge-{APP_VERSION}-macos"
-    pyinstaller_root = build_root / "pyinstaller-macos"
-
-    for path in (release_root, pyinstaller_root, dist_root / "AudioForge.app"):
-        if path.exists():
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-
+def build_pyinstaller_command(workspace: Path, dist_root: Path, pyinstaller_root: Path) -> list[str]:
     icon_source = workspace / "audioforge" / "app" / "assets" / "icons" / "app.icns"
     add_data = f"{workspace / 'audioforge' / 'app' / 'assets'}:audioforge/app/assets"
     command = [
@@ -47,11 +30,41 @@ def main() -> int:
         "com.audioforge.app",
         "--add-data",
         add_data,
+        "--collect-all",
+        "pygame",
+        "--collect-all",
+        "numpy",
+        "--collect-all",
+        "scipy",
+        "--collect-all",
+        "soundfile",
         str(workspace / "audioforge" / "main.py"),
     ]
 
     if icon_source.exists():
         command[10:10] = ["--icon", str(icon_source)]
+    return command
+
+
+def main() -> int:
+    if sys.platform != "darwin":
+        print("macOS package build must be run on a macOS host.", file=sys.stderr)
+        return 1
+
+    workspace = Path(__file__).resolve().parents[1]
+    dist_root = workspace / "dist"
+    build_root = workspace / "build"
+    release_root = dist_root / f"AudioForge-{APP_VERSION}-macos"
+    pyinstaller_root = build_root / "pyinstaller-macos"
+
+    for path in (release_root, pyinstaller_root, dist_root / "AudioForge.app"):
+        if path.exists():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+    command = build_pyinstaller_command(workspace, dist_root, pyinstaller_root)
 
     completed = subprocess.run(command, cwd=workspace)
     if completed.returncode != 0:
