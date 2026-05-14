@@ -2,7 +2,7 @@
 
 这个目录是 Unity 侧运行时资源的独立维护包，也是仓库内的唯一源码真源。
 
-当前文档同步日期：2026-05-12
+当前文档同步日期：2026-05-14
 
 ## 目录定位
 
@@ -39,19 +39,20 @@
 - 包内文档新增 `Docs/一期对比变化总览.md`，Unity 同学拿到包后可以先用一页文档看清楚“一期到当前”的真实差异。
 - 对接规范已经把 `PlayMode = OneShot`、有效 Clip 集合和 editor-only 边界写清楚，不需要再从编辑器实现里反推 Unity 端应该怎么理解。
 - 包内验证材料会随重新打包一起刷新，交接时可以同时给目录包、zip 和签收摘要，而不是只给一份运行时代码目录。
+- 当前包内 runtime 已正式进入“Event 动作层 + AudioObject 声音层”契约：Unity runtime 直接消费顶层 `AudioObjects` 与 `Events[AudioId]`，不再依赖事件内嵌 `Audio` 或扁平镜像字段。
 
-## 2026-05-12 版本说明
+## 2026-05-14 版本说明
 
-- 0.07.0 这轮发布的重点是 phase2 编辑器交付收口和 Unity 对接文档刷新，其中运行时代码目录本身不要求大改，但建议重新打包，以便把 `OneShot` 对接说明、一期对比总览和最新签收材料一起交给 Unity 同学。
-- 当前参考运行时代码仍位于 `unity_package/Assets/AudioForgeRuntime`，并能继续消费新版导出结果；这轮主要新增的是文档解释和交付材料，而不是第二套 SDK 代码树。
-- 如果你只看代码目录，容易误以为这次没有变化；真正需要同步给 Unity 的，是“同样的运行时代码边界下，哪些语义已经更新、哪些 editor-only 内容仍然不进入契约”。
+- 0.09.0 这轮发布的重点是 Schema 3 与 Audio Object 主模型冻结：运行时代码目录仍维持同一套 SDK，但契约已明确要求 `SchemaVersion = 3` 走顶层 `AudioObjects + Events[AudioId]`。
+- 当前参考运行时代码仍位于 `unity_package/Assets/AudioForgeRuntime`，并已直接消费 `AudioObjects` 与 `AudioId` 引用，不再依赖嵌套 `Audio` 或扁平字段回退。
+- 如果你只看代码目录，容易误以为这次只是数据层重命名；真正需要同步给 Unity 的，是“Event 只负责触发行为，声音层全部归 AudioObject”的运行时语义。
 
 ## 打包产物
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.07.0/`
-- `AudioForgeUnityPackage-0.07.0.zip`
+- `AudioForgeUnityPackage-0.09.0/`
+- `AudioForgeUnityPackage-0.09.0.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 

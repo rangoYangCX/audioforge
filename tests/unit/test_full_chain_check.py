@@ -31,10 +31,46 @@ def test_full_chain_runtime_contract_detects_missing_manifest_reference(tmp_path
 
     audio_data_path = export_root / "AudioData.json"
     payload = json.loads(audio_data_path.read_text(encoding="utf-8"))
-    payload["Events"]["UiClick"]["Clips"][0]["AssetKey"] = "ui/missing_asset"
+    audio_id = payload["Events"]["UiClick"]["AudioId"]
+    payload["AudioObjects"][audio_id]["Clips"][0]["AssetKey"] = "ui/missing_asset"
     audio_data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     contract_result = check_runtime_contract(export_root)
 
     assert contract_result.passed is False
     assert any(detail.startswith("manifest_missing_for_clip=") for detail in contract_result.details)
+
+
+def test_full_chain_runtime_contract_requires_audio_object_for_schema_v3(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+    RuntimeExporter().export(project, export_root, issues)
+
+    audio_data_path = export_root / "AudioData.json"
+    payload = json.loads(audio_data_path.read_text(encoding="utf-8"))
+    audio_id = payload["Events"]["UiClick"]["AudioId"]
+    del payload["AudioObjects"][audio_id]
+    audio_data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    contract_result = check_runtime_contract(export_root)
+
+    assert contract_result.passed is False
+    assert f"missing_schema_field=audio_object:UiClick:{audio_id}" in contract_result.details
+
+
+def test_full_chain_runtime_contract_requires_event_audio_id(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+    RuntimeExporter().export(project, export_root, issues)
+
+    audio_data_path = export_root / "AudioData.json"
+    payload = json.loads(audio_data_path.read_text(encoding="utf-8"))
+    del payload["Events"]["UiClick"]["AudioId"]
+    audio_data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    contract_result = check_runtime_contract(export_root)
+
+    assert contract_result.passed is False
+    assert "missing_schema_field=event:UiClick:AudioId" in contract_result.details

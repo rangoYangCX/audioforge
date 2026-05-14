@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QItemSelectionModel, QMimeData, Qt, Signal
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem
 
 from audioforge.app.utils.icons import load_app_icon
@@ -15,6 +16,7 @@ SOURCE_ASSET_MIME_TYPE = "application/x-audioforge-source-asset-paths"
 class SourceTreeWidget(QTreeWidget):
     sourceSelected = Signal(str)
     sourceActivated = Signal(str)
+    importFilesDropped = Signal(list)
 
     def __init__(self, parent=None, *, selection_mode: QAbstractItemView.SelectionMode = QAbstractItemView.SelectionMode.SingleSelection) -> None:
         super().__init__(parent)
@@ -24,19 +26,50 @@ class SourceTreeWidget(QTreeWidget):
         self.setAlternatingRowColors(True)
         self.setUniformRowHeights(True)
         self.setDragEnabled(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.itemSelectionChanged.connect(self._emit_selected_source)
         self.itemDoubleClicked.connect(lambda _item, _column: self._emit_activated_source())
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._extract_import_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self._extract_import_paths(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        import_paths = self._extract_import_paths(event)
+        if import_paths:
+            self.importFilesDropped.emit(import_paths)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
 
     def mimeTypes(self) -> list[str]:
         return [SOURCE_ASSET_MIME_TYPE]
 
     def mimeData(self, items: list[QTreeWidgetItem]) -> QMimeData:
         mime_data = QMimeData()
+        drag_items: list[QTreeWidgetItem] = []
+        seen_item_ids: set[int] = set()
+        for candidate in [*items, *self.selectedItems(), self.currentItem()]:
+            if candidate is None:
+                continue
+            candidate_id = id(candidate)
+            if candidate_id in seen_item_ids:
+                continue
+            seen_item_ids.add(candidate_id)
+            drag_items.append(candidate)
         source_paths: list[str] = []
         seen_paths: set[str] = set()
-        for item in items:
+        for item in drag_items:
             entry = item.data(0, Qt.ItemDataRole.UserRole)
             if not isinstance(entry, dict):
                 continue
@@ -49,7 +82,32 @@ class SourceTreeWidget(QTreeWidget):
             mime_data.setData(SOURCE_ASSET_MIME_TYPE, "\n".join(source_paths).encode("utf-8"))
         return mime_data
 
+    def _extract_import_paths(self, event) -> list[str]:
+        mime_data = event.mimeData()
+        if mime_data is None or not mime_data.hasUrls():
+            return []
+        import_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for url in mime_data.urls():
+            if not url.isLocalFile():
+                continue
+            local_path = url.toLocalFile().strip()
+            if not local_path:
+                continue
+            path = Path(local_path)
+            if not path.exists():
+                continue
+            if path.is_dir() or path.suffix.lower() in {".wav", ".ogg", ".mp3", ".flac"}:
+                normalized = str(path)
+                path_key = normalized.casefold()
+                if path_key in seen_paths:
+                    continue
+                seen_paths.add(path_key)
+                import_paths.append(normalized)
+        return import_paths
+
     def rebuild(self, entries: list[dict[str, object]]) -> None:
+        selected_source_paths = self.selected_source_paths()
         current_source_path = self.current_source_path()
         self.blockSignals(True)
         self.clear()
@@ -102,7 +160,9 @@ class SourceTreeWidget(QTreeWidget):
         self.expandToDepth(1)
         self.blockSignals(False)
 
-        if current_source_path:
+        if selected_source_paths:
+            self.set_selected_source_paths(selected_source_paths)
+        elif current_source_path:
             self.select_source_path(current_source_path)
         else:
             self._emit_selected_source()
@@ -217,13 +277,15 @@ class SourceTreeWidget(QTreeWidget):
 
     def _normalize_entry(self, entry: dict[str, object]) -> dict[str, object]:
         source_path = str(entry.get("source_path", "")).strip()
+        audio_ids = sorted({str(value) for value in entry.get("audio_ids", []) if str(value).strip()})
         event_ids = sorted({str(value) for value in entry.get("event_ids", []) if str(value).strip()})
         asset_keys = sorted({str(value) for value in entry.get("asset_keys", []) if str(value).strip()})
         return {
             "source_path": source_path,
+            "audio_ids": audio_ids,
             "event_ids": event_ids,
             "asset_keys": asset_keys,
-            "reference_count": int(entry.get("reference_count", len(event_ids) or 0)),
+            "reference_count": int(entry.get("reference_count", len(audio_ids) or 0)),
             "missing": bool(entry.get("missing", False)),
             "unreferenced": bool(entry.get("unreferenced", False)),
         }
@@ -262,9 +324,9 @@ class SourceTreeWidget(QTreeWidget):
         fragments: list[str] = []
         reference_count = int(entry.get("reference_count", 0))
         if reference_count > 0:
-            fragments.append(f"事件 {reference_count}")
+            fragments.append(f"Audio {reference_count}")
         else:
-            fragments.append("事件 0")
+            fragments.append("Audio 0")
         if bool(entry.get("missing", False)):
             fragments.append("缺失")
         elif bool(entry.get("unreferenced", False)):
@@ -273,17 +335,19 @@ class SourceTreeWidget(QTreeWidget):
 
     def _entry_tooltip(self, entry: dict[str, object]) -> str:
         source_path = str(entry.get("source_path", "")).strip()
+        audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
         event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
         asset_keys = [str(value) for value in entry.get("asset_keys", []) if str(value).strip()]
         state_fragments: list[str] = []
         if bool(entry.get("missing", False)):
             state_fragments.append("文件缺失")
         if bool(entry.get("unreferenced", False)):
-            state_fragments.append("当前未被事件引用")
+            state_fragments.append("当前未被 Audio 引用")
         state_text = "、".join(state_fragments) if state_fragments else "状态正常"
+        audio_preview = ", ".join(audio_ids[:6]) if audio_ids else "-"
         event_preview = ", ".join(event_ids[:6]) if event_ids else "-"
         asset_preview = ", ".join(asset_keys[:6]) if asset_keys else "-"
-        return f"路径：{source_path}\n状态：{state_text}\n事件：{event_preview}\n资源键：{asset_preview}"
+        return f"路径：{source_path}\n状态：{state_text}\nAudio：{audio_preview}\nEvent：{event_preview}\n资源键：{asset_preview}"
 
     def _apply_filter_recursive(self, item: QTreeWidgetItem, query: str) -> bool:
         child_visible = False
@@ -295,6 +359,7 @@ class SourceTreeWidget(QTreeWidget):
         haystacks = [item.text(0).lower(), item.text(2).lower()]
         if isinstance(entry, dict):
             haystacks.append(str(entry.get("source_path", "")).lower())
+            haystacks.extend(str(value).lower() for value in entry.get("audio_ids", []))
             haystacks.extend(str(value).lower() for value in entry.get("event_ids", []))
             haystacks.extend(str(value).lower() for value in entry.get("asset_keys", []))
         self_match = not query or any(query in haystack for haystack in haystacks)
@@ -329,7 +394,12 @@ class SourceTreeWidget(QTreeWidget):
                 entry = item.data(0, Qt.ItemDataRole.UserRole)
                 if isinstance(entry, dict):
                     source_path = str(entry.get("source_path", "")).lower()
-                    if query in item.text(0).lower() or query in source_path or any(query in str(value).lower() for value in entry.get("event_ids", [])):
+                    if (
+                        query in item.text(0).lower()
+                        or query in source_path
+                        or any(query in str(value).lower() for value in entry.get("audio_ids", []))
+                        or any(query in str(value).lower() for value in entry.get("event_ids", []))
+                    ):
                         matches.append(item)
             for child_index in range(item.childCount()):
                 pending.append(item.child(child_index))

@@ -3,12 +3,14 @@ AudioForge Unity 端对接开发文档
 > 本文档是当前仓库面向 Unity 程序同学的唯一主对接文档。
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-05-13。
-> 当前工具版本：AudioForge 0.07.0。
+> 当前文档同步日期：2026-05-14。
+> 当前工具版本：AudioForge 0.09.0。
 
 0.1 版本增量
 
-- 2026-05-13 phase3 主链更新：当前仓库已落地 `SchemaVersion = 2`、项目级 `GameParameters / StateGroups / SwitchGroups`、事件与总线级 `RtpcBindings / StateOverrides`、事件级 `SwitchVariants`，以及 Unity runtime 的 emitter context 与 GameSync smoke。
+- 2026-05-14 0.09.0 契约更新：导出契约已升级为 `SchemaVersion = 3`，顶层正式输出 `AudioObjects`，事件只保留动作层字段和 `AudioId`，不再导出嵌套 `Audio` 或扁平镜像字段。
+- 2026-05-14 0.09.0 运行时更新：Unity runtime、JSON 适配器与全链路检查已统一改为直接消费 `AudioObjects + Events[AudioId]`；缺失 `AudioId` 或缺失目标 `AudioObject` 会被视为契约错误。
+- 2026-05-14 0.09.0 工作流更新：编辑器当前已把 Audio 树升级为一等对象面，源音频树引用统计切到“引用 Audio 数”，外部导入规则收口为事件树 / Audio 树 / 源音频树三条路径。
 - 2026-05-13 phase3 对接补充：State / Switch 当前支持子项级 child effects，导出会写出 `StateEffects` / `SwitchEffects`，Unity runtime 与 validation 已同步消费。
 - 2026-05-13 phase3 体验补充：工具端现已提供 GameSync 工作区、试听中心 GameSync 控件和 transport 风格 RTPC 调参条；这些属于 authoring / preview 层增强，但其底层字段已经进入当前运行时契约。
 - 2026-05-12 0.07.0 交付更新：包内文档与仓库主文档都新增了“一期到当前变化总览”，Unity 对接时可以先快速判断本次交付相对一期新增了什么。
@@ -35,16 +37,16 @@ AudioForge Unity 端对接开发文档
 
 0.2 相对第一期必须关注的变化
 
-- 当前相对第一期，运行时层真正需要 Unity 程序关注的不再只有 `OneShot`；当前还新增了 `SchemaVersion = 2`、项目级 Game Sync 定义、事件/总线级 Game Sync 绑定、emitter context 与 child effects。
+- 当前相对第一期，运行时层真正需要 Unity 程序关注的不再只有 `OneShot`；当前还新增了 `SchemaVersion = 3`、项目级 `AudioObjects`、项目级 Game Sync 定义、Audio/总线级 Game Sync 绑定、emitter context 与 child effects。
 - 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置；这些 editor-only 状态本身仍不会原样写进导出，但其过滤后的结果与 GameSync 绑定会进入当前 `AudioData.json`。
 - 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
 - 当前仓库附带的 Unity 参考运行时代码已经能够消费新版导出结果；如果项目内是自研 runtime，则需要同步补齐 v2 解析、Game Sync API 与 emitter 作用域。
 
 0.3 当前 GameSync 口径
 
-- 当前仓库主线已经支持 `SchemaVersion = 2`，运行时主契约不再只有 `BusConfigs` 与 `Events`，而是额外包含项目级 `GameParameters`、`StateGroups`、`SwitchGroups` 和事件/总线级 Game Sync 区块。
+- 当前仓库主线已经支持 `SchemaVersion = 3`，运行时主契约不再只有 `BusConfigs` 与 `Events`，而是额外包含项目级 `AudioObjects`、`GameParameters`、`StateGroups`、`SwitchGroups` 和 Audio/总线级 Game Sync 区块。
 - 参考 runtime 已实现 `HasGameParameter`、`HasStateGroup`、`HasSwitchGroup`、`RegisterEmitter`、`SetState`、`SetSwitch`、`SetGlobalGameParameter`、`SetGameParameter` 及对应播放求值路径。
-- 若你当前接入的仍是旧版 phase2 导出物，runtime 会继续按 `SchemaVersion = 1` 兼容初始化；若你要接当前最新包，请直接按本文档的 v2 口径实现。
+- 若你当前接入的仍是旧版 phase2 或 phase3-schema2 导出物，请继续沿用历史 SDK 包；当前最新包与本文档默认以 v3 口径实现，不再承担旧 schema 回退。
 
 0. 当前状态
 
@@ -87,7 +89,7 @@ AudioForge Unity 端对接开发文档
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
 
-2026-05-13 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 2`、Game Sync API、emitter context 和 child effects smoke。重新打包后的目录名仍为 `dist/AudioForgeUnityPackage-0.07.0/`。
+2026-05-14 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、Game Sync API、emitter context、child effects smoke，以及正式的 Event / AudioObject 职责拆层。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.09.0/`。
 
 自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
 
@@ -139,7 +141,7 @@ AudioForgeUnityPackage-<version>/
 
 如果你只是要拿仓库里的最新机器验证样例做联调，优先使用 `reports/internal_release_smoke/export/` 下的导出物，而不是把仓库根目录 `Export/` 误当成唯一基线来源。
 
-如果 Unity 同学已经拿到了之前生成的包，旧代码通常仍可继续对接；但建议至少同步阅读 0.07.0 的对接文档和一期对比总览，确认 `OneShot` 语义、有效 Clip 集合和 editor-only 边界理解一致。
+如果 Unity 同学已经拿到了之前生成的包，旧代码通常仍可继续对接；但建议至少同步阅读 0.09.0 的对接文档和一期对比总览，确认 Event / AudioObject 边界、`AudioId` 引用关系、`OneShot` 语义和有效 Clip 集合理解一致。
 
 3. 工具端与 Unity 端边界
 
@@ -234,9 +236,9 @@ AudioForgeUnityPackage-<version>/
 - `SchemaVersion`。
 - 总线列表以及可选的 `BusConfigs` 初始状态。
 - `GameParameters`、`StateGroups`、`SwitchGroups` 顶层定义。
-- 事件列表。
-- 每个事件下的 Clip 列表。
-- 事件级 `DefaultClipIds`、`RtpcBindings`、`StateOverrides`、`SwitchVariants`。
+- 事件列表，以及事件顶层 `MaxInstances`、`CooldownSeconds`、`StealPolicy`。
+- 每个事件下的 `Audio` 子对象，以及 `Audio.Clips`。
+- `Audio.DefaultClipIds`、`Audio.RtpcBindings`、`Audio.StateOverrides`、`Audio.SwitchVariants`。
 - 总线级 `RtpcBindings`、`StateOverrides`。
 - 各类播放行为参数。
 
@@ -260,12 +262,19 @@ AudioForgeUnityPackage-<version>/
 
 7. 数据字段语义
 
-7.1 Event 字段
+7.1 Event 顶层字段
 
 对多数休闲游戏项目，建议默认只使用 `BGM`、`SFX`、`UI` 三条子总线；单源、一次性触发的短音效可以直接使用 `OneShot`，多变体音效默认仍建议走 `Random`，`Sequence` 和 `Combo` 作为按需启用的进阶玩法即可。
 
 - `Id`：事件唯一标识，Unity 端主索引键。
 - `DisplayName`：仅编辑器展示，不参与运行时查找。
+- `CooldownSeconds`：事件冷却时间。
+- `MaxInstances`：活动实例上限，`0` 表示无限制。
+- `StealPolicy`：达到上限时的处理策略；第一期实际只要求 `RejectNew` 和 `StopOldest`。
+- `AudioId`：事件引用的声音层对象标识；`SchemaVersion = 3` 下 Unity 端应通过 `AudioId` 到顶层 `AudioObjects` 建立主真源映射，而不是再从事件对象内取声音配置。
+
+7.2 AudioObject 字段
+
 - `Bus`：所属总线。
 - `PlayMode`：`OneShot`、`Random`、`Sequence`、`Combo`。
 - `AvoidImmediateRepeat`：若候选 Clip 大于 1，优先排除上次命中的 Clip。
@@ -273,15 +282,12 @@ AudioForgeUnityPackage-<version>/
 - `VolumeRandMinDb`、`VolumeRandMaxDb`：随机音量范围。
 - `PitchCents`：基础音高，单位 cents。
 - `PitchRandMinCents`、`PitchRandMaxCents`：随机音高范围。
-- `CooldownSeconds`：事件冷却时间。
-- `MaxInstances`：活动实例上限，`0` 表示无限制。
-- `StealPolicy`：达到上限时的处理策略；第一期实际只要求 `RejectNew` 和 `StopOldest`。
 - `ComboPitchStepCents`：Combo 每步增加的音高。当前工具端编辑器按“半音”为单位设置，导出时仍以 cents 表达，因此该值应视为 `100` 的整数倍。
 - `ComboResetSeconds`：Combo 状态重置时间。
 - `ComboMaxStep`：Combo 最大步数，`0` 可视为无限。
 - `LoadPolicy`：字段当前保留，但第一期工具与 Unity 验证运行时固定按 `OnDemand` 工作。
 
-7.2 Clip 字段
+7.3 Clip 字段
 
 - `ClipId`：事件内唯一标识。
 - `AssetKey`：运行时资源键。
@@ -510,7 +516,7 @@ Combo 联调时请额外确认以下边界：
 - RTPC：当前已支持全局值、emitter 局部值、事件音量、事件音高和 Bus 音量；后续重点是 active voice 持续重算。
 - State：当前已支持全局模式切换、Event / Bus 属性覆盖和 State child effects；后续重点是过渡时间与插值。
 - Switch：当前已支持 emitter 级分支选择、RTPC 映射阈值、事件变体选片和 Switch child effects；后续重点是更复杂的容器层级。
-- 当前包已经进入 `SchemaVersion = 2` 与显式 v1 兼容逻辑并存阶段；如果项目内仍维护自研 runtime，请优先同步这套兼容路径。
+- 当前包已经正式切到 `SchemaVersion = 3` 单一路径；如果项目内仍维护自研 runtime，请优先同步 `AudioObjects + Events[AudioId]` 解析链，而不是继续依赖旧 schema 兼容。
 - 对当前 0.07.0 包而言，这一节不再只是路线图，而是说明“已落地能力之外还剩什么没有做完”。
 
 补充说明：若 Unity 端本阶段仍采用原生 `AudioSource.pitch` 执行音高变化，则“音高变化是否保时长”不计入第一期最小验收失败项，但需在联调记录中明确标注。

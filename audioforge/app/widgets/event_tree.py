@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem
 
@@ -31,13 +31,13 @@ class EventTreeWidget(QTreeWidget):
     nodesSelectionChanged = Signal(list)
     nodeMoved = Signal(str, str, object, int)
     audioFilesDropped = Signal(list, object)
-    sourceAssetsDroppedToEvent = Signal(list, str)
-    eventBindingsPopupRequested = Signal(str, QPoint)
+    sourceAssetsDroppedToAudio = Signal(list, str)
+    eventAudioRequested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._analysis_status: dict[str, dict[str, str]] = {}
-        self._suppress_event_bindings_popup = False
+        self._suppress_audio_bindings_popup = False
         self.setColumnCount(3)
         self.setHeaderLabels(["名称", "类型", "内容"])
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -71,23 +71,25 @@ class EventTreeWidget(QTreeWidget):
         super().dragMoveEvent(event)
 
     def rebuild(self, project: AudioProject) -> None:
-        self._suppress_event_bindings_popup = True
+        self._suppress_audio_bindings_popup = True
+        signal_blocker = QSignalBlocker(self)
         self.clear()
         for folder_id in project.root_folder_ids:
             folder_item = self._build_folder_item(project, folder_id, is_root=True)
             self.addTopLevelItem(folder_item)
         self._expand_folder_items()
-        self._suppress_event_bindings_popup = False
+        del signal_blocker
+        self._suppress_audio_bindings_popup = False
 
     def set_analysis_status(self, status_map: dict[str, dict[str, str]]) -> None:
         self._analysis_status = dict(status_map)
         for root_index in range(self.topLevelItemCount()):
             self._apply_status_recursive(self.topLevelItem(root_index))
 
-    def select_node(self, node_type: str, node_id: str) -> None:
-        self.select_nodes([(node_type, node_id)], current_node=(node_type, node_id))
+    def select_node(self, node_type: str, node_id: str, *, emit_signal: bool = True) -> None:
+        self.select_nodes([(node_type, node_id)], current_node=(node_type, node_id), emit_signal=emit_signal)
 
-    def select_nodes(self, nodes: list[tuple[str, str]], current_node: tuple[str, str] | None = None) -> None:
+    def select_nodes(self, nodes: list[tuple[str, str]], current_node: tuple[str, str] | None = None, *, emit_signal: bool = True) -> None:
         resolved_items: list[QTreeWidgetItem] = []
         seen: set[tuple[str, str]] = set()
         for node_type, node_id in nodes:
@@ -119,7 +121,8 @@ class EventTreeWidget(QTreeWidget):
             item.setSelected(True)
         self.scrollToItem(current_item)
         self.blockSignals(False)
-        self._emit_selected_event()
+        if emit_signal:
+            self._emit_selected_event()
 
     def rename_node_label(self, node_type: str, node_id: str, new_label: str) -> None:
         item = self._find_item(node_type, node_id)
@@ -133,9 +136,9 @@ class EventTreeWidget(QTreeWidget):
             self._apply_filter_recursive(item, normalized)
 
         if normalized:
-            self._suppress_event_bindings_popup = True
+            self._suppress_audio_bindings_popup = True
             self._expand_folder_items()
-            self._suppress_event_bindings_popup = False
+            self._suppress_audio_bindings_popup = False
 
     def selected_payloads(self) -> list[tuple[str, str]]:
         payloads: list[tuple[str, str]] = []
@@ -220,18 +223,17 @@ class EventTreeWidget(QTreeWidget):
         return item
 
     def _handle_item_expanded(self, item: QTreeWidgetItem) -> None:
-        if self._suppress_event_bindings_popup:
+        if self._suppress_audio_bindings_popup:
             return
         payload = item.data(0, Qt.ItemDataRole.UserRole)
         if payload is None or str(payload[0]) != "event":
             return
 
-        self._suppress_event_bindings_popup = True
+        self._suppress_audio_bindings_popup = True
         self.collapseItem(item)
-        self._suppress_event_bindings_popup = False
-        anchor = self.visualItemRect(item).topRight()
-        global_pos = self.viewport().mapToGlobal(anchor)
-        self.eventBindingsPopupRequested.emit(str(payload[1]), global_pos)
+        self._suppress_audio_bindings_popup = False
+        event_id = str(payload[1])
+        self.eventAudioRequested.emit(event_id)
 
     def _apply_status_recursive(self, item: QTreeWidgetItem) -> None:
         payload = item.data(0, Qt.ItemDataRole.UserRole)
@@ -287,7 +289,7 @@ class EventTreeWidget(QTreeWidget):
         if source_asset_paths:
             target_event_id = self._resolve_drop_target_event_id(self._event_position_point(event))
             if target_event_id is not None:
-                self.sourceAssetsDroppedToEvent.emit(source_asset_paths, target_event_id)
+                self.sourceAssetsDroppedToAudio.emit(source_asset_paths, target_event_id)
                 event.acceptProposedAction()
             return
 

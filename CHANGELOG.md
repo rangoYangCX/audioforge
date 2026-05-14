@@ -8,9 +8,39 @@
 - 每个版本至少记录：新增能力、行为变化、修复项、验证结果。
 - Git 提交负责记录实现细节；本文件负责回答“这一版具体给用户带来了什么变化”。
 
-当前已补录的版本范围：0.03 - 0.07.0，并使用 `Unreleased` 记录尚未单独发版的维护更新。
+当前已补录的版本范围：0.03 - 0.09.0，并使用 `Unreleased` 记录尚未单独发版的维护更新。
 
 ## [Unreleased]
+
+- 暂无未发布变更。
+
+## [0.09.0] - 2026-05-14
+
+### Added
+
+- 项目级 `AudioObject` 正式进入主模型，Audio 树、Audio 引用关系和 Audio 级导入路径成为编辑器一等工作流。
+- 导出契约正式升级为 `SchemaVersion = 3`，新增顶层 `AudioObjects`，并把事件与声音层关系固化为 `Events[AudioId]`。
+- Unity runtime、JSON 适配器与全链路检查已接入 `AudioObjects + Events[AudioId]` 解析链，并新增针对缺失 `AudioId`、缺失 `AudioObject` 的契约错误校验。
+- Bus 混音台工作区新增三分页结构，并把“当前 Bus”再细拆成“路由 / 电平与导出”二级页签，缓解总线编辑页拥挤问题。
+
+### Changed
+
+- Event 不再承载 Bus、PlayMode、Clips、GameSync 绑定或其他声音属性，只保留触发行为和 `AudioId` 引用。
+- Source browser 的引用统计与未引用资源语义已切换到 Audio Object 口径，导入矩阵同步收口为事件树 / Audio 树 / 源音频树三条规则。
+- Unity SDK 对接文档、README、开发文档、包内说明与 release note 已统一刷新到 0.09.0 和 Schema 3 口径。
+- 版本锚点已统一刷新到 0.09.0，包括 `APP_VERSION`、`pyproject.toml`、README、CHANGELOG、开发文档、Unity 对接文档、包内说明和 release note。
+
+### Fixed
+
+- 修复在 `SFX` 下新建子 Bus 后继续切换浏览时误弹“父 Bus 非法”的状态串扰问题。
+- 修复 Bus 混音台在单页堆叠下过于拥挤、布局快照无法准确反映当前总线编辑面的可用性问题。
+
+### Validation
+
+- `pytest tests/unit/test_main_controller_layout.py tests/unit/test_event_tree_widget.py tests/unit/test_exporter.py tests/unit/test_full_chain_check.py tests/unit/test_project_serializer.py`：112 项通过。
+- Python / Qt 侧相关文件编辑器诊断：无错误。
+
+## [0.08.0] - 2026-05-13
 
 ### Added
 
@@ -18,23 +48,29 @@
 - 新增项目级 `GameParameters`、`StateGroups`、`SwitchGroups`，以及事件/总线级 `RtpcBindings`、`StateOverrides`、事件级 `SwitchVariants` 与 `DefaultClipIds`。
 - 新增 GameSync 工作区、事件/总线绑定编辑器、State / Switch 子项 child effects 编辑、RTPC 图形曲线编辑器，以及试听中心内嵌 GameSync 控件与 transport 风格 RTPC 调参条。
 - Unity runtime 新增 emitter context、`SetGlobalGameParameter` / `SetGameParameter` / `SetState` / `SetSwitch` API、Switch Variant 选片、Bus GameSync 求值与 child effects smoke。
+- 事件 payload 新增嵌套 `Audio` 对象，并把 `Bus`、`PlayMode`、`AvoidImmediateRepeat`、音量/音高、Combo、Clips 与 GameSync 绑定正式收拢到音频层。
 
 ### Changed
 
 - `SchemaVersion` 从 1 升级到 2，并保留 v1 payload 兼容初始化路径。
 - StateGroup / SwitchGroup 在保留 names list 的同时新增 `state_effects` / `switch_effects`，兼容旧工程并让子项效果能贯穿 authoring、preview、exporter 与 Unity runtime。
 - Unity SDK 对接文档、README、开发文档和包内 Quick Start 已同步改为当前 v2 契约口径，不再把 phase3 描述为“仅规划中”。
+- 事件设计页视觉结构改为“事件元数据 / 播放控制 / Audio 属性 / Audio 调制”，并把 `AvoidImmediateRepeat` 从播放控制移到 Audio 层展示。
+- `tools/run_full_chain_check.py` 现强校验 `SchemaVersion = 2` 事件必须带嵌套 `Audio`，且扁平镜像字段必须与 `Audio` 保持一致。
+- 版本锚点已统一刷新到 0.08.0，包括 `APP_VERSION`、`pyproject.toml`、README、CHANGELOG、开发文档、Unity 对接文档、包内说明和 release note。
 
 ### Fixed
 
 - 修复 GameSync 页面在新建参数、State 或 Switch 等操作后回跳概览页的问题，导航状态现在会保留 `gamesync_workspace_tab`。
 - 修复试听中心 RTPC 参数条对负数范围支持不完整的问题，当前已按参数定义范围驱动 spin 与 slider。
+- 修复“声音属性已经下沉到模型层，但事件设计页与发布态契约检查仍按旧事件层认知展示”的交付错位问题。
 
 ### Validation
 
 - `pytest tests/unit/test_project_serializer.py tests/unit/test_exporter.py tests/unit/test_preview_service.py tests/unit/test_main_controller_layout.py -k "gamesync or preview_current_event_uses_preview_gamesync_context or preview_gamesync_change_retriggers_current_event_audition or preview_gamesync_parameter_editor_supports_negative_ranges or rtpc_curve_editor_uses_parameter_and_target_ranges"`：25 项通过。
 - `pytest tests/unit/test_main_controller_layout.py -k "navigation_state_restores_gamesync_workspace_tab"`：1 项通过。
 - Unity package 与 unity_validation 关键 C# 文件编辑器诊断：无错误。
+- `pytest tests/unit/test_full_chain_check.py tests/unit/test_main_controller_layout.py -k "full_chain or preview_current_event_uses_preview_gamesync_context or preview_gamesync_change_retriggers_current_event_audition or selecting_folder_does_not_reset_active_property_tab or switching_from_contents_to_property_editor_keeps_clip_edit_stable"`：8 项通过。
 
 ## [0.07.0] - 2026-05-12
 

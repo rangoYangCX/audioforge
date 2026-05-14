@@ -121,13 +121,14 @@ public sealed class AudioForgeSwitchGroupConfig
 }
 
 /// <summary>
-/// 单个事件的运行时配置。
-/// 参考运行时只消费导出数据，不读取 .afproj。
+/// 项目级 Audio Object 配置。
+/// 事件只通过 AudioId 引用这里的对象。
 /// </summary>
 [Serializable]
-public sealed class AudioForgeEventConfig
+public sealed class AudioForgeAudioObjectConfig
 {
-    public string EventId;
+    public string AudioId;
+    public string DisplayName;
     public string Bus;
     public string PlayMode;
     public bool AvoidImmediateRepeat;
@@ -137,9 +138,6 @@ public sealed class AudioForgeEventConfig
     public int PitchCents;
     public int PitchRandMinCents;
     public int PitchRandMaxCents;
-    public int MaxInstances;
-    public float CooldownSeconds;
-    public string StealPolicy;
     public string LoadPolicy;
     public int ComboPitchStepCents;
     public float ComboResetSeconds;
@@ -149,6 +147,229 @@ public sealed class AudioForgeEventConfig
     public List<AudioForgeRtpcBindingConfig> RtpcBindings = new List<AudioForgeRtpcBindingConfig>();
     public List<AudioForgeStateOverrideConfig> StateOverrides = new List<AudioForgeStateOverrideConfig>();
     public List<AudioForgeSwitchVariantConfig> SwitchVariants = new List<AudioForgeSwitchVariantConfig>();
+}
+
+/// <summary>
+/// 单个事件的运行时配置。
+/// 参考运行时只消费导出数据，不读取 .afproj。
+/// </summary>
+[Serializable]
+public sealed class AudioForgeEventConfig
+{
+    public string EventId;
+    public int MaxInstances;
+    public float CooldownSeconds;
+    public string StealPolicy;
+    public string AudioId;
+    public AudioForgeAudioObjectConfig Audio = new AudioForgeAudioObjectConfig();
+
+    public string Bus
+    {
+        get { return Audio != null ? Audio.Bus : string.Empty; }
+        set
+        {
+            EnsureAudio();
+            Audio.Bus = value;
+        }
+    }
+
+    public string PlayMode
+    {
+        get { return Audio != null ? Audio.PlayMode : string.Empty; }
+        set
+        {
+            EnsureAudio();
+            Audio.PlayMode = value;
+        }
+    }
+
+    public bool AvoidImmediateRepeat
+    {
+        get { return Audio != null && Audio.AvoidImmediateRepeat; }
+        set
+        {
+            EnsureAudio();
+            Audio.AvoidImmediateRepeat = value;
+        }
+    }
+
+    public float VolumeDb
+    {
+        get { return Audio != null ? Audio.VolumeDb : 0f; }
+        set
+        {
+            EnsureAudio();
+            Audio.VolumeDb = value;
+        }
+    }
+
+    public float VolumeRandMinDb
+    {
+        get { return Audio != null ? Audio.VolumeRandMinDb : 0f; }
+        set
+        {
+            EnsureAudio();
+            Audio.VolumeRandMinDb = value;
+        }
+    }
+
+    public float VolumeRandMaxDb
+    {
+        get { return Audio != null ? Audio.VolumeRandMaxDb : 0f; }
+        set
+        {
+            EnsureAudio();
+            Audio.VolumeRandMaxDb = value;
+        }
+    }
+
+    public int PitchCents
+    {
+        get { return Audio != null ? Audio.PitchCents : 0; }
+        set
+        {
+            EnsureAudio();
+            Audio.PitchCents = value;
+        }
+    }
+
+    public int PitchRandMinCents
+    {
+        get { return Audio != null ? Audio.PitchRandMinCents : 0; }
+        set
+        {
+            EnsureAudio();
+            Audio.PitchRandMinCents = value;
+        }
+    }
+
+    public int PitchRandMaxCents
+    {
+        get { return Audio != null ? Audio.PitchRandMaxCents : 0; }
+        set
+        {
+            EnsureAudio();
+            Audio.PitchRandMaxCents = value;
+        }
+    }
+
+    public string LoadPolicy
+    {
+        get { return Audio != null ? Audio.LoadPolicy : string.Empty; }
+        set
+        {
+            EnsureAudio();
+            Audio.LoadPolicy = value;
+        }
+    }
+
+    public int ComboPitchStepCents
+    {
+        get { return Audio != null ? Audio.ComboPitchStepCents : 0; }
+        set
+        {
+            EnsureAudio();
+            Audio.ComboPitchStepCents = value;
+        }
+    }
+
+    public float ComboResetSeconds
+    {
+        get { return Audio != null ? Audio.ComboResetSeconds : 0f; }
+        set
+        {
+            EnsureAudio();
+            Audio.ComboResetSeconds = value;
+        }
+    }
+
+    public int ComboMaxStep
+    {
+        get { return Audio != null ? Audio.ComboMaxStep : 0; }
+        set
+        {
+            EnsureAudio();
+            Audio.ComboMaxStep = value;
+        }
+    }
+
+    public List<string> DefaultClipIds
+    {
+        get
+        {
+            EnsureAudio();
+            return Audio.DefaultClipIds;
+        }
+        set
+        {
+            EnsureAudio();
+            Audio.DefaultClipIds = value ?? new List<string>();
+        }
+    }
+
+    public List<AudioForgeClipConfig> Clips
+    {
+        get
+        {
+            EnsureAudio();
+            return Audio.Clips;
+        }
+        set
+        {
+            EnsureAudio();
+            Audio.Clips = value ?? new List<AudioForgeClipConfig>();
+        }
+    }
+
+    public List<AudioForgeRtpcBindingConfig> RtpcBindings
+    {
+        get
+        {
+            EnsureAudio();
+            return Audio.RtpcBindings;
+        }
+        set
+        {
+            EnsureAudio();
+            Audio.RtpcBindings = value ?? new List<AudioForgeRtpcBindingConfig>();
+        }
+    }
+
+    public List<AudioForgeStateOverrideConfig> StateOverrides
+    {
+        get
+        {
+            EnsureAudio();
+            return Audio.StateOverrides;
+        }
+        set
+        {
+            EnsureAudio();
+            Audio.StateOverrides = value ?? new List<AudioForgeStateOverrideConfig>();
+        }
+    }
+
+    public List<AudioForgeSwitchVariantConfig> SwitchVariants
+    {
+        get
+        {
+            EnsureAudio();
+            return Audio.SwitchVariants;
+        }
+        set
+        {
+            EnsureAudio();
+            Audio.SwitchVariants = value ?? new List<AudioForgeSwitchVariantConfig>();
+        }
+    }
+
+    private void EnsureAudio()
+    {
+        if (Audio == null)
+        {
+            Audio = new AudioForgeAudioObjectConfig();
+        }
+    }
 }
 
 /// <summary>
@@ -165,6 +386,7 @@ public sealed class AudioForgeDatabase
     public List<AudioForgeGameParameterConfig> GameParameters = new List<AudioForgeGameParameterConfig>();
     public List<AudioForgeStateGroupConfig> StateGroups = new List<AudioForgeStateGroupConfig>();
     public List<AudioForgeSwitchGroupConfig> SwitchGroups = new List<AudioForgeSwitchGroupConfig>();
+    public List<AudioForgeAudioObjectConfig> AudioObjects = new List<AudioForgeAudioObjectConfig>();
     public List<AudioForgeEventConfig> Events = new List<AudioForgeEventConfig>();
 }
 

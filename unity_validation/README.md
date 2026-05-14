@@ -3,11 +3,11 @@
 > 本文档只负责说明 Unity 空项目验证步骤。
 > SDK 对接边界、运行时契约、字段语义、接入建议与验收标准，统一以 `docs/UnitySDK对接规范.md` 为准；后续不在本文档中维护并行版本的详细对接说明。
 
-> 当前文档同步日期：2026-05-11。
+> 当前文档同步日期：2026-05-14。
 
 ## 当前验证状态
 
-- 当前仓库内最近一次基线验证结果：`pytest` 87 项通过。
+- 当前仓库内最近一次基线验证结果：`pytest` 112 项通过。
 - 真实 WAV 烟雾工程验证结果：PASS。
 - 最近一次全链路检查结果：4/4 通过，覆盖 `pytest`、导出 bundle、运行时契约、Unity 集成包完整性。
 - 最新机器报告位于 `reports/internal_release_smoke/checks/full_chain_report.md`，最新签收摘要位于 `reports/internal_release_smoke/release_signoff.md`。

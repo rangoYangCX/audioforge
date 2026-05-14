@@ -225,34 +225,38 @@ class RuntimeExporter:
             if group.name.strip()
         ]
 
-    def _event_runtime_clips(self, event: EventModel) -> list[ClipModel]:
-        default_clips = effective_event_clips(event)
+    def _audio_runtime_clips(self, audio) -> list[ClipModel]:
+        audio_event = EventModel(id=f"audio_runtime__{audio.id}", audio=audio)
+        default_clips = effective_event_clips(audio_event)
         default_ids = [clip.id for clip in default_clips]
-        variant_ids = [clip_id for variant in event.switch_variants for clip_id in variant.clip_ids]
+        variant_ids = [clip_id for variant in audio.switch_variants for clip_id in variant.clip_ids]
         if not variant_ids:
             return default_clips
-        id_to_clip = {clip.id: clip for clip in event.clips}
+        id_to_clip = {clip.id: clip for clip in audio.clips}
         ordered_ids: list[str] = []
         for clip_id in [*default_ids, *variant_ids]:
             if clip_id in id_to_clip and clip_id not in ordered_ids:
                 ordered_ids.append(clip_id)
         return [id_to_clip[clip_id] for clip_id in ordered_ids]
 
-    def _serialize_event_payload(self, event: EventModel) -> dict[str, object]:
-        runtime_clips = self._event_runtime_clips(event)
+    def _event_runtime_clips(self, event: EventModel) -> list[ClipModel]:
+        return self._audio_runtime_clips(event.audio)
+
+    def _serialize_audio_object_payload(self, event: EventModel) -> dict[str, object]:
+        audio = event.audio
+        runtime_clips = self._audio_runtime_clips(audio)
         default_clips = effective_event_clips(event)
         payload: dict[str, object] = {
-            "Bus": event.bus,
-            "PlayMode": event.play_mode,
-            "AvoidImmediateRepeat": event.avoid_immediate_repeat,
-            "VolumeDb": event.volume_db,
-            "VolumeRandDb": [event.volume_rand_min_db, event.volume_rand_max_db],
-            "PitchCents": event.pitch_cents,
-            "PitchRandCents": [event.pitch_rand_min_cents, event.pitch_rand_max_cents],
-            "MaxInstances": event.max_instances,
-            "CooldownSeconds": event.cooldown_seconds,
-            "StealPolicy": event.steal_policy,
-            "LoadPolicy": event.load_policy,
+            "AudioId": audio.id,
+            "DisplayName": audio.display_name,
+            "Bus": audio.bus,
+            "PlayMode": audio.play_mode,
+            "AvoidImmediateRepeat": audio.avoid_immediate_repeat,
+            "VolumeDb": audio.volume_db,
+            "VolumeRandDb": [audio.volume_rand_min_db, audio.volume_rand_max_db],
+            "PitchCents": audio.pitch_cents,
+            "PitchRandCents": [audio.pitch_rand_min_cents, audio.pitch_rand_max_cents],
+            "LoadPolicy": audio.load_policy,
             "DefaultClipIds": [clip.id for clip in default_clips],
             "Clips": [
                 {
@@ -268,15 +272,23 @@ class RuntimeExporter:
                 }
                 for clip in runtime_clips
             ],
-            "RtpcBindings": self._serialize_rtpc_bindings(event.rtpc_bindings),
-            "StateOverrides": self._serialize_state_overrides(event.state_overrides),
-            "SwitchVariants": self._serialize_switch_variants(event.switch_variants),
+            "RtpcBindings": self._serialize_rtpc_bindings(audio.rtpc_bindings),
+            "StateOverrides": self._serialize_state_overrides(audio.state_overrides),
+            "SwitchVariants": self._serialize_switch_variants(audio.switch_variants),
         }
-        if event.play_mode == "Combo":
-            payload["ComboPitchStepCents"] = event.combo_pitch_step_cents
-            payload["ComboResetSeconds"] = event.combo_reset_seconds
-            payload["ComboMaxStep"] = event.combo_max_step
+        if audio.play_mode == "Combo":
+            payload["ComboPitchStepCents"] = audio.combo_pitch_step_cents
+            payload["ComboResetSeconds"] = audio.combo_reset_seconds
+            payload["ComboMaxStep"] = audio.combo_max_step
         return payload
+
+    def _serialize_event_payload(self, event: EventModel) -> dict[str, object]:
+        return {
+            "MaxInstances": event.max_instances,
+            "CooldownSeconds": event.cooldown_seconds,
+            "StealPolicy": event.steal_policy,
+            "AudioId": event.audio.id,
+        }
 
     def export(
         self,
@@ -342,6 +354,7 @@ class RuntimeExporter:
         current_asset_entries = self._collect_asset_entries(project)
         current_manifest_assets = self._build_manifest_payload(current_asset_entries).get("Assets", [])
         current_event_map = dict(current_runtime_payload.get("Events", {}))
+        current_audio_object_map = dict(current_runtime_payload.get("AudioObjects", {}))
         current_asset_map = {str(asset.get("AssetKey", "")): asset for asset in current_manifest_assets}
 
         previous_manifest_payload = self._load_json_if_exists(export_root / DEFAULT_AUDIO_MANIFEST_FILENAME)
@@ -351,14 +364,23 @@ class RuntimeExporter:
             for asset in (previous_manifest_payload or {}).get("Assets", [])
         }
         previous_event_map = dict((previous_runtime_payload or {}).get("Events", {}))
+        previous_audio_object_map = dict((previous_runtime_payload or {}).get("AudioObjects", {}))
         previous_assets_dir = export_root / DEFAULT_EXPORT_ASSETS_DIRNAME
+
+        def event_signature(event_id: str, event_map: dict[str, object], audio_map: dict[str, object]) -> tuple[object, object]:
+            event_payload = event_map.get(event_id)
+            audio_id = ""
+            if isinstance(event_payload, dict):
+                audio_id = str(event_payload.get("AudioId", ""))
+            return event_payload, audio_map.get(audio_id)
 
         added_event_ids = sorted(set(current_event_map) - set(previous_event_map))
         removed_event_ids = sorted(set(previous_event_map) - set(current_event_map))
         changed_event_ids = sorted(
             event_id
             for event_id in set(current_event_map) & set(previous_event_map)
-            if current_event_map[event_id] != previous_event_map[event_id]
+            if event_signature(event_id, current_event_map, current_audio_object_map)
+            != event_signature(event_id, previous_event_map, previous_audio_object_map)
         )
 
         added_asset_keys = sorted(set(current_asset_map) - set(previous_asset_map))
@@ -518,6 +540,12 @@ class RuntimeExporter:
             event = project.events[event_id]
             events[event_id] = self._serialize_event_payload(event)
 
+        audio_objects: dict[str, object] = {}
+        for event_id in sorted(project.events):
+            event = project.events[event_id]
+            if event.audio.id not in audio_objects:
+                audio_objects[event.audio.id] = self._serialize_audio_object_payload(event)
+
         return {
             "SchemaVersion": SCHEMA_VERSION,
             "GeneratedAt": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -535,6 +563,7 @@ class RuntimeExporter:
             "GameParameters": self._serialize_game_parameters(project),
             "StateGroups": self._serialize_state_groups(project),
             "SwitchGroups": self._serialize_switch_groups(project),
+            "AudioObjects": audio_objects,
             "Events": events,
         }
 
@@ -578,7 +607,7 @@ class RuntimeExporter:
             "ProjectVersion": project.project_version,
             "SchemaVersion": SCHEMA_VERSION,
             "EventCount": len(project.events),
-            "ClipCount": sum(len(self._event_runtime_clips(event)) for event in project.events.values()),
+            "ClipCount": sum(len(self._audio_runtime_clips(audio)) for audio in project.audio_objects.values()),
             "ErrorCount": sum(1 for issue in issues if issue.severity == "Error"),
             "WarningCount": sum(1 for issue in issues if issue.severity == "Warning"),
             "ExportedFiles": [path.name for path in exported_files],

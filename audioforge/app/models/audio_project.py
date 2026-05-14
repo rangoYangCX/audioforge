@@ -329,9 +329,80 @@ class SwitchGroupModel:
         }
 
 
+def _coerce_clips(values: list[object] | None) -> list[ClipModel]:
+    clips: list[ClipModel] = []
+    for raw_value in values or []:
+        if isinstance(raw_value, ClipModel):
+            clips.append(raw_value)
+            continue
+        if isinstance(raw_value, dict):
+            clips.append(ClipModel(**raw_value))
+    return clips
+
+
+def _coerce_rtpc_bindings(values: list[object] | None) -> list[RtpcBindingModel]:
+    bindings: list[RtpcBindingModel] = []
+    for raw_value in values or []:
+        if isinstance(raw_value, RtpcBindingModel):
+            bindings.append(raw_value)
+            continue
+        if not isinstance(raw_value, dict):
+            continue
+        bindings.append(
+            RtpcBindingModel(
+                parameter_name=str(raw_value.get("parameter_name", "")).strip(),
+                target=str(raw_value.get("target", "EventVolumeDb")).strip(),
+                scope=str(raw_value.get("scope", "Global")).strip(),
+                curve_points=_coerce_curve_points(list(raw_value.get("curve_points", []))),
+                notes=str(raw_value.get("notes", "")),
+            )
+        )
+    return bindings
+
+
+def _coerce_state_overrides(values: list[object] | None) -> list[StateOverrideModel]:
+    overrides: list[StateOverrideModel] = []
+    for raw_value in values or []:
+        if isinstance(raw_value, StateOverrideModel):
+            overrides.append(raw_value)
+            continue
+        if not isinstance(raw_value, dict):
+            continue
+        overrides.append(
+            StateOverrideModel(
+                group_name=str(raw_value.get("group_name", "")).strip(),
+                state_name=str(raw_value.get("state_name", "")).strip(),
+                volume_db=float(raw_value.get("volume_db", 0.0)),
+                pitch_cents=int(raw_value.get("pitch_cents", 0)),
+                is_muted=bool(raw_value.get("is_muted", False)),
+                notes=str(raw_value.get("notes", "")),
+            )
+        )
+    return overrides
+
+
+def _coerce_switch_variants(values: list[object] | None) -> list[SwitchVariantModel]:
+    variants: list[SwitchVariantModel] = []
+    for raw_value in values or []:
+        if isinstance(raw_value, SwitchVariantModel):
+            variants.append(raw_value)
+            continue
+        if not isinstance(raw_value, dict):
+            continue
+        variants.append(
+            SwitchVariantModel(
+                group_name=str(raw_value.get("group_name", "")).strip(),
+                switch_name=str(raw_value.get("switch_name", "")).strip(),
+                clip_ids=[str(value) for value in raw_value.get("clip_ids", [])],
+                notes=str(raw_value.get("notes", "")),
+            )
+        )
+    return variants
+
+
 @dataclass(slots=True)
-class EventModel:
-    id: str
+class AudioObjectModel:
+    id: str = ""
     display_name: str = ""
     bus: str = "SFX"
     play_mode: PlayMode = "Random"
@@ -342,9 +413,6 @@ class EventModel:
     pitch_cents: int = 0
     pitch_rand_min_cents: int = 0
     pitch_rand_max_cents: int = 0
-    max_instances: int = 0
-    cooldown_seconds: float = 0.0
-    steal_policy: StealPolicy = "RejectNew"
     combo_pitch_step_cents: int = 100
     combo_reset_seconds: float = 1.5
     combo_max_step: int = 0
@@ -353,48 +421,305 @@ class EventModel:
     rtpc_bindings: list[RtpcBindingModel] = field(default_factory=list)
     state_overrides: list[StateOverrideModel] = field(default_factory=list)
     switch_variants: list[SwitchVariantModel] = field(default_factory=list)
-    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.id = str(self.id).strip() or new_id("audio")
+        self.display_name = str(self.display_name).strip() or self.id
+        self.bus = str(self.bus).strip() or "SFX"
+        self.play_mode = str(self.play_mode or "Random")
+        self.avoid_immediate_repeat = bool(self.avoid_immediate_repeat)
+        self.volume_db = float(self.volume_db)
+        self.volume_rand_min_db = float(self.volume_rand_min_db)
+        self.volume_rand_max_db = float(self.volume_rand_max_db)
+        self.pitch_cents = int(self.pitch_cents)
+        self.pitch_rand_min_cents = int(self.pitch_rand_min_cents)
+        self.pitch_rand_max_cents = int(self.pitch_rand_max_cents)
+        self.combo_pitch_step_cents = int(self.combo_pitch_step_cents)
+        self.combo_reset_seconds = float(self.combo_reset_seconds)
+        self.combo_max_step = int(self.combo_max_step)
+        self.load_policy = str(self.load_policy or "OnDemand")
+        self.clips = _coerce_clips(list(self.clips))
+        self.rtpc_bindings = _coerce_rtpc_bindings(list(self.rtpc_bindings))
+        self.state_overrides = _coerce_state_overrides(list(self.state_overrides))
+        self.switch_variants = _coerce_switch_variants(list(self.switch_variants))
 
     def to_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload["clips"] = [clip.to_dict() for clip in self.clips]
-        payload["rtpc_bindings"] = [binding.to_dict() for binding in self.rtpc_bindings]
-        payload["state_overrides"] = [override.to_dict() for override in self.state_overrides]
-        payload["switch_variants"] = [variant.to_dict() for variant in self.switch_variants]
-        return payload
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "bus": self.bus,
+            "play_mode": self.play_mode,
+            "avoid_immediate_repeat": self.avoid_immediate_repeat,
+            "volume_db": self.volume_db,
+            "volume_rand_min_db": self.volume_rand_min_db,
+            "volume_rand_max_db": self.volume_rand_max_db,
+            "pitch_cents": self.pitch_cents,
+            "pitch_rand_min_cents": self.pitch_rand_min_cents,
+            "pitch_rand_max_cents": self.pitch_rand_max_cents,
+            "combo_pitch_step_cents": self.combo_pitch_step_cents,
+            "combo_reset_seconds": self.combo_reset_seconds,
+            "combo_max_step": self.combo_max_step,
+            "load_policy": self.load_policy,
+            "clips": [clip.to_dict() for clip in self.clips],
+            "rtpc_bindings": [binding.to_dict() for binding in self.rtpc_bindings],
+            "state_overrides": [override.to_dict() for override in self.state_overrides],
+            "switch_variants": [variant.to_dict() for variant in self.switch_variants],
+        }
+
+
+EventAudioModel = AudioObjectModel
+
+
+@dataclass(slots=True, init=False)
+class EventModel:
+    id: str
+    display_name: str
+    max_instances: int
+    cooldown_seconds: float
+    steal_policy: StealPolicy
+    notes: str
+    audio_id: str
+    audio: AudioObjectModel
+
+    def __init__(
+        self,
+        id: str,
+        display_name: str = "",
+        max_instances: int = 0,
+        cooldown_seconds: float = 0.0,
+        steal_policy: StealPolicy = "RejectNew",
+        notes: str = "",
+        audio_id: str = "",
+        audio_display_name: str = "",
+        audio: AudioObjectModel | dict[str, Any] | None = None,
+        **legacy_audio_fields: Any,
+    ) -> None:
+        audio_payload = dict(audio) if isinstance(audio, dict) else {}
+
+        def _audio_value(name: str, default: Any) -> Any:
+            if name in audio_payload:
+                return audio_payload[name]
+            return legacy_audio_fields.pop(name, default)
+
+        self.id = id
+        self.display_name = display_name
+        self.max_instances = int(max_instances)
+        self.cooldown_seconds = float(cooldown_seconds)
+        self.steal_policy = str(steal_policy or "RejectNew")
+        self.notes = str(notes)
+        if isinstance(audio, AudioObjectModel):
+            resolved_audio = audio
+            if str(audio_id).strip():
+                resolved_audio.id = str(audio_id).strip()
+            if str(audio_display_name).strip():
+                resolved_audio.display_name = str(audio_display_name).strip()
+        else:
+            default_audio_id = str(audio_payload.get("id", audio_id)).strip() or new_id("audio")
+            default_audio_name = str(audio_payload.get("display_name", audio_display_name)).strip() or f"{display_name or id} Audio"
+            resolved_audio = AudioObjectModel(
+                id=default_audio_id,
+                display_name=default_audio_name,
+                bus=str(_audio_value("bus", "SFX") or "SFX"),
+                play_mode=str(_audio_value("play_mode", "Random") or "Random"),
+                avoid_immediate_repeat=bool(_audio_value("avoid_immediate_repeat", False)),
+                volume_db=float(_audio_value("volume_db", 0.0)),
+                volume_rand_min_db=float(_audio_value("volume_rand_min_db", 0.0)),
+                volume_rand_max_db=float(_audio_value("volume_rand_max_db", 0.0)),
+                pitch_cents=int(_audio_value("pitch_cents", 0)),
+                pitch_rand_min_cents=int(_audio_value("pitch_rand_min_cents", 0)),
+                pitch_rand_max_cents=int(_audio_value("pitch_rand_max_cents", 0)),
+                combo_pitch_step_cents=int(_audio_value("combo_pitch_step_cents", 100)),
+                combo_reset_seconds=float(_audio_value("combo_reset_seconds", 1.5)),
+                combo_max_step=int(_audio_value("combo_max_step", 0)),
+                load_policy=str(_audio_value("load_policy", "OnDemand") or "OnDemand"),
+                clips=_coerce_clips(_audio_value("clips", [])),
+                rtpc_bindings=_coerce_rtpc_bindings(_audio_value("rtpc_bindings", [])),
+                state_overrides=_coerce_state_overrides(_audio_value("state_overrides", [])),
+                switch_variants=_coerce_switch_variants(_audio_value("switch_variants", [])),
+            )
+        self.audio = resolved_audio
+        self.audio_id = resolved_audio.id
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "display_name": self.display_name,
+            "max_instances": self.max_instances,
+            "cooldown_seconds": self.cooldown_seconds,
+            "steal_policy": self.steal_policy,
+            "notes": self.notes,
+            "audio_id": self.audio.id,
+        }
+
+    @property
+    def bus(self) -> str:
+        return self.audio.bus
+
+    @bus.setter
+    def bus(self, value: str) -> None:
+        self.audio.bus = str(value)
+
+    @property
+    def play_mode(self) -> PlayMode:
+        return self.audio.play_mode
+
+    @play_mode.setter
+    def play_mode(self, value: PlayMode) -> None:
+        self.audio.play_mode = str(value)
+
+    @property
+    def avoid_immediate_repeat(self) -> bool:
+        return self.audio.avoid_immediate_repeat
+
+    @avoid_immediate_repeat.setter
+    def avoid_immediate_repeat(self, value: bool) -> None:
+        self.audio.avoid_immediate_repeat = bool(value)
+
+    @property
+    def volume_db(self) -> float:
+        return self.audio.volume_db
+
+    @volume_db.setter
+    def volume_db(self, value: float) -> None:
+        self.audio.volume_db = float(value)
+
+    @property
+    def volume_rand_min_db(self) -> float:
+        return self.audio.volume_rand_min_db
+
+    @volume_rand_min_db.setter
+    def volume_rand_min_db(self, value: float) -> None:
+        self.audio.volume_rand_min_db = float(value)
+
+    @property
+    def volume_rand_max_db(self) -> float:
+        return self.audio.volume_rand_max_db
+
+    @volume_rand_max_db.setter
+    def volume_rand_max_db(self, value: float) -> None:
+        self.audio.volume_rand_max_db = float(value)
+
+    @property
+    def pitch_cents(self) -> int:
+        return self.audio.pitch_cents
+
+    @pitch_cents.setter
+    def pitch_cents(self, value: int) -> None:
+        self.audio.pitch_cents = int(value)
+
+    @property
+    def pitch_rand_min_cents(self) -> int:
+        return self.audio.pitch_rand_min_cents
+
+    @pitch_rand_min_cents.setter
+    def pitch_rand_min_cents(self, value: int) -> None:
+        self.audio.pitch_rand_min_cents = int(value)
+
+    @property
+    def pitch_rand_max_cents(self) -> int:
+        return self.audio.pitch_rand_max_cents
+
+    @pitch_rand_max_cents.setter
+    def pitch_rand_max_cents(self, value: int) -> None:
+        self.audio.pitch_rand_max_cents = int(value)
+
+    @property
+    def combo_pitch_step_cents(self) -> int:
+        return self.audio.combo_pitch_step_cents
+
+    @combo_pitch_step_cents.setter
+    def combo_pitch_step_cents(self, value: int) -> None:
+        self.audio.combo_pitch_step_cents = int(value)
+
+    @property
+    def combo_reset_seconds(self) -> float:
+        return self.audio.combo_reset_seconds
+
+    @combo_reset_seconds.setter
+    def combo_reset_seconds(self, value: float) -> None:
+        self.audio.combo_reset_seconds = float(value)
+
+    @property
+    def combo_max_step(self) -> int:
+        return self.audio.combo_max_step
+
+    @combo_max_step.setter
+    def combo_max_step(self, value: int) -> None:
+        self.audio.combo_max_step = int(value)
+
+    @property
+    def load_policy(self) -> LoadPolicy:
+        return self.audio.load_policy
+
+    @load_policy.setter
+    def load_policy(self, value: LoadPolicy) -> None:
+        self.audio.load_policy = str(value)
+
+    @property
+    def clips(self) -> list[ClipModel]:
+        return self.audio.clips
+
+    @clips.setter
+    def clips(self, value: list[ClipModel]) -> None:
+        self.audio.clips = value
+
+    @property
+    def rtpc_bindings(self) -> list[RtpcBindingModel]:
+        return self.audio.rtpc_bindings
+
+    @rtpc_bindings.setter
+    def rtpc_bindings(self, value: list[RtpcBindingModel]) -> None:
+        self.audio.rtpc_bindings = value
+
+    @property
+    def state_overrides(self) -> list[StateOverrideModel]:
+        return self.audio.state_overrides
+
+    @state_overrides.setter
+    def state_overrides(self, value: list[StateOverrideModel]) -> None:
+        self.audio.state_overrides = value
+
+    @property
+    def switch_variants(self) -> list[SwitchVariantModel]:
+        return self.audio.switch_variants
+
+    @switch_variants.setter
+    def switch_variants(self, value: list[SwitchVariantModel]) -> None:
+        self.audio.switch_variants = value
 
 
 def normalize_event_binding_states(event: EventModel) -> None:
-    if not event.clips:
+    audio = event.audio
+    if not audio.clips:
         return
 
-    for clip in event.clips:
+    for clip in audio.clips:
         clip.enabled = bool(clip.enabled)
 
-    enabled_clips = [clip for clip in event.clips if bool(clip.enabled)]
+    enabled_clips = [clip for clip in audio.clips if bool(clip.enabled)]
     if not enabled_clips:
-        for clip in event.clips:
+        for clip in audio.clips:
             clip.active = False
         return
 
-    if event.play_mode == "OneShot":
+    if audio.play_mode == "OneShot":
         active_clip = next((clip for clip in enabled_clips if bool(clip.active)), None)
         if active_clip is None:
             active_clip = enabled_clips[0]
 
-        for clip in event.clips:
+        for clip in audio.clips:
             clip.active = bool(clip.enabled and clip is active_clip)
         return
 
     has_any_active = any(bool(clip.active) for clip in enabled_clips)
-    for clip in event.clips:
+    for clip in audio.clips:
         clip.active = bool(clip.enabled and (clip.active or not has_any_active))
 
 
 def effective_event_clips(event: EventModel) -> list[ClipModel]:
     normalize_event_binding_states(event)
-    active_clips = [clip for clip in event.clips if bool(clip.enabled and clip.active)]
-    if event.play_mode == "OneShot":
+    audio = event.audio
+    active_clips = [clip for clip in audio.clips if bool(clip.enabled and clip.active)]
+    if audio.play_mode == "OneShot":
         active_clip = next((clip for clip in active_clips if bool(clip.active)), None)
         return [active_clip] if active_clip is not None else []
     return active_clips
@@ -538,6 +863,7 @@ class AudioProject:
     root_folder_ids: list[str] = field(default_factory=list)
     folders: dict[str, FolderModel] = field(default_factory=dict)
     events: dict[str, EventModel] = field(default_factory=dict)
+    audio_objects: dict[str, AudioObjectModel] = field(default_factory=dict)
     game_parameters: list[GameParameterModel] = field(default_factory=list)
     state_groups: list[StateGroupModel] = field(default_factory=list)
     switch_groups: list[SwitchGroupModel] = field(default_factory=list)
@@ -563,8 +889,23 @@ class AudioProject:
             self.asset_registry[normalized] = AssetRegistryEntry(source_path=normalized)
             self.touch()
 
+    def add_audio_object(self, audio: AudioObjectModel) -> AudioObjectModel:
+        audio.id = str(audio.id).strip() or new_id("audio")
+        if audio.id in self.audio_objects and self.audio_objects[audio.id] is not audio:
+            self.audio_objects[audio.id] = audio
+        else:
+            self.audio_objects[audio.id] = audio
+        self.touch()
+        return audio
+
     def add_event(self, folder_id: str, event: EventModel) -> None:
         normalize_event_binding_states(event)
+        event.audio_id = str(event.audio.id).strip() or str(event.audio_id).strip() or new_id("audio")
+        event.audio.id = event.audio_id
+        if event.audio_id in self.audio_objects:
+            event.audio = self.audio_objects[event.audio_id]
+        else:
+            self.audio_objects[event.audio_id] = event.audio
         self.events[event.id] = event
         self.folders[folder_id].child_event_ids.append(event.id)
         for clip in event.clips:
@@ -694,9 +1035,8 @@ class AudioProject:
         self.touch()
 
     def sync_asset_registry(self) -> None:
-        for event in self.events.values():
-            normalize_event_binding_states(event)
-            for clip in event.clips:
+        for audio in self.audio_objects.values():
+            for clip in audio.clips:
                 normalized = str(clip.source_path).strip()
                 if normalized and normalized not in self.asset_registry:
                     self.asset_registry[normalized] = AssetRegistryEntry(source_path=normalized)
@@ -740,6 +1080,7 @@ class AudioProject:
                 "RootFolderIds": list(self.root_folder_ids),
                 "Folders": {folder_id: folder.to_dict() for folder_id, folder in self.folders.items()},
             },
+            "AudioObjects": {audio_id: audio.to_dict() for audio_id, audio in self.audio_objects.items()},
             "Events": {event_id: event.to_dict() for event_id, event in self.events.items()},
             "GameSync": {
                 "GameParameters": [parameter.to_dict() for parameter in self.game_parameters],
@@ -866,63 +1207,49 @@ def project_from_dict(payload: dict[str, Any], file_path: str | None = None) -> 
             child_event_ids=list(folder_data.get("child_event_ids", [])),
         )
 
+    audio_payloads = payload.get("AudioObjects", {})
+    for audio_id, audio_data in audio_payloads.items():
+        if not isinstance(audio_data, dict):
+            continue
+        audio = AudioObjectModel(
+            id=str(audio_data.get("id", audio_id)).strip() or str(audio_id).strip(),
+            display_name=str(audio_data.get("display_name", "")).strip() or f"{audio_id}",
+            bus=audio_data.get("bus", "SFX"),
+            play_mode=audio_data.get("play_mode", "Random"),
+            avoid_immediate_repeat=audio_data.get("avoid_immediate_repeat", False),
+            volume_db=audio_data.get("volume_db", 0.0),
+            volume_rand_min_db=audio_data.get("volume_rand_min_db", 0.0),
+            volume_rand_max_db=audio_data.get("volume_rand_max_db", 0.0),
+            pitch_cents=audio_data.get("pitch_cents", 0),
+            pitch_rand_min_cents=audio_data.get("pitch_rand_min_cents", 0),
+            pitch_rand_max_cents=audio_data.get("pitch_rand_max_cents", 0),
+            combo_pitch_step_cents=audio_data.get("combo_pitch_step_cents", 100),
+            combo_reset_seconds=audio_data.get("combo_reset_seconds", 1.5),
+            combo_max_step=audio_data.get("combo_max_step", 0),
+            load_policy=audio_data.get("load_policy", "OnDemand"),
+            clips=audio_data.get("clips", []),
+            rtpc_bindings=audio_data.get("rtpc_bindings", []),
+            state_overrides=audio_data.get("state_overrides", []),
+            switch_variants=audio_data.get("switch_variants", []),
+        )
+        project.audio_objects[audio.id] = audio
+
     event_payloads = payload.get("Events", {})
     for event_id, event_data in event_payloads.items():
-        clips = [ClipModel(**clip_payload) for clip_payload in event_data.get("clips", [])]
+        audio_id = str(event_data.get("audio_id", "")).strip()
+        linked_audio = project.audio_objects.get(audio_id)
+        if linked_audio is None:
+            linked_audio = AudioObjectModel(id=audio_id or new_id("audio"), display_name=f"{event_data.get('display_name', event_id)} Audio")
+            project.audio_objects[linked_audio.id] = linked_audio
         event = EventModel(
             id=event_id,
             display_name=event_data.get("display_name", ""),
-            bus=event_data.get("bus", "SFX"),
-            play_mode=event_data.get("play_mode", "Random"),
-            avoid_immediate_repeat=event_data.get("avoid_immediate_repeat", False),
-            volume_db=event_data.get("volume_db", 0.0),
-            volume_rand_min_db=event_data.get("volume_rand_min_db", 0.0),
-            volume_rand_max_db=event_data.get("volume_rand_max_db", 0.0),
-            pitch_cents=event_data.get("pitch_cents", 0),
-            pitch_rand_min_cents=event_data.get("pitch_rand_min_cents", 0),
-            pitch_rand_max_cents=event_data.get("pitch_rand_max_cents", 0),
             max_instances=event_data.get("max_instances", 0),
             cooldown_seconds=event_data.get("cooldown_seconds", 0.0),
             steal_policy=event_data.get("steal_policy", "RejectNew"),
-            combo_pitch_step_cents=event_data.get("combo_pitch_step_cents", 100),
-            combo_reset_seconds=event_data.get("combo_reset_seconds", 1.5),
-            combo_max_step=event_data.get("combo_max_step", 0),
-            load_policy=event_data.get("load_policy", "OnDemand"),
-            clips=clips,
-            rtpc_bindings=[
-                RtpcBindingModel(
-                    parameter_name=str(binding_payload.get("parameter_name", "")).strip(),
-                    target=str(binding_payload.get("target", "EventVolumeDb")).strip(),
-                    scope=str(binding_payload.get("scope", "Global")).strip(),
-                    curve_points=_coerce_curve_points(list(binding_payload.get("curve_points", []))),
-                    notes=str(binding_payload.get("notes", "")),
-                )
-                for binding_payload in event_data.get("rtpc_bindings", [])
-                if isinstance(binding_payload, dict)
-            ],
-            state_overrides=[
-                StateOverrideModel(
-                    group_name=str(override_payload.get("group_name", "")).strip(),
-                    state_name=str(override_payload.get("state_name", "")).strip(),
-                    volume_db=float(override_payload.get("volume_db", 0.0)),
-                    pitch_cents=int(override_payload.get("pitch_cents", 0)),
-                    is_muted=bool(override_payload.get("is_muted", False)),
-                    notes=str(override_payload.get("notes", "")),
-                )
-                for override_payload in event_data.get("state_overrides", [])
-                if isinstance(override_payload, dict)
-            ],
-            switch_variants=[
-                SwitchVariantModel(
-                    group_name=str(variant_payload.get("group_name", "")).strip(),
-                    switch_name=str(variant_payload.get("switch_name", "")).strip(),
-                    clip_ids=[str(value) for value in variant_payload.get("clip_ids", [])],
-                    notes=str(variant_payload.get("notes", "")),
-                )
-                for variant_payload in event_data.get("switch_variants", [])
-                if isinstance(variant_payload, dict)
-            ],
             notes=event_data.get("notes", ""),
+            audio_id=linked_audio.id,
+            audio=linked_audio,
         )
         normalize_event_binding_states(event)
         project.events[event_id] = event

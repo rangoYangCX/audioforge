@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from audioforge.app.models.audio_project import (
+    AudioObjectModel,
     AudioProject,
     BusConfig,
     ClipModel,
@@ -281,6 +282,7 @@ class MainController(QObject):
         self.project = self._create_default_project()
         self.selected_event_id: str | None = None
         self.selected_event_ids: list[str] = []
+        self.selected_audio_id: str | None = None
         self.selected_folder_id: str | None = None
         self.selected_source_binding_tokens: list[str] = []
         self.is_dirty = False
@@ -376,10 +378,15 @@ class MainController(QObject):
         self.window.tree.nodeSelected.connect(self.select_node)
         self.window.tree.nodesSelectionChanged.connect(self.select_nodes)
         self.window.tree.nodeMoved.connect(self.handle_tree_move)
+        self.window.audio_tree.audioSelected.connect(self.select_audio)
         self.window.tree.audioFilesDropped.connect(self.import_audio_files_as_events)
-        self.window.tree.sourceAssetsDroppedToEvent.connect(lambda source_paths, event_id: self.assign_source_assets_to_event(event_id, source_paths, replace_existing=False))
-        self.window.tree.eventBindingsPopupRequested.connect(self.open_event_bindings_popup)
+        self.window.tree.sourceAssetsDroppedToAudio.connect(lambda source_paths, event_id: self.assign_source_assets_to_audio(event_id, source_paths, replace_existing=False))
+        self.window.audio_tree.audioFilesDropped.connect(self.import_audio_files_to_audio)
+        self.window.audio_tree.sourceAssetsDroppedToAudio.connect(lambda source_paths, audio_id: self.assign_source_assets_to_audio_object(audio_id, source_paths, replace_existing=False))
+        self.window.source_tree.importFilesDropped.connect(self.import_audio_files_to_source_registry)
+        self.window.tree.eventAudioRequested.connect(self.navigate_to_event_audio)
         self.window.eventPropertiesChanged.connect(self.update_current_event_from_form)
+        self.window.audioPropertiesChanged.connect(self.update_current_audio_from_form)
         self.window.projectSettingsChanged.connect(self.update_project_settings_from_form)
         self.window.gameSyncChanged.connect(self.update_gamesync_from_form)
         self.window.previewGameSyncChanged.connect(self.update_preview_gamesync_from_form)
@@ -403,10 +410,10 @@ class MainController(QObject):
         self.window.importClipsRequested.connect(self.import_clips)
         self.window.importAudioAsEventsRequested.connect(self.import_audio_files_as_events)
         self.window.removeClipsRequested.connect(self.remove_selected_clips)
-        self.window.assignSourceAssetsToCurrentEventRequested.connect(self.assign_source_assets_to_current_event)
-        self.window.assignSourceAssetsToEventRequested.connect(self.assign_source_assets_to_event)
-        self.window.sourceBindingEnabledChangedRequested.connect(self.update_source_binding_enabled)
-        self.window.sourceBindingActiveChangedRequested.connect(self.update_source_binding_active)
+        self.window.assignSourceAssetsToCurrentAudioRequested.connect(self.assign_source_assets_to_current_audio)
+        self.window.assignSourceAssetsToAudioRequested.connect(self.assign_source_assets_to_audio)
+        self.window.audioSourceBindingEnabledChangedRequested.connect(self.update_audio_source_binding_enabled)
+        self.window.audioSourceBindingActiveChangedRequested.connect(self.update_audio_source_binding_active)
         self.window.bulkWeightRequested.connect(self.apply_bulk_weight)
         self.window.batchRenameRequested.connect(self.batch_rename_clips)
         self.window.bulkClipPropertiesRequested.connect(self.apply_bulk_clip_properties)
@@ -420,6 +427,7 @@ class MainController(QObject):
         self.window.clipEdited.connect(self.update_clip_field)
         self.window.loudnessScanRequested.connect(self.scan_project_loudness)
         self.window.reportTargetRequested.connect(self.navigate_to_report_target)
+        self.window.openAudioBindingsForAudioRequested.connect(self.open_audio_bindings_for_audio)
         self.window.logAppended.connect(self._handle_log_appended)
         self.window.diagnosticContextChanged.connect(self._publish_diagnostic_snapshot)
         self.window.validationReportUpdated.connect(self._handle_validation_report_updated)
@@ -437,10 +445,21 @@ class MainController(QObject):
         for event_id in binding_event_ids:
             if event_id not in self.selected_event_ids:
                 self.selected_event_ids.append(event_id)
+        preserve_audio_only_selection = (
+            self.selected_audio_id in self.project.audio_objects
+            and not self._event_ids_for_audio(self.selected_audio_id)
+        )
         if self.selected_event_id not in self.project.events:
-            self.selected_event_id = self.selected_event_ids[0] if self.selected_event_ids else next(iter(self.project.events), None)
+            if self.selected_event_ids:
+                self.selected_event_id = self.selected_event_ids[0]
+            elif preserve_audio_only_selection:
+                self.selected_event_id = None
+            else:
+                self.selected_event_id = next(iter(self.project.events), None)
         if self.selected_event_id is not None and self.selected_event_id not in self.selected_event_ids:
             self.selected_event_ids = [self.selected_event_id, *self.selected_event_ids]
+        if self.selected_audio_id not in self.project.audio_objects:
+            self.selected_audio_id = self.current_event.audio_id if self.current_event is not None else next(iter(self.project.audio_objects), None)
         if self.selected_folder_id not in self.project.folders:
             self.selected_folder_id = next(iter(self.project.root_folder_ids), None)
         self.window.tree.rebuild(self.project)
@@ -458,16 +477,18 @@ class MainController(QObject):
         elif self.selected_event_id is not None:
             self.window.tree.select_node("event", self.selected_event_id)
         elif self.selected_folder_id is not None:
-            self.window.tree.select_node("folder", self.selected_folder_id)
+            self.window.tree.select_node("folder", self.selected_folder_id, emit_signal=not preserve_audio_only_selection)
         self.window.set_source_browser_entries(self._build_source_browser_entries())
+        self.window.set_audio_browser_entries(self._build_audio_browser_entries())
+        self.window.select_audio_browser_audio(self.selected_audio_id)
         self.window.set_gamesync_entries(self._build_gamesync_entries())
         self.window.set_gamesync_definitions(self.project.game_parameters, self.project.state_groups, self.project.switch_groups)
         self.window.set_project_settings(self.project.settings)
         self._sync_preview_bus_mixer()
         self.sync_preview_bus_editor()
         self.window.set_event_details(self.current_event)
-        popup_event_id = self.window.current_event_bindings_popup_event_id()
-        self.window.refresh_event_bindings_popup(self.project.events.get(popup_event_id) if popup_event_id else None)
+        popup_event_id = self.window.current_audio_bindings_popup_event_id()
+        self.window.refresh_audio_bindings_popup(self.project.events.get(popup_event_id) if popup_event_id else None)
         self._sync_source_binding_selection_to_clip_table()
         self._sync_preview_transport_state()
         self.window.set_project_title(self.project.name, self.project.file_path)
@@ -479,20 +500,27 @@ class MainController(QObject):
         self._publish_diagnostic_snapshot()
 
     def _build_source_browser_entries(self) -> list[dict[str, object]]:
-        references_by_source: dict[str, dict[str, set[str]]] = {}
+        event_ids_by_audio: dict[str, set[str]] = {}
         for event in self.project.events.values():
-            for clip in event.clips:
+            event_ids_by_audio.setdefault(event.audio_id, set()).add(event.id)
+
+        references_by_source: dict[str, dict[str, set[str]]] = {}
+        for audio_id, audio in self.project.audio_objects.items():
+            linked_event_ids = event_ids_by_audio.get(audio_id, set())
+            for clip in audio.clips:
                 source_path = str(clip.source_path).strip()
                 if not source_path:
                     continue
                 bucket = references_by_source.setdefault(
                     source_path,
                     {
+                        "audio_ids": set(),
                         "event_ids": set(),
                         "asset_keys": set(),
                     },
                 )
-                bucket["event_ids"].add(event.id)
+                bucket["audio_ids"].add(audio_id)
+                bucket["event_ids"].update(linked_event_ids)
                 if clip.asset_key:
                     bucket["asset_keys"].add(str(clip.asset_key))
 
@@ -507,19 +535,59 @@ class MainController(QObject):
                 is_missing = not Path(source_text).exists()
             except OSError:
                 is_missing = True
+            audio_ids = sorted(reference_bucket.get("audio_ids", set()))
             event_ids = sorted(reference_bucket["event_ids"])
             asset_keys = sorted(reference_bucket["asset_keys"])
             entries.append(
                 {
                     "source_path": source_text,
+                    "audio_ids": audio_ids,
                     "event_ids": event_ids,
                     "asset_keys": asset_keys,
-                    "reference_count": len(event_ids),
+                    "reference_count": len(audio_ids),
                     "missing": is_missing,
-                    "unreferenced": len(event_ids) == 0,
+                    "unreferenced": len(audio_ids) == 0,
                 }
             )
         return entries
+
+    def _build_audio_browser_entries(self) -> list[dict[str, object]]:
+        event_ids_by_audio: dict[str, list[str]] = {}
+        for event in self.project.events.values():
+            event_ids_by_audio.setdefault(event.audio_id, []).append(event.id)
+
+        entries: list[dict[str, object]] = []
+        for audio_id, audio in sorted(self.project.audio_objects.items(), key=lambda item: (item[1].display_name.casefold(), item[0].casefold())):
+            event_ids = sorted(event_ids_by_audio.get(audio_id, []))
+            entries.append(
+                {
+                    "audio_id": audio_id,
+                    "display_name": audio.display_name,
+                    "play_mode": audio.play_mode,
+                    "bus": audio.bus,
+                    "clip_count": len(audio.clips),
+                    "event_ids": event_ids,
+                    "event_count": len(event_ids),
+                }
+            )
+        return entries
+
+    def _make_unique_audio_id(self, base_id: str, reserved_audio_ids: set[str] | None = None) -> str:
+        blocked_ids = set(self.project.audio_objects.keys())
+        if reserved_audio_ids is not None:
+            blocked_ids.update(reserved_audio_ids)
+        candidate = base_id
+        index = 1
+        while candidate in blocked_ids:
+            index += 1
+            candidate = f"{base_id}_{index}"
+        return candidate
+
+    def _normalize_audio_binding_states(self, audio: AudioObjectModel) -> None:
+        reference_event = next((event for event in self.project.events.values() if event.audio_id == audio.id), None)
+        if reference_event is None:
+            reference_event = EventModel(id=f"{audio.id}_binding", display_name=audio.display_name, audio=audio, audio_id=audio.id)
+        normalize_event_binding_states(reference_event)
 
     def _build_gamesync_entries(self) -> dict[str, list[dict[str, object]]]:
         return {
@@ -819,6 +887,15 @@ class MainController(QObject):
         return self.project.events.get(self.selected_event_id)
 
     @property
+    def current_audio(self):
+        if self.selected_audio_id is None:
+            return None
+        return self.project.audio_objects.get(self.selected_audio_id)
+
+    def _event_ids_for_audio(self, audio_id: str) -> list[str]:
+        return [event.id for event in self.project.events.values() if event.audio_id == audio_id]
+
+    @property
     def current_events(self) -> list[EventModel]:
         return [self.project.events[event_id] for event_id in self.selected_event_ids if event_id in self.project.events]
 
@@ -955,31 +1032,36 @@ class MainController(QObject):
         return True
 
     def select_node(self, node_type: str, node_id: str) -> None:
-        navigation_state = self.window.navigation_state()
         if node_type == "source_binding":
             event_id, clip_id = decode_source_binding_token(node_id)
             if event_id not in self.project.events or not any(clip.id == clip_id for clip in self.project.events[event_id].clips):
                 return
             self.selected_event_id = event_id
             self.selected_event_ids = [event_id]
+            self.selected_audio_id = self.project.events[event_id].audio_id
             self.selected_folder_id = self.project.find_event_folder_id(event_id)
             self.selected_source_binding_tokens = [encode_source_binding_token(event_id, clip_id)]
         elif node_type == "event":
             self.selected_event_id = node_id
             self.selected_event_ids = [node_id]
+            if node_id in self.project.events:
+                self.selected_audio_id = self.project.events[node_id].audio_id
             self.selected_folder_id = self.project.find_event_folder_id(node_id)
             self.selected_source_binding_tokens = []
         else:
             self.selected_folder_id = node_id
             self.selected_event_id = None
             self.selected_event_ids = []
+            self.selected_audio_id = None
             self.selected_source_binding_tokens = []
+        if node_type in {"event", "folder"}:
+            self.window.tree.select_node(node_type, node_id, emit_signal=False)
+        self.window.audio_tree.select_audio_id(self.selected_audio_id, emit_signal=False)
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
         self._sync_source_binding_selection_to_clip_table()
         self._sync_multi_selection_affordances()
         self._update_object_context()
         self._sync_build_selection_context()
-        self.window.apply_navigation_state(navigation_state)
 
     def select_nodes(self, nodes: list[tuple[str, str]]) -> None:
         event_ids = [node_id for node_type, node_id in nodes if node_type == "event" and node_id in self.project.events]
@@ -993,12 +1075,14 @@ class MainController(QObject):
             current_event = self.current_event
             current_event_id = current_event.id if current_event is not None else None
             self.selected_event_id = current_event_id if current_event_id in event_ids else event_ids[0]
+            self.selected_audio_id = self.project.events[self.selected_event_id].audio_id if self.selected_event_id in self.project.events else None
             self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id)
             self.selected_source_binding_tokens = [encode_source_binding_token(event_id, clip_id) for event_id, clip_id in binding_pairs]
         elif nodes:
             folder_ids = [node_id for node_type, node_id in nodes if node_type == "folder" and node_id in self.project.folders]
             self.selected_event_ids = []
             self.selected_event_id = None
+            self.selected_audio_id = None
             self.selected_source_binding_tokens = []
             if folder_ids:
                 self.selected_folder_id = folder_ids[0]
@@ -1016,6 +1100,7 @@ class MainController(QObject):
             self.selected_folder_id = folder_id
             self.selected_event_id = None
             self.selected_event_ids = []
+            self.selected_audio_id = None
             self._refresh_ui()
             return
 
@@ -1027,23 +1112,47 @@ class MainController(QObject):
         self.selected_folder_id = parent_folder_id
         self.selected_event_id = None
         self.selected_event_ids = []
+        self.selected_audio_id = None
         self._refresh_ui()
+
+    def select_audio(self, audio_id: str) -> None:
+        if audio_id not in self.project.audio_objects:
+            return
+        self.selected_audio_id = audio_id
+        event_ids = self._event_ids_for_audio(audio_id)
+        if event_ids:
+            self.selected_event_id = event_ids[0]
+            self.selected_event_ids = [self.selected_event_id]
+            self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id)
+        else:
+            self.selected_event_id = None
+            self.selected_event_ids = []
+        self.selected_source_binding_tokens = []
+        self.window.audio_tree.select_audio_id(audio_id, emit_signal=False)
+        self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
+        self._sync_source_binding_selection_to_clip_table()
+        self._sync_multi_selection_affordances()
+        self._update_object_context()
+        self._sync_build_selection_context()
+
+    def navigate_to_event_audio(self, event_id: str) -> None:
+        event = self.project.events.get(event_id)
+        if event is None:
+            return
+        self.select_audio(event.audio_id)
+        self.window.focus_current_audio_browser()
 
     def update_current_event_from_form(self) -> None:
         event = self.current_event
         if event is None:
             return
 
-        form_data = self.window.current_event_form_data()
-        rtpc_bindings = [RtpcBindingModel(**binding) for binding in form_data.get("rtpc_bindings", [])]
-        state_overrides = [StateOverrideModel(**override) for override in form_data.get("state_overrides", [])]
-        switch_variants = [SwitchVariantModel(**variant) for variant in form_data.get("switch_variants", [])]
+        form_data = self.window.current_event_identity_form_data()
 
         def mutate() -> bool:
             current_event = self.current_event
             if current_event is None:
                 return False
-            previous_play_mode = current_event.play_mode
             changed = False
 
             new_id_value = str(form_data["id"])
@@ -1052,51 +1161,16 @@ class MainController(QObject):
                 self.selected_event_id = new_id_value
                 self.selected_event_ids = [new_id_value if event_id == current_event.id else event_id for event_id in self.selected_event_ids or [current_event.id]]
                 current_event = self.project.events[new_id_value]
+                self.selected_audio_id = current_event.audio_id
                 changed = True
 
             updated_display_name = str(form_data["display_name"])
             if current_event.display_name != updated_display_name:
                 current_event.display_name = updated_display_name
                 changed = True
-            updated_bus = str(form_data["bus"])
-            if current_event.bus != updated_bus:
-                current_event.bus = updated_bus
-                changed = True
-            updated_play_mode = str(form_data["play_mode"])
-            if current_event.play_mode != updated_play_mode:
-                current_event.play_mode = updated_play_mode
-                changed = True
             updated_steal_policy = str(form_data["steal_policy"])
             if current_event.steal_policy != updated_steal_policy:
                 current_event.steal_policy = updated_steal_policy
-                changed = True
-            updated_load_policy = str(form_data["load_policy"])
-            if current_event.load_policy != updated_load_policy:
-                current_event.load_policy = updated_load_policy
-                changed = True
-            updated_volume_db = float(form_data["volume_db"])
-            if current_event.volume_db != updated_volume_db:
-                current_event.volume_db = updated_volume_db
-                changed = True
-            updated_volume_rand_min_db = float(form_data["volume_rand_min_db"])
-            if current_event.volume_rand_min_db != updated_volume_rand_min_db:
-                current_event.volume_rand_min_db = updated_volume_rand_min_db
-                changed = True
-            updated_volume_rand_max_db = float(form_data["volume_rand_max_db"])
-            if current_event.volume_rand_max_db != updated_volume_rand_max_db:
-                current_event.volume_rand_max_db = updated_volume_rand_max_db
-                changed = True
-            updated_pitch_cents = int(form_data["pitch_cents"])
-            if current_event.pitch_cents != updated_pitch_cents:
-                current_event.pitch_cents = updated_pitch_cents
-                changed = True
-            updated_pitch_rand_min_cents = int(form_data["pitch_rand_min_cents"])
-            if current_event.pitch_rand_min_cents != updated_pitch_rand_min_cents:
-                current_event.pitch_rand_min_cents = updated_pitch_rand_min_cents
-                changed = True
-            updated_pitch_rand_max_cents = int(form_data["pitch_rand_max_cents"])
-            if current_event.pitch_rand_max_cents != updated_pitch_rand_max_cents:
-                current_event.pitch_rand_max_cents = updated_pitch_rand_max_cents
                 changed = True
             updated_cooldown_seconds = float(form_data["cooldown_seconds"])
             if current_event.cooldown_seconds != updated_cooldown_seconds:
@@ -1106,51 +1180,10 @@ class MainController(QObject):
             if current_event.max_instances != updated_max_instances:
                 current_event.max_instances = updated_max_instances
                 changed = True
-            updated_combo_pitch_step_cents = int(form_data["combo_pitch_step_cents"])
-            if current_event.combo_pitch_step_cents != updated_combo_pitch_step_cents:
-                current_event.combo_pitch_step_cents = updated_combo_pitch_step_cents
-                changed = True
-            updated_combo_reset_seconds = float(form_data["combo_reset_seconds"])
-            if current_event.combo_reset_seconds != updated_combo_reset_seconds:
-                current_event.combo_reset_seconds = updated_combo_reset_seconds
-                changed = True
-            updated_combo_max_step = int(form_data["combo_max_step"])
-            if current_event.combo_max_step != updated_combo_max_step:
-                current_event.combo_max_step = updated_combo_max_step
-                changed = True
-            updated_avoid_repeat = bool(form_data["avoid_immediate_repeat"])
-            if current_event.avoid_immediate_repeat != updated_avoid_repeat:
-                current_event.avoid_immediate_repeat = updated_avoid_repeat
-                changed = True
-            event_tags = [str(tag) for tag in form_data["tags"]]
-            for clip in current_event.clips:
-                if clip.tags != list(event_tags):
-                    clip.tags = list(event_tags)
-                    changed = True
-            if current_event.rtpc_bindings != rtpc_bindings:
-                current_event.rtpc_bindings = rtpc_bindings
-                changed = True
-            if current_event.state_overrides != state_overrides:
-                current_event.state_overrides = state_overrides
-                changed = True
-            if current_event.switch_variants != switch_variants:
-                current_event.switch_variants = switch_variants
-                changed = True
             updated_notes = str(form_data["notes"])
             if current_event.notes != updated_notes:
                 current_event.notes = updated_notes
                 changed = True
-            if previous_play_mode == "OneShot" and current_event.play_mode != "OneShot":
-                for clip in current_event.clips:
-                    if clip.enabled:
-                        clip.active = True
-                        changed = True
-            normalize_event_binding_states(current_event)
-            changed = self._merge_gamesync_definitions(
-                rtpc_bindings=current_event.rtpc_bindings,
-                state_overrides=current_event.state_overrides,
-                switch_variants=current_event.switch_variants,
-            ) or changed
             if changed:
                 self.project.touch()
             return changed
@@ -1174,8 +1207,119 @@ class MainController(QObject):
             self._refresh_ui()
             self.window.apply_navigation_state(navigation_state)
 
+    def update_current_audio_from_form(self) -> None:
+        event = self.current_event
+        if event is None:
+            return
+
+        form_data = self.window.current_audio_form_data()
+        rtpc_bindings = [RtpcBindingModel(**binding) for binding in form_data.get("rtpc_bindings", [])]
+        state_overrides = [StateOverrideModel(**override) for override in form_data.get("state_overrides", [])]
+        switch_variants = [SwitchVariantModel(**variant) for variant in form_data.get("switch_variants", [])]
+
+        def mutate() -> bool:
+            current_event = self.current_event
+            if current_event is None:
+                return False
+            current_audio = current_event.audio
+            previous_play_mode = current_audio.play_mode
+            changed = False
+
+            updated_bus = str(form_data["bus"])
+            if current_audio.bus != updated_bus:
+                current_audio.bus = updated_bus
+                changed = True
+            updated_play_mode = str(form_data["play_mode"])
+            if current_audio.play_mode != updated_play_mode:
+                current_audio.play_mode = updated_play_mode
+                changed = True
+            updated_load_policy = str(form_data["load_policy"])
+            if current_audio.load_policy != updated_load_policy:
+                current_audio.load_policy = updated_load_policy
+                changed = True
+            updated_volume_db = float(form_data["volume_db"])
+            if current_audio.volume_db != updated_volume_db:
+                current_audio.volume_db = updated_volume_db
+                changed = True
+            updated_volume_rand_min_db = float(form_data["volume_rand_min_db"])
+            if current_audio.volume_rand_min_db != updated_volume_rand_min_db:
+                current_audio.volume_rand_min_db = updated_volume_rand_min_db
+                changed = True
+            updated_volume_rand_max_db = float(form_data["volume_rand_max_db"])
+            if current_audio.volume_rand_max_db != updated_volume_rand_max_db:
+                current_audio.volume_rand_max_db = updated_volume_rand_max_db
+                changed = True
+            updated_pitch_cents = int(form_data["pitch_cents"])
+            if current_audio.pitch_cents != updated_pitch_cents:
+                current_audio.pitch_cents = updated_pitch_cents
+                changed = True
+            updated_pitch_rand_min_cents = int(form_data["pitch_rand_min_cents"])
+            if current_audio.pitch_rand_min_cents != updated_pitch_rand_min_cents:
+                current_audio.pitch_rand_min_cents = updated_pitch_rand_min_cents
+                changed = True
+            updated_pitch_rand_max_cents = int(form_data["pitch_rand_max_cents"])
+            if current_audio.pitch_rand_max_cents != updated_pitch_rand_max_cents:
+                current_audio.pitch_rand_max_cents = updated_pitch_rand_max_cents
+                changed = True
+            updated_combo_pitch_step_cents = int(form_data["combo_pitch_step_cents"])
+            if current_audio.combo_pitch_step_cents != updated_combo_pitch_step_cents:
+                current_audio.combo_pitch_step_cents = updated_combo_pitch_step_cents
+                changed = True
+            updated_combo_reset_seconds = float(form_data["combo_reset_seconds"])
+            if current_audio.combo_reset_seconds != updated_combo_reset_seconds:
+                current_audio.combo_reset_seconds = updated_combo_reset_seconds
+                changed = True
+            updated_combo_max_step = int(form_data["combo_max_step"])
+            if current_audio.combo_max_step != updated_combo_max_step:
+                current_audio.combo_max_step = updated_combo_max_step
+                changed = True
+            updated_avoid_repeat = bool(form_data["avoid_immediate_repeat"])
+            if current_audio.avoid_immediate_repeat != updated_avoid_repeat:
+                current_audio.avoid_immediate_repeat = updated_avoid_repeat
+                changed = True
+            event_tags = [str(tag) for tag in form_data["tags"]]
+            for clip in current_event.clips:
+                if clip.tags != list(event_tags):
+                    clip.tags = list(event_tags)
+                    changed = True
+            if current_audio.rtpc_bindings != rtpc_bindings:
+                current_audio.rtpc_bindings = rtpc_bindings
+                changed = True
+            if current_audio.state_overrides != state_overrides:
+                current_audio.state_overrides = state_overrides
+                changed = True
+            if current_audio.switch_variants != switch_variants:
+                current_audio.switch_variants = switch_variants
+                changed = True
+            if previous_play_mode == "OneShot" and current_audio.play_mode != "OneShot":
+                for clip in current_event.clips:
+                    if clip.enabled:
+                        clip.active = True
+                        changed = True
+            normalize_event_binding_states(current_event)
+            changed = self._merge_gamesync_definitions(
+                rtpc_bindings=current_audio.rtpc_bindings,
+                state_overrides=current_audio.state_overrides,
+                switch_variants=current_audio.switch_variants,
+            ) or changed
+            if changed:
+                self.project.touch()
+            return changed
+
+        changed = self._apply_mutation(
+            "Update Audio Properties",
+            mutate,
+            merge_key=f"audio-properties:{self.selected_audio_id}",
+        )
+        if changed:
+            self.window.append_log("已更新 Audio 属性。")
+            navigation_state = self.window.navigation_state()
+            self._refresh_ui()
+            self.window.apply_navigation_state(navigation_state)
+
     def update_project_settings_from_form(self) -> None:
         form_data = self.window.current_project_settings_form_data()
+        change_source = self.window.consume_project_settings_change_source()
         source_audio_format = str(form_data["source_audio_format"])
         runtime_audio_format = str(form_data["runtime_audio_format"])
         auto_assign_bus_by_name = bool(form_data.get("auto_assign_bus_by_name", True))
@@ -1198,6 +1342,14 @@ class MainController(QObject):
         ]
         default_bus = str(form_data["default_bus"])
         export_root = str(form_data["export_root"])
+        if change_source == "project-bus-selection":
+            source_audio_format = self.project.settings.source_audio_format
+            runtime_audio_format = self.project.settings.runtime_audio_format
+            auto_assign_bus_by_name = self.project.settings.auto_assign_bus_by_name
+            default_bus = self.project.settings.default_bus
+            export_root = self.project.settings.export_root
+        if not self.window.export_root_edit.isModified():
+            export_root = self.project.settings.export_root
         if default_bus not in buses and buses:
             default_bus = buses[0]
 
@@ -1646,7 +1798,7 @@ class MainController(QObject):
             self.window.set_event_details(self.project.events[event.id])
             self.window.apply_navigation_state(navigation_state)
 
-    def assign_source_assets_to_event(self, event_id: str, source_paths: list[str], replace_existing: bool) -> None:
+    def assign_source_assets_to_audio(self, event_id: str, source_paths: list[str], replace_existing: bool) -> None:
         event = self.project.events.get(event_id)
         if event is None:
             return
@@ -1741,37 +1893,280 @@ class MainController(QObject):
 
         if self._apply_mutation("Assign Source Assets", mutate):
             operation_label = "替换" if replace_existing else "追加"
-            self.window.append_log(f"已为事件 {event.id}{operation_label} {len(normalized_paths)} 条源音频绑定。")
+            self.window.append_log(f"已为事件 {event.id} 的 Audio {operation_label} {len(normalized_paths)} 条源音频绑定。")
             if replace_existing:
-                feedback_message = f"已将事件 {event.id} 的源音频绑定替换为 {replaced_count} 条。"
+                feedback_message = f"已将事件 {event.id} 的 Audio 源音频绑定替换为 {replaced_count} 条。"
             else:
-                feedback_message = f"已成功向事件 {event.id} 追加 {added_count} 条源音频。"
+                feedback_message = f"已成功向事件 {event.id} 的 Audio 追加 {added_count} 条源音频。"
                 if skipped_count:
                     feedback_message += f" 已跳过 {skipped_count} 条重复项。"
-            self.window.set_event_source_binding_feedback(event.id, feedback_message)
+            self.window.set_audio_source_binding_feedback(event.id, feedback_message)
             self._refresh_ui()
             self.window.apply_navigation_state(navigation_state)
         elif self.selected_source_binding_tokens:
             if replace_existing:
-                self.window.set_event_source_binding_feedback(event.id, f"事件 {event.id} 的源音频绑定未发生变化。")
+                self.window.set_audio_source_binding_feedback(event.id, f"事件 {event.id} 的 Audio 源音频绑定未发生变化。")
             else:
-                self.window.set_event_source_binding_feedback(event.id, f"事件 {event.id} 没有新增绑定；{skipped_count} 条源音频均已存在。")
+                self.window.set_audio_source_binding_feedback(event.id, f"事件 {event.id} 的 Audio 没有新增绑定；{skipped_count} 条源音频均已存在。")
             self._refresh_ui()
             self.window.apply_navigation_state(navigation_state)
 
-    def assign_source_assets_to_current_event(self, source_paths: list[str], replace_existing: bool) -> None:
+    def assign_source_assets_to_current_audio(self, source_paths: list[str], replace_existing: bool) -> None:
         event = self.current_event
         if event is None:
             return
-        self.assign_source_assets_to_event(event.id, source_paths, replace_existing)
+        self.assign_source_assets_to_audio(event.id, source_paths, replace_existing)
 
-    def open_event_bindings_popup(self, event_id: str, anchor) -> None:
+    def assign_source_assets_to_audio_object(self, audio_id: str, source_paths: list[str], replace_existing: bool) -> None:
+        audio = self.project.audio_objects.get(audio_id)
+        if audio is None:
+            return
+
+        normalized_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for raw_path in source_paths:
+            normalized = str(raw_path).strip()
+            if not normalized:
+                continue
+            lookup_key = normalized.casefold()
+            if lookup_key in seen_paths:
+                continue
+            seen_paths.add(lookup_key)
+            normalized_paths.append(normalized)
+        if not normalized_paths:
+            return
+
+        linked_event_ids = self._event_ids_for_audio(audio_id)
+        selected_tokens: list[str] = []
+        added_count = 0
+        skipped_count = 0
+        replaced_count = 0
+
+        def mutate() -> bool:
+            nonlocal added_count, skipped_count, replaced_count
+            before_signature = [(clip.id, str(clip.source_path), bool(clip.enabled), bool(clip.active)) for clip in audio.clips]
+            if replace_existing:
+                existing_by_source: dict[str, list[ClipModel]] = {}
+                for clip in audio.clips:
+                    existing_by_source.setdefault(str(clip.source_path).strip(), []).append(clip)
+
+                reserved_clip_ids = {clip.id for clip in audio.clips}
+                rebuilt_clips: list[ClipModel] = []
+                for source_path in normalized_paths:
+                    existing_clips = existing_by_source.get(source_path, [])
+                    if existing_clips:
+                        clip = existing_clips.pop(0)
+                    else:
+                        clip = self._build_clip_from_path(Path(source_path), reserved_clip_ids)
+                    reserved_clip_ids.add(clip.id)
+                    rebuilt_clips.append(clip)
+                    self.project.register_source_asset(source_path)
+                    if linked_event_ids:
+                        selected_tokens.append(encode_source_binding_token(linked_event_ids[0], clip.id))
+                audio.clips = rebuilt_clips
+                replaced_count = len(rebuilt_clips)
+            else:
+                existing_clips_by_path = {
+                    str(clip.source_path).strip().casefold(): clip
+                    for clip in audio.clips
+                    if str(clip.source_path).strip()
+                }
+                reserved_clip_ids = {clip.id for clip in audio.clips}
+                for source_path in normalized_paths:
+                    existing_clip = existing_clips_by_path.get(source_path.casefold())
+                    if existing_clip is not None:
+                        if linked_event_ids:
+                            selected_tokens.append(encode_source_binding_token(linked_event_ids[0], existing_clip.id))
+                        skipped_count += 1
+                        continue
+                    clip = self._build_clip_from_path(Path(source_path), reserved_clip_ids)
+                    reserved_clip_ids.add(clip.id)
+                    audio.clips.append(clip)
+                    self.project.register_source_asset(source_path)
+                    if linked_event_ids:
+                        selected_tokens.append(encode_source_binding_token(linked_event_ids[0], clip.id))
+                    added_count += 1
+
+            self.selected_audio_id = audio.id
+            if linked_event_ids:
+                self.selected_event_id = linked_event_ids[0]
+                self.selected_event_ids = [linked_event_ids[0]]
+                self.selected_folder_id = self.project.find_event_folder_id(linked_event_ids[0])
+                self.selected_source_binding_tokens = list(selected_tokens)
+            else:
+                self.selected_event_id = None
+                self.selected_event_ids = []
+                self.selected_source_binding_tokens = []
+            self._normalize_audio_binding_states(audio)
+            after_signature = [(clip.id, str(clip.source_path), bool(clip.enabled), bool(clip.active)) for clip in audio.clips]
+            if before_signature == after_signature:
+                return False
+            self.project.touch()
+            return True
+
+        if self._apply_mutation("Assign Source Assets To Audio", mutate):
+            operation_label = "替换" if replace_existing else "追加"
+            event_hint = f"；引用 Event：{linked_event_ids[0]}" if linked_event_ids else "；当前尚未创建引用 Event"
+            if replace_existing:
+                feedback_message = f"已将 Audio {audio.id} 的源音频替换为 {replaced_count} 条。"
+            else:
+                feedback_message = f"已成功向 Audio {audio.id} 追加 {added_count} 条源音频。"
+                if skipped_count:
+                    feedback_message += f" 已跳过 {skipped_count} 条重复项。"
+            self.window.append_log(f"已为 Audio {audio.id} {operation_label} {len(normalized_paths)} 条源音频绑定{event_hint}。")
+            if linked_event_ids:
+                self.window.set_audio_source_binding_feedback(linked_event_ids[0], feedback_message)
+                self.window.set_active_property_category("音频属性")
+            self._refresh_ui()
+            self.window.explorer_tabs.setCurrentIndex(2)
+            self.window.select_audio_browser_audio(audio.id)
+        elif linked_event_ids:
+            if replace_existing:
+                self.window.set_audio_source_binding_feedback(linked_event_ids[0], f"Audio {audio.id} 的源音频绑定未发生变化。")
+            else:
+                self.window.set_audio_source_binding_feedback(linked_event_ids[0], f"Audio {audio.id} 没有新增绑定；{skipped_count} 条源音频均已存在。")
+            self._refresh_ui()
+
+    def import_audio_files_to_audio(self, file_paths: list[str], target_audio_id=None) -> None:
+        import_entries, skipped_unsupported, skipped_missing, skipped_empty_directories = self._classify_event_import_paths(file_paths)
+        if not import_entries:
+            self._notify_import_skip(
+                "导入音频到 Audio",
+                skipped_unsupported,
+                skipped_missing,
+                skipped_empty_directories,
+            )
+            return
+
+        target_audio = self.project.audio_objects.get(str(target_audio_id)) if target_audio_id is not None else None
+        if target_audio is not None:
+            binding_mode = "append"
+            if target_audio.clips:
+                binding_mode = self.window.ask_audio_import_binding_mode(target_audio.display_name or target_audio.id)
+                if binding_mode is None:
+                    return
+            self.assign_source_assets_to_audio_object(
+                target_audio.id,
+                [str(source_path) for _folder_parts, source_path in import_entries],
+                replace_existing=binding_mode == "replace",
+            )
+            return
+
+        create_events = self.window.ask_audio_import_create_events(len(import_entries))
+        if create_events is None:
+            return
+
+        imported_audio: list[tuple[tuple[str, ...], AudioObjectModel, EventModel | None]] = []
+        reserved_audio_ids = set(self.project.audio_objects.keys())
+        reserved_event_ids = set(self.project.events.keys())
+        for folder_parts, source_path in import_entries:
+            audio = self._build_audio_object_from_path(source_path, reserved_audio_ids)
+            reserved_audio_ids.add(audio.id)
+            event = self._build_event_for_audio_object(audio, source_path, reserved_event_ids) if create_events else None
+            if event is not None:
+                reserved_event_ids.add(event.id)
+            imported_audio.append((folder_parts, audio, event))
+
+        folder_id = self._resolve_target_folder_for_creation()
+        last_audio_id = imported_audio[-1][1].id
+        last_event_id = imported_audio[-1][2].id if imported_audio[-1][2] is not None else None
+        created_folder_count = 0
+        last_event_folder_id = folder_id
+
+        def mutate() -> bool:
+            nonlocal created_folder_count, last_event_folder_id
+            folder_cache: dict[tuple[str, ...], str] = {(): folder_id}
+            for folder_parts, audio, event in imported_audio:
+                self.project.add_audio_object(audio)
+                if event is not None:
+                    event_folder_id, new_folder_count = self._ensure_import_folder_path(folder_id, folder_parts, folder_cache)
+                    created_folder_count += new_folder_count
+                    self.project.add_event(event_folder_id, event)
+                    last_event_folder_id = event_folder_id
+                else:
+                    for clip in audio.clips:
+                        self.project.register_source_asset(str(clip.source_path))
+            self.selected_audio_id = last_audio_id
+            if last_event_id is not None:
+                self.selected_event_id = last_event_id
+                self.selected_event_ids = [last_event_id]
+                self.selected_folder_id = last_event_folder_id
+            else:
+                self.selected_event_id = None
+                self.selected_event_ids = []
+                self.selected_source_binding_tokens = []
+            return True
+
+        if self._apply_mutation("Import Audio To Audio Objects", mutate):
+            folder_suffix = f"；新增文件夹：{created_folder_count} 个" if created_folder_count else ""
+            skipped_suffix = self._format_import_skip_suffix(skipped_unsupported, skipped_missing, skipped_empty_directories)
+            if create_events:
+                self.window.append_log(
+                    f"已导入 {len(imported_audio)} 个音频并创建 Audio Object/同名 Event{folder_suffix}；当前 Audio：{last_audio_id}。{skipped_suffix}"
+                )
+                self.window.set_active_property_category("音频属性")
+            else:
+                self.window.append_log(
+                    f"已导入 {len(imported_audio)} 个音频并创建 Audio Object；未自动创建 Event；当前 Audio：{last_audio_id}。{skipped_suffix}"
+                )
+            self._refresh_ui()
+            self.window.explorer_tabs.setCurrentIndex(2)
+            self.window.select_audio_browser_audio(last_audio_id)
+
+    def import_audio_files_to_source_registry(self, file_paths: list[str]) -> None:
+        import_entries, skipped_unsupported, skipped_missing, skipped_empty_directories = self._classify_event_import_paths(file_paths)
+        if not import_entries:
+            self._notify_import_skip(
+                "导入音频到源资源库",
+                skipped_unsupported,
+                skipped_missing,
+                skipped_empty_directories,
+            )
+            return
+
+        source_paths: list[str] = []
+        seen_paths: set[str] = set()
+        for _folder_parts, source_path in import_entries:
+            normalized = str(source_path)
+            lookup_key = normalized.casefold()
+            if lookup_key in seen_paths:
+                continue
+            seen_paths.add(lookup_key)
+            source_paths.append(normalized)
+
+        registered_count = 0
+
+        def mutate() -> bool:
+            nonlocal registered_count
+            changed = False
+            for source_path in source_paths:
+                if source_path not in self.project.asset_registry:
+                    registered_count += 1
+                self.project.register_source_asset(source_path)
+                changed = True
+            return changed
+
+        if self._apply_mutation("Import Audio To Source Registry", mutate):
+            skipped_suffix = self._format_import_skip_suffix(skipped_unsupported, skipped_missing, skipped_empty_directories)
+            self.window.append_log(f"已导入 {len(source_paths)} 条源音频到资源库；新增未引用资源 {registered_count} 条。{skipped_suffix}")
+            self._refresh_ui()
+            self.window.explorer_tabs.setCurrentIndex(1)
+
+    def open_audio_bindings_popup(self, event_id: str, anchor) -> None:
         event = self.project.events.get(event_id)
         if event is None:
             return
-        self.window.show_event_bindings_popup(event, anchor)
+        self.window.show_audio_bindings_popup(event, anchor)
 
-    def update_source_binding_enabled(self, event_id: str, clip_id: str, enabled: bool) -> None:
+    def open_audio_bindings_for_audio(self, audio_id: str) -> None:
+        event_ids = self._event_ids_for_audio(audio_id)
+        if not event_ids:
+            self.window.append_log(f"Audio 绑定打开失败：{audio_id} 当前没有引用 Event。")
+            return
+        anchor = self.window.mapToGlobal(self.window.rect().center())
+        self.open_audio_bindings_popup(event_ids[0], anchor)
+
+    def update_audio_source_binding_enabled(self, event_id: str, clip_id: str, enabled: bool) -> None:
         event = self.project.events.get(event_id)
         if event is None:
             return
@@ -1790,14 +2185,14 @@ class MainController(QObject):
         merge_key = f"source-binding-enabled:{event_id}:{clip_id}"
         if self._apply_mutation("Update Source Binding State", mutate, merge_key=merge_key):
             state_label = "启用" if enabled else "停用"
-            self.window.append_log(f"已将事件 {event_id} 的绑定 {clip_id} 标记为{state_label}。")
-            self.window.set_event_source_binding_feedback(event_id, f"已将绑定 {clip_id} 标记为{state_label}。")
+            self.window.append_log(f"已将事件 {event_id} 的 Audio 绑定 {clip_id} 标记为{state_label}。")
+            self.window.set_audio_source_binding_feedback(event_id, f"已将 Audio 绑定 {clip_id} 标记为{state_label}。")
             self._refresh_ui()
 
     def set_active_source_binding(self, event_id: str, clip_id: str) -> None:
-        self.update_source_binding_active(event_id, clip_id, True)
+        self.update_audio_source_binding_active(event_id, clip_id, True)
 
-    def update_source_binding_active(self, event_id: str, clip_id: str, active: bool) -> None:
+    def update_audio_source_binding_active(self, event_id: str, clip_id: str, active: bool) -> None:
         event = self.project.events.get(event_id)
         if event is None:
             return
@@ -1838,22 +2233,24 @@ class MainController(QObject):
         merge_key = f"source-binding-active:{event_id}"
         if self._apply_mutation("Set Active Source Binding", mutate, merge_key=merge_key):
             if event.play_mode == "OneShot":
-                message = f"已将 Active Source Binding 切换为 {clip_id}。"
+                message = f"已将 Active Audio Source Binding 切换为 {clip_id}。"
             else:
                 state_label = "激活" if active else "取消激活"
-                message = f"已将绑定 {clip_id} 标记为{state_label}。"
-            self.window.append_log(f"已更新事件 {event_id} 的绑定状态：{message}")
-            self.window.set_event_source_binding_feedback(event_id, message)
+                message = f"已将 Audio 绑定 {clip_id} 标记为{state_label}。"
+            self.window.append_log(f"已更新事件 {event_id} 的 Audio 绑定状态：{message}")
+            self.window.set_audio_source_binding_feedback(event_id, message)
             self._refresh_ui()
 
     def import_audio_files_as_events(self, file_paths: list[str], target_folder_id=None, template: dict[str, object] | None = None) -> None:
         import_entries, skipped_unsupported, skipped_missing, skipped_empty_directories = self._classify_event_import_paths(file_paths)
         imported_events: list[tuple[tuple[str, ...], EventModel]] = []
         reserved_event_ids = set(self.project.events.keys())
+        reserved_audio_ids = set(self.project.audio_objects.keys())
         for folder_parts, source_path in import_entries:
-            event = self._build_event_from_audio_path(source_path, reserved_event_ids)
+            event = self._build_event_from_audio_path(source_path, reserved_event_ids, reserved_audio_ids)
             self._apply_event_import_template(event, template)
             reserved_event_ids.add(event.id)
+            reserved_audio_ids.add(event.audio_id)
             imported_events.append((folder_parts, event))
 
         if not imported_events:
@@ -2969,24 +3366,44 @@ class MainController(QObject):
             asset_key=asset_key,
         )
 
-    def _build_event_from_audio_path(self, source_path: Path, reserved_event_ids: set[str] | None = None) -> EventModel:
-        base_event_id = self._normalize_event_id(source_path.stem)
-        event_id = self._make_unique_event_id(base_event_id, reserved_event_ids)
+    def _build_audio_object_from_path(self, source_path: Path, reserved_audio_ids: set[str] | None = None) -> AudioObjectModel:
+        base_audio_id = self._normalize_event_id(source_path.stem)
+        audio_id = self._make_unique_audio_id(base_audio_id, reserved_audio_ids)
+        clip = self._build_clip_from_path(source_path)
+        audio = AudioObjectModel(
+            id=audio_id,
+            display_name=source_path.stem,
+            play_mode="OneShot",
+            clips=[clip],
+        )
+        self._normalize_audio_binding_states(audio)
+        return audio
+
+    def _build_event_for_audio_object(
+        self,
+        audio: AudioObjectModel,
+        source_path: Path,
+        reserved_event_ids: set[str] | None = None,
+    ) -> EventModel:
+        event_id = self._make_unique_event_id(audio.id, reserved_event_ids)
         event = self._make_casual_event_template(
             event_id,
             display_name=source_path.stem,
             default_bus=self.project.settings.default_bus,
             available_buses=self.project.settings.buses,
         )
-        clip = ClipModel(
-            id=event_id,
-            source_path=str(source_path),
-            export_path=event_id,
-            asset_key=event_id,
-        )
-        event.clips.append(clip)
-        event.play_mode = "OneShot" if len(event.clips) == 1 else "Random"
+        event.audio_id = audio.id
+        event.audio = audio
         return event
+
+    def _build_event_from_audio_path(
+        self,
+        source_path: Path,
+        reserved_event_ids: set[str] | None = None,
+        reserved_audio_ids: set[str] | None = None,
+    ) -> EventModel:
+        audio = self._build_audio_object_from_path(source_path, reserved_audio_ids)
+        return self._build_event_for_audio_object(audio, source_path, reserved_event_ids)
 
     def _normalize_event_id(self, raw_name: str) -> str:
         normalized = "".join(character if character.isalnum() else "_" for character in raw_name.strip())
@@ -3128,7 +3545,7 @@ class MainController(QObject):
                 object_name=event.display_name or event.id,
                 breadcrumb=" / ".join(part for part in breadcrumb_parts if part),
                 stats_text=f"片段 {len(event.clips)} | 标签 {len(clip_tags)} | 冷却 {cooldown_text}",
-                summary_primary=f"模式 {event.play_mode} | {WWISE_OUTPUT_BUS_LABEL} {event.bus} | 试听 {self.preview_bus_mixer.describe_bus(event.bus)}",
+                summary_primary=f"Audio {event.play_mode} | {WWISE_OUTPUT_BUS_LABEL} {event.bus} | 试听 {self.preview_bus_mixer.describe_bus(event.bus)}",
                 summary_secondary=f"实例 {instances_text} | 负载 {event.load_policy} | 输出 {self.project.settings.source_audio_format} -> {self.project.settings.runtime_audio_format}",
                 can_navigate_parent=folder_id is not None,
             )
@@ -3657,6 +4074,14 @@ class MainController(QObject):
             self.select_node("event", target_id)
             self.window.set_active_property_category("事件")
             return
+        if target_type == "audio":
+            if target_id in self.project.events:
+                self.navigate_to_event_audio(target_id)
+                return
+            if target_id in self.project.audio_objects:
+                self.select_audio(target_id)
+                self.window.focus_current_audio_browser()
+                return
         if (target_type == "folder" and target_id in self.project.folders) or (target_type == "auto" and target_id in self.project.folders):
             self.select_node("folder", target_id)
             self.window.set_active_property_category("工程")

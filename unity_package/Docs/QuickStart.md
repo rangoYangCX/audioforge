@@ -1,6 +1,6 @@
 # AudioForge Unity SDK Quick Start
 
-当前文档同步日期：2026-05-13
+当前文档同步日期：2026-05-14
 
 这份文档只回答一件事：拿到包以后，Unity 程序最快怎么在 10 分钟内听到第一声。
 
@@ -20,7 +20,7 @@
 - `AudioManifest.json` -> `Assets/StreamingAssets/AudioForge/AudioManifest.json`
 - `Assets/**` -> `Assets/StreamingAssets/AudioForge/Assets/**`
 
-如果当前导出是 `SchemaVersion = 2`，`AudioData.json` 里还会包含 `GameParameters`、`StateGroups`、`SwitchGroups` 和事件/总线级 GameSync 区块；这些字段已经由包内 runtime 负责解析，不需要额外复制其他配置文件。
+如果当前导出是 `SchemaVersion = 3`，`AudioData.json` 里还会包含顶层 `AudioObjects`、`Events[AudioId]`、`GameParameters`、`StateGroups`、`SwitchGroups`，以及 Audio/总线级 GameSync 区块；这些字段已经由包内 runtime 负责解析，不需要额外复制其他配置文件。
 
 ## 第三步：搭最小验证场景
 
@@ -52,4 +52,4 @@
 3. 至少一个真实事件可以被触发播放。
 4. `AudioForgeRuntimeDebugPanel` 或日志里能看到事件触发记录。
 
-补充说明：当前包除了 `PlayMode = OneShot` 外，还已经补齐 `SchemaVersion = 2`、GameSync API、emitter context 和 child effects smoke；如果项目里不是直接使用包内 runtime，而是自行维护运行时，请优先同步这些契约变化。
+补充说明：当前包除了 `PlayMode = OneShot` 外，还已经补齐 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、GameSync API、emitter context、child effects smoke，以及 Event 顶层只保留播放控制、声音属性统一归 `AudioObject` 的契约；如果项目里不是直接使用包内 runtime，而是自行维护运行时，请优先同步这些变化。

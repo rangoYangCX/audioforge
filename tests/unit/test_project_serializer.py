@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -71,11 +72,18 @@ def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: P
     project_path = tmp_path / "sample.afproj"
 
     serializer.save(project, project_path)
+    raw_payload = json.loads(project_path.read_text(encoding="utf-8"))
     loaded = serializer.load(project_path)
 
     assert loaded.file_path == str(project_path)
+    assert "AudioObjects" in raw_payload
+    assert raw_payload["Events"]["UiClick"]["audio_id"] == project.events["UiClick"].audio_id
+    assert raw_payload["AudioObjects"][project.events["UiClick"].audio_id]["bus"] == "UI"
     assert loaded.events["UiClick"].clips[0].source_path == str(wav_path)
     assert loaded.events["UiClick"].clips[0].asset_key == "ui/click_primary"
+    assert loaded.events["UiClick"].audio_id in loaded.audio_objects
+    assert loaded.events["UiClick"].audio.bus == "UI"
+    assert loaded.events["UiClick"].audio.volume_db == -1.0
     assert loaded.settings.default_bus == "UI"
     assert loaded.settings.auto_assign_bus_by_name is False
     assert loaded.settings.bus_configs[-1].name == "UI"
@@ -91,6 +99,7 @@ def test_project_serializer_roundtrip_preserves_bus_routes_and_clips(tmp_path: P
     assert loaded.events["UiClick"].rtpc_bindings[0].curve_points[1].output_value == 0.0
     assert loaded.events["UiClick"].state_overrides[0].state_name == "Combat"
     assert loaded.events["UiClick"].switch_variants[0].clip_ids == [loaded.events["UiClick"].clips[0].id]
+    assert loaded.events["UiClick"].audio.rtpc_bindings[0].parameter_name == "PlayerSpeed"
     assert loaded.settings.bus_configs[-1].rtpc_bindings[0].target == "BusVolumeDb"
     assert loaded.settings.bus_configs[-1].rtpc_bindings[0].curve_points[1].interpolation == "Constant"
     assert loaded.settings.bus_configs[-1].state_overrides[0].volume_db == 2.0

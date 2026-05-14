@@ -1,13 +1,13 @@
 # AudioForge Unity SDK 一期到当前变化总览
 
-当前文档同步日期：2026-05-13
+当前文档同步日期：2026-05-14
 
 这份文档只回答一个问题：如果你已经按第一期心智开始对接 Unity SDK，那么当前版本相对一期到底改了什么，哪些需要你关注，哪些仍然不需要动 Unity 代码。
 
 ## 一眼结论
 
-- 当前相对第一期，运行时层已经从 `SchemaVersion = 1` 升到 `SchemaVersion = 2`，不再只有 `PlayMode = OneShot` 这一处变化。
-- 当前导出会额外写出项目级 `GameParameters / StateGroups / SwitchGroups`，以及事件/总线级 Game Sync 绑定；如果项目使用仓库自带 runtime，重点是同步最新包；如果项目维护自研 runtime，则必须补齐 v2 解析与 emitter context。
+- 当前相对第一期，运行时层已经从 `SchemaVersion = 1` 升到 `SchemaVersion = 3`，不再只有 `PlayMode = OneShot` 这一处变化。
+- 当前导出会额外写出顶层 `AudioObjects`、项目级 `GameParameters / StateGroups / SwitchGroups`，以及 Audio/总线级 Game Sync 绑定；如果项目使用仓库自带 runtime，重点是同步最新包；如果项目维护自研 runtime，则必须补齐 v3 解析与 emitter context。
 - 对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈和智能总线分配设置，仍然主要是桌面工具编辑体验升级，不要求把这些 editor-only 状态原样写进 SDK。
 
 ## 和第一期对比，当前新增了什么
@@ -15,7 +15,7 @@
 | 类别 | 第一期 | 当前版本 | Unity 侧要不要改 |
 | --- | --- | --- | --- |
 | 播放模式 | `Random / Sequence / Combo` | 明确补齐 `OneShot` | 要理解 `OneShot` 语义 |
-| 导出版本 | `SchemaVersion = 1` | `SchemaVersion = 2`，并保留 v1 兼容 | 若自研 runtime，需要补齐 v2 解析 |
+| 导出版本 | `SchemaVersion = 1` | `SchemaVersion = 3`，主结构为 `AudioObjects + Events[AudioId]` | 若自研 runtime，需要补齐 v3 解析 |
 | 项目级控制量 | 无 | `GameParameters`、`StateGroups`、`SwitchGroups` | 若自研 runtime，需要支持 |
 | 事件/总线调制 | 无 | `RtpcBindings`、`StateOverrides`、`SwitchVariants` | 若自研 runtime，需要支持 |
 | emitter 作用域 | 无 | `RegisterEmitter`、局部 RTPC、局部 Switch | 若项目要用 per-object 语义，需要支持 |
@@ -29,14 +29,14 @@
 ## 现在必须确认的 Unity 侧理解
 
 1. `PlayMode = OneShot` 表示一次触发只从当前有效 Clip 集合里取一个 Clip 播放。
-2. 当前最新导出可能是 `SchemaVersion = 2`，其中会包含项目级 Game Sync 定义和事件/总线级绑定；旧版只按 `Events + BusConfigs` 解析的自研 runtime 会漏能力。
+2. 当前最新导出可能是 `SchemaVersion = 3`，其中会包含顶层 `AudioObjects`、项目级 Game Sync 定义和 Audio/总线级绑定；旧版只按 `Events + BusConfigs` 解析的自研 runtime 会漏能力。
 3. Unity 侧不需要读取 `Enabled`、`Active`、bindings 弹窗状态或对象浏览器分页信息；这些都不会以 editor-only 原始状态进入当前导出 Schema。
 4. 如果你看到导出的 `Clips` 数量变少，不一定是导出器丢数据，也可能是工具端已经按当前有效集合过滤过结果，或者当前事件正通过 `DefaultClipIds / SwitchVariants` 表达候选集。
 5. 当前参考运行时代码已经能消费新版导出物；这次对使用官方包的同学主要是同步包和文档，对维护自研 runtime 的同学则是一次实质性的契约升级。
 
 ## 建议的对接动作
 
-1. 先读 `docs/UnitySDK对接规范.md` 里关于 `SchemaVersion = 2`、GameSync 字段和 editor-only 边界的最新说明。
-2. 再拿最新打包目录 `dist/AudioForgeUnityPackage-0.07.0/` 或 zip 里的文档副本走一遍 Quick Start。
+1. 先读 `docs/UnitySDK对接规范.md` 里关于 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、GameSync 字段和 editor-only 边界的最新说明。
+2. 再拿最新打包目录 `dist/AudioForgeUnityPackage-0.09.0/` 或 zip 里的文档副本走一遍 Quick Start。
 3. 如果项目里自己写过 runtime 解析层，先确认是否仍把顶层契约硬编码成只有 `BusConfigs` 与 `Events`。
 4. 如果项目里自己写过 `PlayMode` 或 emitter 触发逻辑，确认没有遗漏 `OneShot`、`RegisterEmitter`、`SetSwitch`、`SetGameParameter` 这类新增路径。

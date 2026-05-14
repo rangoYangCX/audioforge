@@ -110,6 +110,7 @@ from audioforge.app.utils.constants import (
 )
 from audioforge.app.widgets.clip_table import ClipTableWidget
 from audioforge.app.widgets.clip_waveform_editor import ClipWaveformEditor
+from audioforge.app.widgets.audio_tree import AudioTreeWidget
 from audioforge.app.widgets.event_tree import EventTreeWidget, decode_source_binding_token
 from audioforge.app.widgets.loudness_history_plot import LoudnessHistoryPlot
 from audioforge.app.widgets.rtpc_curve_editor import RtpcCurveEditor
@@ -331,7 +332,7 @@ def _apply_binding_card_style(
     path_label.setStyleSheet(f"color: {palette['path']};")
 
 
-class EventBindingsPopup(QDialog):
+class AudioBindingsPopup(QDialog):
     sourceAssetsDropped = Signal(str, list)
     bindingEnabledChanged = Signal(str, str, bool)
     bindingActiveChanged = Signal(str, str, bool)
@@ -344,7 +345,7 @@ class EventBindingsPopup(QDialog):
         self._binding_group: QButtonGroup | None = QButtonGroup(self)
         self._binding_group.setExclusive(True)
 
-        self.setWindowTitle("源音频绑定")
+        self.setWindowTitle("Audio 源音频绑定")
         self.setWindowFlag(Qt.WindowType.Popup, True)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setMinimumWidth(460)
@@ -354,9 +355,9 @@ class EventBindingsPopup(QDialog):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
-        self.title_label = QLabel("源音频绑定")
+        self.title_label = QLabel("Audio 源音频绑定")
         self.title_label.setProperty("role", "workspaceSectionTitle")
-        self.detail_label = QLabel("拖拽左侧源音频到这里，或直接调整当前事件的 Active / Enabled。")
+        self.detail_label = QLabel("拖拽左侧源音频到这里，或直接调整当前 Audio 的 Active / Enabled。")
         self.detail_label.setProperty("role", "workspaceSectionSummary")
         self.detail_label.setWordWrap(True)
 
@@ -396,7 +397,7 @@ class EventBindingsPopup(QDialog):
         self.bindings_layout.setSpacing(8)
         self.scroll_area.setWidget(self.bindings_container)
 
-        self.empty_state_label = QLabel("当前事件还没有绑定源音频。直接从左侧源音频树拖进来即可。")
+        self.empty_state_label = QLabel("当前 Audio 还没有绑定源音频。直接从左侧源音频树拖进来即可。")
         self.empty_state_label.setProperty("role", "workspaceSectionSummary")
         self.empty_state_label.setWordWrap(True)
 
@@ -421,11 +422,11 @@ class EventBindingsPopup(QDialog):
             mode_hint = "OneShot 下只能保留一个 Active；切换时会自动取消其他绑定的 Active。"
         else:
             mode_hint = "当前模式允许多个 Active；新追加的已启用绑定默认都会进入 Active。"
-        self.title_label.setText(f"事件 {label} 的源音频绑定")
+        self.title_label.setText(f"事件 {label} 的 Audio 源音频绑定")
         self.detail_label.setText(
-            f"模式 {play_mode_label} | {_binding_rollup_text(self._play_mode, list(event.clips))}。{mode_hint}"
+            f"Audio 模式 {play_mode_label} | {_binding_rollup_text(self._play_mode, list(event.clips))}。{mode_hint}"
         )
-        self.drop_title_label.setText(f"拖入即可追加到事件 {event.id}")
+        self.drop_title_label.setText(f"拖入即可追加到事件 {event.id} 的 Audio")
         self.drop_detail_label.setText("支持从左侧源音频树单选或多选后直接拖入；重复绑定会自动跳过。")
         self.set_status_message(status_message)
         self._clear_binding_cards()
@@ -561,6 +562,7 @@ class EventBindingsPopup(QDialog):
 
 class MainWindow(QMainWindow):
     eventPropertiesChanged = Signal()
+    audioPropertiesChanged = Signal()
     projectSettingsChanged = Signal()
     gameSyncChanged = Signal()
     previewGameSyncChanged = Signal()
@@ -587,10 +589,10 @@ class MainWindow(QMainWindow):
     stopPreviewBusRequested = Signal()
     importClipsRequested = Signal(list)
     removeClipsRequested = Signal(list)
-    assignSourceAssetsToCurrentEventRequested = Signal(list, bool)
-    assignSourceAssetsToEventRequested = Signal(str, list, bool)
-    sourceBindingEnabledChangedRequested = Signal(str, str, bool)
-    sourceBindingActiveChangedRequested = Signal(str, str, bool)
+    assignSourceAssetsToCurrentAudioRequested = Signal(list, bool)
+    assignSourceAssetsToAudioRequested = Signal(str, list, bool)
+    audioSourceBindingEnabledChangedRequested = Signal(str, str, bool)
+    audioSourceBindingActiveChangedRequested = Signal(str, str, bool)
     bulkWeightRequested = Signal(int)
     batchRenameRequested = Signal(str, int)
     bulkClipPropertiesRequested = Signal(dict)
@@ -608,14 +610,15 @@ class MainWindow(QMainWindow):
     previewClipSegmentRequested = Signal(str, int, int)
     importAudioAsEventsRequested = Signal(list, object, dict)
     reportTargetRequested = Signal(str, str)
+    openAudioBindingsForAudioRequested = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(load_app_icon("app"))
-        self._event_bindings_popup: EventBindingsPopup | None = None
-        self._event_source_binding_feedback_event_id = ""
-        self._event_source_binding_feedback_message = ""
+        self._audio_bindings_popup: AudioBindingsPopup | None = None
+        self._audio_source_binding_feedback_event_id = ""
+        self._audio_source_binding_feedback_message = ""
         self.resize(*DEFAULT_WINDOW_SIZE)
         self.setMinimumSize(1180, 760)
         self._loading_event = False
@@ -639,6 +642,7 @@ class MainWindow(QMainWindow):
         self._pending_layout_flush = False
         self._build_status_summary_override: str | None = None
         self._build_status_detail_override: str | None = None
+        self._project_settings_change_source = ""
         self._closing_main_window = False
         self._loading_clip_details = False
         self._preview_transport_state = "idle"
@@ -654,6 +658,8 @@ class MainWindow(QMainWindow):
         self._project_bus_configs: list[dict[str, object]] = []
         self._active_project_bus_name = ""
         self._active_event_id: str | None = None
+        self._active_audio_id: str | None = None
+        self._loading_project_bus_details = False
         self._project_bus_selection_overridden = False
         self._syncing_project_bus_selection = False
         self._explorer_detached = False
@@ -664,6 +670,7 @@ class MainWindow(QMainWindow):
             "tags": [],
         }
         self._source_browser_entries: list[dict[str, object]] = []
+        self._audio_browser_entries: list[dict[str, object]] = []
         self._gamesync_entries: dict[str, list[dict[str, object]]] = {
             "game_parameters": [],
             "state_groups": [],
@@ -737,20 +744,25 @@ class MainWindow(QMainWindow):
         self.inline_bus_default_chip = QLabel(f"{WWISE_DEFAULT_BUS_LABEL} -")
         self.inline_bus_export_chip = QLabel("导出 -")
         self.project_bus_list = ProjectBusTreeWidget()
-        self.source_tree = SourceTreeWidget()
+        self.source_tree = SourceTreeWidget(selection_mode=QAbstractItemView.SelectionMode.MultiSelection)
+        self.audio_tree = AudioTreeWidget()
         self.source_browser_filter_combo = QComboBox()
         self.source_browser_filter_combo.addItem("全部状态", "all")
         self.source_browser_filter_combo.addItem("文件缺失", "missing")
         self.source_browser_filter_combo.addItem("未被引用", "unreferenced")
-        self.source_browser_filter_combo.addItem("多事件复用", "reused")
-        self.source_browser_filter_combo.addItem("当前事件已绑定", "current_event")
-        self.source_browser_filter_combo.addItem("当前事件未绑定", "not_current_event")
+        self.source_browser_filter_combo.addItem("多 Audio 复用", "reused")
+        self.source_browser_filter_combo.addItem("当前 Audio 已绑定", "current_event")
+        self.source_browser_filter_combo.addItem("当前 Audio 未绑定", "not_current_event")
+        self.source_browser_filter_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.source_browser_filter_combo.setMinimumContentsLength(8)
         self.project_bus_add_button = QPushButton("新建 Bus")
         self.project_bus_remove_button = QPushButton("删除 Bus")
         self.source_browser_locate_button = QPushButton("定位源文件")
         self.source_browser_copy_button = QPushButton("复制源路径")
-        self.source_browser_locate_event_button = QPushButton("定位引用事件")
-        self.source_browser_add_to_event_button = QPushButton("追加到当前事件")
+        self.source_browser_locate_event_button = QPushButton("定位引用 Audio")
+        self.source_browser_add_to_event_button = QPushButton("追加到 Audio")
+        self.audio_browser_locate_event_button = QPushButton("定位引用 Event")
+        self.audio_browser_open_bindings_button = QPushButton("打开 Audio 绑定")
         self.project_bus_browser_button = QPushButton("切到总线树")
         self.project_bus_name_edit = QLineEdit()
         self.project_bus_name_edit.setPlaceholderText("Music")
@@ -772,10 +784,14 @@ class MainWindow(QMainWindow):
         self.project_bus_effective_bar.setRange(0, 100)
         self.project_bus_summary_label = QLabel("在左侧选择 Bus 后，可在属性编辑器中直接编辑当前 Bus。")
         self.project_bus_summary_label.setWordWrap(True)
-        self.source_browser_summary_label = QLabel("源音频树会按路径展示工程中的源文件，并标记引用、缺失和未引用状态。")
+        self.source_browser_summary_label = QLabel("源音频树会按路径展示工程中的源文件，并标记 Audio 引用、缺失和未引用状态。")
         self.source_browser_summary_label.setWordWrap(True)
         self.source_browser_status_label = QLabel("当前没有源音频。")
         self.source_browser_status_label.setWordWrap(True)
+        self.audio_browser_summary_label = QLabel("Audio 树展示项目级 Audio Object，并聚合它们引用的 Event、Bus 和片段数量。")
+        self.audio_browser_summary_label.setWordWrap(True)
+        self.audio_browser_status_label = QLabel("当前没有 Audio Object。")
+        self.audio_browser_status_label.setWordWrap(True)
         self.gamesync_browser_summary_label = QLabel("GameSync 浏览页会汇总项目级 RTPC、State Group 和 Switch Group。")
         self.gamesync_browser_summary_label.setWordWrap(True)
         self.gamesync_browser_status_label = QLabel("当前还没有任何 GameSync 定义。")
@@ -843,9 +859,9 @@ class MainWindow(QMainWindow):
         self.gamesync_switch_mapped_parameter_edit.setPlaceholderText("SurfaceBlend")
         self.gamesync_switch_notes_edit = QPlainTextEdit()
         self.gamesync_switch_notes_edit.setPlaceholderText("记录 emitter 作用域或映射规则")
-        self.event_source_binding_summary_label = QLabel("当前事件还没有绑定源音频。")
+        self.event_source_binding_summary_label = QLabel("当前 Audio 还没有绑定源音频。")
         self.event_source_binding_summary_label.setWordWrap(True)
-        self.event_source_binding_detail_label = QLabel("这里现在只展示当前事件的绑定摘要。需要追加源音频或切换 Active / Enabled，请在事件树中展开当前事件打开绑定弹窗。")
+        self.event_source_binding_detail_label = QLabel("这里现在只展示当前 Audio 的绑定摘要。需要追加源音频或切换 Active / Enabled，请在 Audio 树中定位当前对象后打开 Audio 绑定。")
         self.event_source_binding_detail_label.setProperty("role", "workspaceSectionSummary")
         self.event_source_binding_detail_label.setWordWrap(True)
         self.event_source_binding_overview_scroll = QScrollArea()
@@ -858,7 +874,7 @@ class MainWindow(QMainWindow):
         self.event_source_binding_overview_layout.setContentsMargins(0, 0, 0, 0)
         self.event_source_binding_overview_layout.setSpacing(8)
         self.event_source_binding_overview_scroll.setWidget(self.event_source_binding_overview_container)
-        self.event_source_binding_empty_label = QLabel("当前事件还没有绑定源音频。")
+        self.event_source_binding_empty_label = QLabel("当前 Audio 还没有绑定源音频。")
         self.event_source_binding_empty_label.setProperty("role", "workspaceSectionSummary")
         self.event_source_binding_empty_label.setWordWrap(True)
         self.project_bus_focus_audio_button = QPushButton("在属性编辑器中编辑当前 Bus")
@@ -1062,6 +1078,10 @@ class MainWindow(QMainWindow):
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMaximumHeight(100)
         self.notes_edit.setPlaceholderText("记录触发语义、使用场景或联调备注")
+        self.event_audio_reference_label = QLabel("当前引用 Audio：-")
+        self.event_audio_reference_label.setWordWrap(True)
+        self.event_open_audio_workspace_button = QPushButton("切到 Audio 属性")
+        self.event_locate_audio_browser_button = QPushButton("在 Audio 树中定位")
         self.tags_summary_edit = QLineEdit()
         self.tags_summary_edit.setPlaceholderText("ui, click, soft")
 
@@ -1478,23 +1498,38 @@ class MainWindow(QMainWindow):
         reference_layout.addWidget(self.reference_work_unit_label, 2, 0, 1, 2)
         reference_layout.addWidget(self.reference_output_label, 2, 2, 1, 2)
 
-        self.event_general_group = QGroupBox("对象设置")
+        self.event_general_group = QGroupBox("事件元数据")
         general_layout = QFormLayout(self.event_general_group)
         general_layout.addRow("名称", self.display_name_edit)
         general_layout.addRow("对象 ID", self.event_id_edit)
-        general_layout.addRow(WWISE_OUTPUT_BUS_LABEL, self.bus_combo)
-        general_layout.addRow("播放机制", self.play_mode_combo)
-        general_layout.addRow("加载方式", self.load_policy_combo)
-        general_layout.addRow("标签", self.tags_summary_edit)
 
-        self.event_behavior_group = QGroupBox("触发控制")
+        self.event_behavior_group = QGroupBox("播放控制")
         voice_layout = QFormLayout(self.event_behavior_group)
         voice_layout.addRow("抢占策略", self.steal_policy_combo)
         voice_layout.addRow("实例上限", self.max_instances_spin)
         voice_layout.addRow("冷却时间（秒）", self.cooldown_spin)
-        voice_layout.addRow("避免紧邻重复", self.avoid_repeat_check)
 
-        self.modulation_group = QGroupBox("音调与音量")
+        self.event_audio_reference_group = QGroupBox("引用 Audio")
+        event_audio_reference_layout = QVBoxLayout(self.event_audio_reference_group)
+        event_audio_reference_layout.setSpacing(8)
+        event_audio_reference_layout.addWidget(self.event_audio_reference_label)
+        event_audio_reference_actions = QHBoxLayout()
+        event_audio_reference_actions.setContentsMargins(0, 0, 0, 0)
+        event_audio_reference_actions.setSpacing(8)
+        event_audio_reference_actions.addWidget(self.event_open_audio_workspace_button)
+        event_audio_reference_actions.addWidget(self.event_locate_audio_browser_button)
+        event_audio_reference_actions.addStretch(1)
+        event_audio_reference_layout.addLayout(event_audio_reference_actions)
+
+        self.audio_general_group = QGroupBox("Audio 属性")
+        audio_general_layout = QFormLayout(self.audio_general_group)
+        audio_general_layout.addRow(WWISE_OUTPUT_BUS_LABEL, self.bus_combo)
+        audio_general_layout.addRow("Audio 模式", self.play_mode_combo)
+        audio_general_layout.addRow("加载方式", self.load_policy_combo)
+        audio_general_layout.addRow("避免紧邻重复", self.avoid_repeat_check)
+        audio_general_layout.addRow("标签", self.tags_summary_edit)
+
+        self.modulation_group = QGroupBox("Audio 调制")
         modulation_layout = QFormLayout(self.modulation_group)
         modulation_layout.addRow("基础音量（dB）", self.volume_spin)
         modulation_layout.addRow("音量随机最小（dB）", self.volume_rand_min_spin)
@@ -1503,7 +1538,7 @@ class MainWindow(QMainWindow):
         modulation_layout.addRow("音高随机最小（cents）", self.pitch_rand_min_spin)
         modulation_layout.addRow("音高随机最大（cents）", self.pitch_rand_max_spin)
 
-        self.combo_group = QGroupBox("连击加成")
+        self.combo_group = QGroupBox("Audio Combo 规则")
         combo_layout = QFormLayout(self.combo_group)
         combo_layout.addRow("连击步进（半音）", self.combo_pitch_step_spin)
         combo_layout.addRow("重置时间（秒）", self.combo_reset_spin)
@@ -1652,7 +1687,7 @@ class MainWindow(QMainWindow):
         notes_layout = QVBoxLayout(self.notes_group)
         notes_layout.addWidget(self.notes_edit)
 
-        self.event_source_binding_group = QGroupBox("源音频绑定")
+        self.event_source_binding_group = QGroupBox("Audio 源音频绑定")
         event_source_binding_layout = QVBoxLayout(self.event_source_binding_group)
         event_source_binding_layout.setSpacing(8)
         event_source_binding_layout.addWidget(self.event_source_binding_summary_label)
@@ -1708,22 +1743,8 @@ class MainWindow(QMainWindow):
         bus_validation_layout.setContentsMargins(12, 10, 12, 10)
         bus_validation_layout.addWidget(self.project_bus_export_label)
         self.bus_gamesync_group = self._build_bus_gamesync_group()
-        self.inline_bus_content = QSplitter()
-        self.inline_bus_content.setObjectName("InlineBusContentSplitter")
-        self.inline_bus_content.setOrientation(Qt.Orientation.Horizontal)
-        self.inline_bus_content.setChildrenCollapsible(False)
-        self.inline_bus_content.addWidget(self.bus_routing_group)
-        bus_status_panel = QWidget()
-        bus_status_layout = QVBoxLayout(bus_status_panel)
-        bus_status_layout.setContentsMargins(0, 0, 0, 0)
-        bus_status_layout.addWidget(self.bus_level_group)
-        bus_status_layout.addWidget(self.bus_validation_group)
-        bus_status_layout.addWidget(self.bus_gamesync_group, 1)
-        bus_status_layout.addStretch(1)
-        self.inline_bus_content.addWidget(bus_status_panel)
-        self.inline_bus_content.setStretchFactor(0, 3)
-        self.inline_bus_content.setStretchFactor(1, 2)
-        inline_bus_layout.addWidget(self.inline_bus_content)
+        self.current_bus_detail_tabs = QTabWidget()
+        inline_bus_layout.addWidget(self.current_bus_detail_tabs)
 
         self.audio_top_splitter = QSplitter()
         self.audio_top_splitter.setObjectName("AudioTopSplitter")
@@ -1788,17 +1809,37 @@ class MainWindow(QMainWindow):
 
         self.source_browser_group = QGroupBox("源音频树")
         source_browser_layout = QVBoxLayout(self.source_browser_group)
-        source_browser_actions = QHBoxLayout()
-        source_browser_actions.addWidget(self.source_browser_filter_combo)
-        source_browser_actions.addWidget(self.source_browser_locate_button)
-        source_browser_actions.addWidget(self.source_browser_copy_button)
-        source_browser_actions.addWidget(self.source_browser_locate_event_button)
-        source_browser_actions.addWidget(self.source_browser_add_to_event_button)
-        source_browser_actions.addStretch(1)
+        source_browser_actions = QVBoxLayout()
+        source_browser_actions.setContentsMargins(0, 0, 0, 0)
+        source_browser_actions.setSpacing(6)
+        source_browser_action_row_top = QHBoxLayout()
+        source_browser_action_row_top.addWidget(self.source_browser_filter_combo)
+        source_browser_action_row_top.addWidget(self.source_browser_locate_button)
+        source_browser_action_row_top.addWidget(self.source_browser_copy_button)
+        source_browser_action_row_top.addStretch(1)
+        source_browser_action_row_bottom = QHBoxLayout()
+        source_browser_action_row_bottom.addWidget(self.source_browser_locate_event_button)
+        source_browser_action_row_bottom.addWidget(self.source_browser_add_to_event_button)
+        source_browser_action_row_bottom.addStretch(1)
+        source_browser_actions.addLayout(source_browser_action_row_top)
+        source_browser_actions.addLayout(source_browser_action_row_bottom)
         source_browser_layout.addLayout(source_browser_actions)
         source_browser_layout.addWidget(self.source_tree)
         source_browser_layout.addWidget(self.source_browser_summary_label)
         source_browser_layout.addWidget(self.source_browser_status_label)
+
+        self.audio_browser_group = QGroupBox("Audio 树")
+        audio_browser_layout = QVBoxLayout(self.audio_browser_group)
+        audio_browser_actions = QHBoxLayout()
+        audio_browser_actions.setContentsMargins(0, 0, 0, 0)
+        audio_browser_actions.setSpacing(8)
+        audio_browser_actions.addWidget(self.audio_browser_locate_event_button)
+        audio_browser_actions.addWidget(self.audio_browser_open_bindings_button)
+        audio_browser_actions.addStretch(1)
+        audio_browser_layout.addLayout(audio_browser_actions)
+        audio_browser_layout.addWidget(self.audio_tree)
+        audio_browser_layout.addWidget(self.audio_browser_summary_label)
+        audio_browser_layout.addWidget(self.audio_browser_status_label)
 
         self.gamesync_browser_group = QGroupBox("GameSync")
         gamesync_browser_layout = QVBoxLayout(self.gamesync_browser_group)
@@ -1850,6 +1891,23 @@ class MainWindow(QMainWindow):
         project_bus_overview_layout.addWidget(self.project_bus_summary_label)
         project_bus_overview_layout.addWidget(self.project_bus_focus_audio_button)
 
+        self.current_bus_route_scroll = self._wrap_scrollable_page(
+            self._build_two_column_page(
+                [self.bus_routing_group],
+                [self.project_bus_overview_group],
+                splitter_name="CurrentBusRoutePageSplitter",
+            )
+        )
+        self.current_bus_level_scroll = self._wrap_scrollable_page(
+            self._build_two_column_page(
+                [self.bus_level_group],
+                [self.bus_validation_group],
+                splitter_name="CurrentBusLevelPageSplitter",
+            )
+        )
+        self.current_bus_detail_tabs.addTab(self.current_bus_route_scroll, load_app_icon("route"), WWISE_ROUTING_LABEL)
+        self.current_bus_detail_tabs.addTab(self.current_bus_level_scroll, load_app_icon("generate"), "电平/导出")
+
         self.project_bus_browser_hint_group = QGroupBox("对象浏览器")
         project_bus_browser_hint_layout = QVBoxLayout(self.project_bus_browser_hint_group)
         project_bus_browser_hint_label = QLabel("总线树已并入左侧对象浏览器；在浏览器中选中 Bus 后，这里只保留属性与总览。")
@@ -1863,7 +1921,6 @@ class MainWindow(QMainWindow):
         project_right_layout.setContentsMargins(0, 0, 0, 0)
         project_right_layout.addWidget(self.master_bus_group)
         project_right_layout.addWidget(self.project_settings_group)
-        project_right_layout.addWidget(self.project_bus_overview_group)
         project_right_layout.addStretch(1)
 
         self.project_splitter = QSplitter()
@@ -2144,6 +2201,7 @@ class MainWindow(QMainWindow):
         event_browser_layout.addWidget(self.tree)
         self.explorer_tabs.addTab(self.bus_browser_group, load_app_icon("bus"), "总线树")
         self.explorer_tabs.addTab(self.source_browser_group, load_app_icon("audio"), "源音频树")
+        self.explorer_tabs.addTab(self.audio_browser_group, load_app_icon("audio"), "Audio 树")
         self.explorer_tabs.addTab(event_browser_page, load_app_icon("event"), "事件树")
         self.explorer_tabs.addTab(self.gamesync_browser_group, load_app_icon("curve"), "GameSync")
         left_layout.addWidget(self.explorer_tabs)
@@ -2618,20 +2676,35 @@ class MainWindow(QMainWindow):
 
     def _build_events_workspace(self) -> QWidget:
         self.events_workspace_tabs = QTabWidget()
-        top_section = self._build_two_column_page(
-            [self.event_general_group, self.event_behavior_group, self.event_source_binding_group],
-            [self.modulation_group, self.combo_group, self.notes_group],
+        event_top_section = self._build_two_column_page(
+            [self.event_general_group, self.event_behavior_group],
+            [self.event_audio_reference_group, self.notes_group],
             splitter_name="EventDesignPageSplitter",
         )
-        design_page = QWidget()
-        design_layout = QVBoxLayout(design_page)
-        design_layout.setContentsMargins(0, 0, 0, 0)
-        design_layout.setSpacing(10)
-        design_layout.addWidget(top_section)
-        design_layout.addWidget(self._wrap_workspace_widget(self.event_gamesync_group))
-        design_layout.addStretch(1)
-        self.event_design_scroll = self._wrap_scrollable_page(design_page)
-        self.events_workspace_tabs.addTab(self.event_design_scroll, load_app_icon("event"), "事件参数")
+        event_design_page = QWidget()
+        event_design_layout = QVBoxLayout(event_design_page)
+        event_design_layout.setContentsMargins(0, 0, 0, 0)
+        event_design_layout.setSpacing(10)
+        event_design_layout.addWidget(event_top_section)
+        event_design_layout.addStretch(1)
+        self.event_design_scroll = self._wrap_scrollable_page(event_design_page)
+
+        audio_top_section = self._build_two_column_page(
+            [self.audio_general_group, self.modulation_group],
+            [self.combo_group, self.event_source_binding_group],
+            splitter_name="AudioDesignPageSplitter",
+        )
+        audio_design_page = QWidget()
+        audio_design_layout = QVBoxLayout(audio_design_page)
+        audio_design_layout.setContentsMargins(0, 0, 0, 0)
+        audio_design_layout.setSpacing(10)
+        audio_design_layout.addWidget(audio_top_section)
+        audio_design_layout.addWidget(self._wrap_workspace_widget(self.event_gamesync_group))
+        audio_design_layout.addStretch(1)
+        self.audio_design_scroll = self._wrap_scrollable_page(audio_design_page)
+
+        self.events_workspace_tabs.addTab(self.event_design_scroll, load_app_icon("event"), "事件")
+        self.events_workspace_tabs.addTab(self.audio_design_scroll, load_app_icon("audio"), "Audio")
         self.events_workspace_tabs.addTab(self.loudness_view, load_app_icon("audio"), "响度监视器")
 
         workspace = QWidget()
@@ -2962,8 +3035,11 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_event_gamesync_group(self) -> QGroupBox:
-        group = QGroupBox("GameSync 绑定")
+        group = QGroupBox("Audio GameSync 绑定")
         layout = QVBoxLayout(group)
+        self.event_gamesync_context_label = QLabel("当前 Audio：-")
+        self.event_gamesync_context_label.setProperty("role", "workspaceSectionSummary")
+        self.event_gamesync_context_label.setWordWrap(True)
         tabs = QTabWidget()
         tabs.addTab(
             self._build_rtpc_binding_editor(
@@ -3003,6 +3079,7 @@ class MainWindow(QMainWindow):
             "State",
         )
         tabs.addTab(self._build_switch_variant_editor(), load_app_icon("switch"), "Switch")
+        layout.addWidget(self.event_gamesync_context_label)
         layout.addWidget(tabs)
         self.event_gamesync_tabs = tabs
         return group
@@ -3205,14 +3282,35 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_buses_workspace(self) -> QWidget:
-        bus_surface = QSplitter()
-        bus_surface.setObjectName("BusesSurfaceSplitter")
-        bus_surface.setOrientation(Qt.Orientation.Vertical)
-        bus_surface.setChildrenCollapsible(False)
-        bus_surface.addWidget(self.inline_bus_group)
-        bus_surface.addWidget(self.project_splitter)
-        bus_surface.setStretchFactor(0, 2)
-        bus_surface.setStretchFactor(1, 3)
+        self.buses_workspace_tabs = QTabWidget()
+
+        current_bus_page = QWidget()
+        current_bus_layout = QVBoxLayout(current_bus_page)
+        current_bus_layout.setContentsMargins(0, 0, 0, 0)
+        current_bus_layout.setSpacing(10)
+        current_bus_layout.addWidget(self._wrap_workspace_widget(self.inline_bus_group))
+        current_bus_layout.addStretch(1)
+        self.current_bus_workspace_scroll = self._wrap_scrollable_page(current_bus_page)
+
+        bus_overview_page = QWidget()
+        bus_overview_layout = QVBoxLayout(bus_overview_page)
+        bus_overview_layout.setContentsMargins(0, 0, 0, 0)
+        bus_overview_layout.setSpacing(10)
+        bus_overview_layout.addWidget(self.project_splitter)
+        bus_overview_layout.addStretch(1)
+        self.bus_overview_workspace_scroll = self._wrap_scrollable_page(bus_overview_page)
+
+        bus_gamesync_page = QWidget()
+        bus_gamesync_layout = QVBoxLayout(bus_gamesync_page)
+        bus_gamesync_layout.setContentsMargins(0, 0, 0, 0)
+        bus_gamesync_layout.setSpacing(10)
+        bus_gamesync_layout.addWidget(self._wrap_workspace_widget(self.bus_gamesync_group))
+        bus_gamesync_layout.addStretch(1)
+        self.bus_gamesync_workspace_scroll = self._wrap_scrollable_page(bus_gamesync_page)
+
+        self.buses_workspace_tabs.addTab(self.current_bus_workspace_scroll, load_app_icon("bus"), "当前 Bus")
+        self.buses_workspace_tabs.addTab(self.bus_overview_workspace_scroll, load_app_icon("route"), "工程总览")
+        self.buses_workspace_tabs.addTab(self.bus_gamesync_workspace_scroll, load_app_icon("rtpc"), "Bus GameSync")
 
         workspace = QWidget()
         layout = QVBoxLayout(workspace)
@@ -3229,7 +3327,7 @@ class MainWindow(QMainWindow):
                 ],
             )
         )
-        layout.addWidget(bus_surface, 1)
+        layout.addWidget(self.buses_workspace_tabs, 1)
         return workspace
 
     def _build_build_overview_panel(self) -> QWidget:
@@ -3671,6 +3769,7 @@ class MainWindow(QMainWindow):
             self.activity_toggle_button.setText("收起" if expanded else "展开")
             self.activity_toggle_button.setToolTip("收起结果坞摘要" if expanded else "展开结果坞摘要")
         self.activity_panel.setMinimumHeight(self._expanded_report_panel_min_height if expanded else self._minimum_report_panel_height)
+        self.activity_panel.setMaximumHeight(16777215 if expanded else self._minimum_report_panel_height)
 
     def _toggle_activity_panel(self) -> None:
         current_sizes = self.workspace_splitter.sizes() if hasattr(self, "workspace_splitter") else list(self._default_workspace_splitter_sizes)
@@ -4235,9 +4334,18 @@ class MainWindow(QMainWindow):
         self.main_splitter.updateGeometry()
         self.workspace_splitter.updateGeometry()
         if previous_main_sizes and not self._explorer_detached:
-            self._set_main_splitter_sizes(previous_main_sizes)
+            restored_main_sizes = [int(value) for value in previous_main_sizes]
+            self._set_main_splitter_sizes(restored_main_sizes)
+            QTimer.singleShot(0, lambda sizes=list(restored_main_sizes): self._restore_main_splitter_sizes_after_mode_switch(sizes))
         self._set_workspace_mode(mode)
         self._update_object_bus_status()
+
+    def _restore_main_splitter_sizes_after_mode_switch(self, sizes: list[int]) -> None:
+        if self._explorer_detached or not self.isVisible():
+            return
+        normalized_sizes = [int(value) for value in sizes]
+        self._last_docked_main_splitter_sizes = list(normalized_sizes)
+        self.main_splitter.setSizes(normalized_sizes)
 
     def _sync_global_search_fields(self, text: str) -> None:
         self.tree_filter_edit.setText(text)
@@ -4651,6 +4759,12 @@ class MainWindow(QMainWindow):
                 splitter = self.findChild(QSplitter, name)
                 if splitter is not None:
                     splitter.setSizes([int(value) for value in sizes])
+        actual_workspace_sizes = self.workspace_splitter.sizes() if hasattr(self, "workspace_splitter") else []
+        if len(actual_workspace_sizes) == 2:
+            self._activity_panel_expanded = actual_workspace_sizes[1] > self._minimum_report_panel_height + 24
+            if self._activity_panel_expanded:
+                self._last_expanded_report_panel_height = actual_workspace_sizes[1]
+        self._apply_activity_panel_presentation()
 
     def _normalize_workspace_splitter_sizes(self, sizes: list[int]) -> list[int]:
         normalized = [int(value) for value in sizes]
@@ -4756,8 +4870,11 @@ class MainWindow(QMainWindow):
         current_event_id = event.id if event is not None else None
         event_changed = current_event_id != previous_event_id
         self._active_event_id = current_event_id
+        self._active_audio_id = event.audio_id if event is not None else None
         self._loading_event = True
         if event is None:
+            self.event_gamesync_group.setTitle("Audio GameSync 绑定")
+            self.event_gamesync_context_label.setText("当前 Audio：-")
             self.clear_resources_batch_feedback()
             self.status_label.setText("未选择事件")
             self.event_id_edit.clear()
@@ -4782,6 +4899,9 @@ class MainWindow(QMainWindow):
             self.combo_max_step_spin.setValue(0)
             self.avoid_repeat_check.setChecked(False)
             self.notes_edit.clear()
+            self.event_audio_reference_label.setText("当前引用 Audio：-")
+            self.event_open_audio_workspace_button.setEnabled(False)
+            self.event_locate_audio_browser_button.setEnabled(False)
             self.clip_table.setRowCount(0)
             self._event_rtpc_bindings = []
             self._event_state_overrides = []
@@ -4830,6 +4950,9 @@ class MainWindow(QMainWindow):
             self._loading_event = False
             return
 
+        audio_context_label = event.display_name or event.id
+        self.event_gamesync_group.setTitle(f"Audio GameSync 绑定 | {audio_context_label}")
+        self.event_gamesync_context_label.setText(f"当前 Audio：{event.audio_id}")
         self.status_label.setText(f"当前事件：{event.id}")
         if self._resources_batch_feedback_event_id != event.id:
             self.clear_resources_batch_feedback(event.id, len(event.clips))
@@ -4839,7 +4962,7 @@ class MainWindow(QMainWindow):
             object_name=event.display_name or event.id,
             breadcrumb=f"Project / Event / {event.id}",
             stats_text=f"片段 {len(event.clips)} | 标签 {len(event_tags)}",
-            summary_primary=f"模式 {self._play_mode_label(event.play_mode)} | {WWISE_OUTPUT_BUS_LABEL} {event.bus}",
+            summary_primary=f"Audio {self._play_mode_label(event.play_mode)} | {WWISE_OUTPUT_BUS_LABEL} {event.bus}",
             summary_secondary=f"实例 {'不限' if event.max_instances == 0 else event.max_instances} | 导出 {self.runtime_audio_format_combo.currentText()}",
             can_navigate_parent=True,
         )
@@ -4865,6 +4988,9 @@ class MainWindow(QMainWindow):
         self.combo_max_step_spin.setValue(event.combo_max_step)
         self.avoid_repeat_check.setChecked(event.avoid_immediate_repeat)
         self.notes_edit.setPlainText(event.notes)
+        self.event_audio_reference_label.setText(f"当前引用 Audio：{event.audio_id}")
+        self.event_open_audio_workspace_button.setEnabled(True)
+        self.event_locate_audio_browser_button.setEnabled(True)
         self._event_rtpc_bindings = [self._rtpc_binding_payload(binding) for binding in getattr(event, "rtpc_bindings", [])]
         self._event_state_overrides = [self._state_override_payload(override) for override in getattr(event, "state_overrides", [])]
         self._event_switch_variants = [self._switch_variant_payload(variant) for variant in getattr(event, "switch_variants", [])]
@@ -4946,13 +5072,89 @@ class MainWindow(QMainWindow):
         ]
 
     def _refresh_source_browser_tree(self) -> None:
+        selected_source_paths = self.source_tree.selected_source_paths()
         current_source_path = self.source_tree.current_source_path()
         entries = self._filtered_source_entries(self.tree_filter_edit.text(), self._source_filter_key(self.source_browser_filter_combo))
         self.source_tree.rebuild(entries)
-        if current_source_path:
+        if selected_source_paths:
+            self.source_tree.set_selected_source_paths(selected_source_paths)
+        elif current_source_path:
             self.source_tree.select_source_path(current_source_path)
         self._update_source_browser_summary(entries)
         self._update_source_browser_status()
+
+    def set_audio_browser_entries(self, entries: list[dict[str, object]]) -> None:
+        self._audio_browser_entries = [dict(entry) for entry in entries]
+        self._refresh_audio_browser_tree()
+
+    def _filtered_audio_entries(self, query: str) -> list[dict[str, object]]:
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            return list(self._audio_browser_entries)
+        visible_entries: list[dict[str, object]] = []
+        for entry in self._audio_browser_entries:
+            haystacks = [
+                str(entry.get("audio_id", "")).lower(),
+                str(entry.get("display_name", "")).lower(),
+                str(entry.get("play_mode", "")).lower(),
+                str(entry.get("bus", "")).lower(),
+                *[str(value).lower() for value in entry.get("event_ids", [])],
+            ]
+            if any(normalized_query in value for value in haystacks):
+                visible_entries.append(entry)
+        return visible_entries
+
+    def _refresh_audio_browser_tree(self) -> None:
+        current_audio_id = self.audio_tree.current_audio_id()
+        entries = self._filtered_audio_entries(self.tree_filter_edit.text())
+        self.audio_tree.rebuild(entries)
+        if current_audio_id:
+            self.audio_tree.select_audio_id(current_audio_id)
+        self.audio_tree.apply_filter(self.tree_filter_edit.text())
+        self._update_audio_browser_summary(entries)
+        self._update_audio_browser_status()
+
+    def _update_audio_browser_summary(self, visible_entries: list[dict[str, object]]) -> None:
+        total_count = len(self._audio_browser_entries)
+        visible_count = len(visible_entries)
+        referenced_events = sum(int(entry.get("event_count", 0)) for entry in self._audio_browser_entries)
+        total_clips = sum(int(entry.get("clip_count", 0)) for entry in self._audio_browser_entries)
+        self.audio_browser_summary_label.setText(
+            f"Audio Object {total_count} 个 | 当前显示 {visible_count} | 引用 Event {referenced_events} 个 | 片段 {total_clips} 个"
+        )
+
+    def _update_audio_browser_status(self) -> None:
+        entry = self.current_audio_browser_entry()
+        if not entry:
+            self.audio_browser_status_label.setText("选择一个 Audio Object，可查看模式、Bus、片段数量和引用 Event。")
+            self.audio_browser_locate_event_button.setEnabled(False)
+            self.audio_browser_open_bindings_button.setEnabled(False)
+            return
+
+        audio_id = str(entry.get("audio_id", "")).strip() or "-"
+        play_mode = str(entry.get("play_mode", "")).strip() or "-"
+        bus_name = str(entry.get("bus", "")).strip() or "-"
+        clip_count = int(entry.get("clip_count", 0))
+        event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
+        preview_events = "、".join(event_ids[:4]) if event_ids else "-"
+        self.audio_browser_status_label.setText(
+            f"{audio_id}\n模式 {play_mode} | {WWISE_OUTPUT_BUS_LABEL} {bus_name} | 片段 {clip_count}\n引用 Event：{preview_events}"
+        )
+        self.audio_browser_locate_event_button.setEnabled(bool(event_ids))
+        self.audio_browser_open_bindings_button.setEnabled(bool(event_ids))
+
+    def current_audio_browser_entry(self) -> dict[str, object] | None:
+        current_audio_id = self.audio_tree.current_audio_id()
+        if not current_audio_id:
+            return None
+        for entry in self._audio_browser_entries:
+            if str(entry.get("audio_id", "")).strip() == current_audio_id:
+                return entry
+        return None
+
+    def select_audio_browser_audio(self, audio_id: str | None) -> None:
+        self.audio_tree.select_audio_id(audio_id)
+        self._update_audio_browser_status()
 
     def _update_source_browser_summary(self, visible_entries: list[dict[str, object]]) -> None:
         total_count = len(self._source_browser_entries)
@@ -5027,8 +5229,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_event_source_binding_state(self) -> None:
         if not self._active_event_id:
-            self.event_source_binding_summary_label.setText("当前事件还没有绑定源音频。")
-            self.event_source_binding_detail_label.setText("这里现在只展示当前事件的绑定摘要。需要追加源音频或切换 Active / Enabled，请在事件树中展开当前事件打开绑定弹窗。")
+            self.event_source_binding_summary_label.setText("当前 Audio 还没有绑定源音频。")
+            self.event_source_binding_detail_label.setText("这里现在只展示当前 Audio 的绑定摘要。需要追加源音频或切换 Active / Enabled，请在 Audio 树中定位当前对象后打开 Audio 绑定。")
             self._refresh_event_source_binding_overview([], "Random")
             return
 
@@ -5038,72 +5240,72 @@ class MainWindow(QMainWindow):
         preview_names = [os.path.basename(path) or path for path in bound_paths[:4]]
         preview_text = "、".join(preview_names) if preview_names else "未绑定"
         self.event_source_binding_summary_label.setText(
-            f"当前事件 {self._active_event_id} 已绑定 {len(bound_paths)} 个源音频 | {_binding_rollup_text(play_mode, current_event_clips)}\n{preview_text}"
+            f"当前 Audio 已绑定 {len(bound_paths)} 个源音频 | {_binding_rollup_text(play_mode, current_event_clips)}\n{preview_text}"
         )
-        feedback_message = self._event_source_binding_feedback_for(self._active_event_id)
+        feedback_message = self._audio_source_binding_feedback_for(self._active_event_id)
         self.event_source_binding_detail_label.setText(
             feedback_message
-            or "这里只保留当前绑定摘要。需要追加绑定、切换 Active / Enabled 或定位源音频时，请在事件树中展开当前事件打开绑定弹窗。"
+            or "这里只保留当前 Audio 绑定摘要。需要追加绑定、切换 Active / Enabled 或定位源音频时，请在 Audio 树中定位当前对象后打开 Audio 绑定。"
         )
         self._refresh_event_source_binding_overview(current_event_clips, play_mode)
 
-    def _ensure_event_bindings_popup(self) -> EventBindingsPopup:
-        if self._event_bindings_popup is None:
-            popup = EventBindingsPopup(self)
+    def _ensure_audio_bindings_popup(self) -> AudioBindingsPopup:
+        if self._audio_bindings_popup is None:
+            popup = AudioBindingsPopup(self)
             popup.sourceAssetsDropped.connect(
-                lambda event_id, source_paths: self.assignSourceAssetsToEventRequested.emit(event_id, source_paths, False)
+                lambda event_id, source_paths: self.assignSourceAssetsToAudioRequested.emit(event_id, source_paths, False)
             )
-            popup.bindingEnabledChanged.connect(self.sourceBindingEnabledChangedRequested.emit)
-            popup.bindingActiveChanged.connect(self.sourceBindingActiveChangedRequested.emit)
+            popup.bindingEnabledChanged.connect(self.audioSourceBindingEnabledChangedRequested.emit)
+            popup.bindingActiveChanged.connect(self.audioSourceBindingActiveChangedRequested.emit)
             popup.locateSourceRequested.connect(self._show_source_in_browser)
-            self._event_bindings_popup = popup
-        return self._event_bindings_popup
+            self._audio_bindings_popup = popup
+        return self._audio_bindings_popup
 
-    def show_event_bindings_popup(self, event: EventModel, global_pos: QPoint) -> None:
-        popup = self._ensure_event_bindings_popup()
-        popup.set_event(event, self._event_source_binding_feedback_for(event.id))
+    def show_audio_bindings_popup(self, event: EventModel, global_pos: QPoint) -> None:
+        popup = self._ensure_audio_bindings_popup()
+        popup.set_event(event, self._audio_source_binding_feedback_for(event.id))
         popup.show_at(global_pos)
 
-    def refresh_event_bindings_popup(self, event: EventModel | None) -> None:
-        popup = self._event_bindings_popup
+    def refresh_audio_bindings_popup(self, event: EventModel | None) -> None:
+        popup = self._audio_bindings_popup
         if popup is None or not popup.isVisible():
             return
         if event is None or popup.event_id() != event.id:
             popup.close()
             return
-        popup.set_event(event, self._event_source_binding_feedback_for(event.id))
+        popup.set_event(event, self._audio_source_binding_feedback_for(event.id))
 
-    def current_event_bindings_popup_event_id(self) -> str | None:
-        popup = self._event_bindings_popup
+    def current_audio_bindings_popup_event_id(self) -> str | None:
+        popup = self._audio_bindings_popup
         if popup is None or not popup.isVisible():
             return None
         event_id = popup.event_id().strip()
         return event_id or None
 
-    def _event_source_binding_feedback_for(self, event_id: str | None) -> str:
+    def _audio_source_binding_feedback_for(self, event_id: str | None) -> str:
         normalized_event_id = str(event_id or "").strip()
-        if not normalized_event_id or normalized_event_id != self._event_source_binding_feedback_event_id:
+        if not normalized_event_id or normalized_event_id != self._audio_source_binding_feedback_event_id:
             return ""
-        return self._event_source_binding_feedback_message
+        return self._audio_source_binding_feedback_message
 
-    def set_event_source_binding_feedback(self, event_id: str, message: str) -> None:
-        self._event_source_binding_feedback_event_id = str(event_id).strip()
-        self._event_source_binding_feedback_message = str(message).strip()
-        if self._active_event_id == self._event_source_binding_feedback_event_id:
+    def set_audio_source_binding_feedback(self, event_id: str, message: str) -> None:
+        self._audio_source_binding_feedback_event_id = str(event_id).strip()
+        self._audio_source_binding_feedback_message = str(message).strip()
+        if self._active_event_id == self._audio_source_binding_feedback_event_id:
             self._refresh_event_source_binding_state()
-        popup = self._event_bindings_popup
-        if popup is not None and popup.event_id() == self._event_source_binding_feedback_event_id:
-            popup.set_status_message(self._event_source_binding_feedback_message)
+        popup = self._audio_bindings_popup
+        if popup is not None and popup.event_id() == self._audio_source_binding_feedback_event_id:
+            popup.set_status_message(self._audio_source_binding_feedback_message)
 
-    def clear_event_source_binding_feedback(self, event_id: str | None = None) -> None:
+    def clear_audio_source_binding_feedback(self, event_id: str | None = None) -> None:
         normalized_event_id = str(event_id or "").strip()
-        if normalized_event_id and normalized_event_id != self._event_source_binding_feedback_event_id:
+        if normalized_event_id and normalized_event_id != self._audio_source_binding_feedback_event_id:
             return
-        self._event_source_binding_feedback_event_id = ""
-        self._event_source_binding_feedback_message = ""
+        self._audio_source_binding_feedback_event_id = ""
+        self._audio_source_binding_feedback_message = ""
         if self._active_event_id:
             self._refresh_event_source_binding_state()
-        popup = self._event_bindings_popup
+        popup = self._audio_bindings_popup
         if popup is not None:
             popup.set_status_message("")
 
@@ -5119,35 +5321,104 @@ class MainWindow(QMainWindow):
         self.report_detail_label.setText(f"已在源音频树中定位：{normalized_source_path}")
         self.report_detail_label.setToolTip(normalized_source_path)
 
-    def _append_selected_source_to_current_event(self) -> None:
-        entry = self.source_tree.current_source_entry()
-        if not entry:
+    def _append_selected_source_to_current_audio(self) -> None:
+        source_entries = self.source_tree.selected_source_entries()
+        if not source_entries:
             self.report_detail_label.setText("当前没有选中的源音频。")
             return
-        source_path = str(entry.get("source_path", "")).strip()
-        if not source_path:
+        source_paths = [
+            str(entry.get("source_path", "")).strip()
+            for entry in source_entries
+            if str(entry.get("source_path", "")).strip()
+        ]
+        if not source_paths:
             return
-        self.assignSourceAssetsToCurrentEventRequested.emit([source_path], False)
+        self.assignSourceAssetsToCurrentAudioRequested.emit(source_paths, False)
+        self.report_detail_label.setText(f"已请求向当前 Audio 追加 {len(source_paths)} 条源音频。")
 
-    def _locate_selected_source_reference_event(self) -> None:
+    def _append_selected_source_to_current_event(self) -> None:
+        self._append_selected_source_to_current_audio()
+
+    def _locate_selected_source_reference_audio(self) -> None:
         entry = self.source_tree.current_source_entry()
         if not entry:
             self.report_detail_label.setText("当前没有选中的源音频。")
             return
         source_path = str(entry.get("source_path", "")).strip()
-        target_event_id = ""
-        if source_path and source_path in set(self._current_event_source_paths) and self._active_event_id:
-            target_event_id = self._active_event_id
-        if not target_event_id:
-            event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
-            if event_ids:
-                target_event_id = event_ids[0]
-        if not target_event_id:
-            self.report_detail_label.setText("当前源音频没有可跳转的引用事件。")
+        target_audio_id = ""
+        if source_path and source_path in set(self._current_event_source_paths) and self._active_audio_id:
+            target_audio_id = self._active_audio_id
+        if not target_audio_id:
+            audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
+            if audio_ids:
+                target_audio_id = audio_ids[0]
+        if not target_audio_id:
+            self.report_detail_label.setText("当前源音频没有可跳转的引用 Audio。")
             return
-        self.reportTargetRequested.emit("event", target_event_id)
-        self.report_detail_label.setText(f"已定位引用事件：{target_event_id}")
-        self.report_detail_label.setToolTip(target_event_id)
+        self.reportTargetRequested.emit("audio", target_audio_id)
+        self.report_detail_label.setText(f"已定位引用 Audio：{target_audio_id}")
+        self.report_detail_label.setToolTip(target_audio_id)
+
+    def _locate_selected_audio_reference_event(self) -> None:
+        entry = self.current_audio_browser_entry()
+        if not entry:
+            self.report_detail_label.setText("当前没有选中的 Audio。")
+            return
+        event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
+        if not event_ids:
+            self.report_detail_label.setText("当前 Audio 没有可跳转的引用 Event。")
+            return
+        self.reportTargetRequested.emit("event", event_ids[0])
+        self.report_detail_label.setText(f"已定位引用 Event：{event_ids[0]}")
+        self.report_detail_label.setToolTip(event_ids[0])
+
+    def _open_selected_audio_bindings(self) -> None:
+        entry = self.current_audio_browser_entry()
+        if not entry:
+            self.report_detail_label.setText("当前没有选中的 Audio。")
+            return
+        audio_id = str(entry.get("audio_id", "")).strip()
+        if not audio_id:
+            self.report_detail_label.setText("当前 Audio 没有可用的 Audio ID。")
+            return
+        self.openAudioBindingsForAudioRequested.emit(audio_id)
+        self.report_detail_label.setText(f"已打开 Audio 绑定：{audio_id}")
+        self.report_detail_label.setToolTip(audio_id)
+
+    def focus_current_audio_browser(self) -> None:
+        self.set_active_property_category("音频属性")
+        self.explorer_tabs.setCurrentIndex(2)
+        current_audio_id = self._active_audio_id
+        if current_audio_id:
+            self.select_audio_browser_audio(current_audio_id)
+            self.report_detail_label.setText(f"已定位当前 Audio：{current_audio_id}")
+            self.report_detail_label.setToolTip(current_audio_id)
+
+    def _show_source_tree_context_menu(self, position) -> None:
+        menu = QMenu(self)
+        locate_action = menu.addAction("定位源文件")
+        copy_action = menu.addAction("复制源路径")
+        locate_event_action = menu.addAction("定位引用 Audio")
+        add_to_audio_action = menu.addAction("追加到 Audio")
+
+        selected_entries = self.source_tree.selected_source_entries()
+        selected_paths = [str(entry.get("source_path", "")).strip() for entry in selected_entries if str(entry.get("source_path", "")).strip()]
+        has_selection = bool(selected_entries)
+        has_paths = bool(selected_paths)
+        locate_action.setEnabled(has_paths)
+        copy_action.setEnabled(has_paths)
+        locate_event_action.setEnabled(has_selection)
+        add_to_audio_action.setEnabled(has_paths and bool(self._active_event_id))
+
+        action = menu.exec(self.source_tree.viewport().mapToGlobal(position))
+        if action == locate_action:
+            self._locate_selected_source_asset()
+        elif action == copy_action:
+            self._copy_selected_source_asset_path()
+        elif action == locate_event_action:
+            self._locate_selected_source_reference_audio()
+        elif action == add_to_audio_action:
+            self._append_selected_source_to_current_audio()
 
     def _sync_event_mode_ui(self) -> None:
         is_combo_mode = self._current_play_mode() == "Combo"
@@ -5264,13 +5535,14 @@ class MainWindow(QMainWindow):
         return str(payload[0]), str(payload[1])
 
     def _active_explorer_page_key(self) -> str:
-        page_keys = {0: "buses", 1: "sources", 2: "events", 3: "gamesync"}
+        page_keys = {0: "buses", 1: "sources", 2: "audios", 3: "events", 4: "gamesync"}
         return page_keys.get(self.explorer_tabs.currentIndex(), "events")
 
     def _sync_explorer_browser_state(self) -> None:
         placeholder_map = {
             "buses": "搜索总线",
             "sources": "搜索源音频",
+            "audios": "搜索 Audio Object",
             "events": "搜索事件与文件夹",
             "gamesync": "搜索 GameSync 定义",
         }
@@ -5280,6 +5552,7 @@ class MainWindow(QMainWindow):
     def _apply_explorer_filter(self, query: str) -> None:
         self._apply_project_bus_browser_filter(query)
         self._refresh_source_browser_tree()
+        self._refresh_audio_browser_tree()
         self._refresh_gamesync_views()
         self.tree.apply_filter(query)
 
@@ -5458,6 +5731,10 @@ class MainWindow(QMainWindow):
     def navigation_state(self) -> dict[str, object]:
         return {
             "workspace_mode": self._active_workspace_mode,
+            "project_bus_name": self.current_project_bus_name(),
+            "project_bus_selection_overridden": self._project_bus_selection_overridden,
+            "buses_workspace_tab": self.buses_workspace_tabs.currentIndex(),
+            "current_bus_detail_tab": self.current_bus_detail_tabs.currentIndex(),
             "explorer_tab": self.explorer_tabs.currentIndex(),
             "editor_tab": self.editor_tabs.currentIndex(),
             "property_tab": self.property_tabs.currentIndex(),
@@ -5482,6 +5759,10 @@ class MainWindow(QMainWindow):
         if not state:
             return
         workspace_mode = state.get("workspace_mode")
+        project_bus_name = state.get("project_bus_name")
+        project_bus_selection_overridden = state.get("project_bus_selection_overridden")
+        buses_workspace_tab = state.get("buses_workspace_tab")
+        current_bus_detail_tab = state.get("current_bus_detail_tab")
         explorer_tab = state.get("explorer_tab")
         workspace_sizes = state.get("workspace_splitter_sizes")
         main_sizes = state.get("main_splitter_sizes")
@@ -5502,6 +5783,10 @@ class MainWindow(QMainWindow):
             self._set_content_top_splitter_sizes([int(value) for value in content_sizes])
         if isinstance(explorer_tab, int) and 0 <= explorer_tab < self.explorer_tabs.count():
             self.explorer_tabs.setCurrentIndex(explorer_tab)
+        if isinstance(buses_workspace_tab, int) and 0 <= buses_workspace_tab < self.buses_workspace_tabs.count():
+            self.buses_workspace_tabs.setCurrentIndex(buses_workspace_tab)
+        if isinstance(current_bus_detail_tab, int) and 0 <= current_bus_detail_tab < self.current_bus_detail_tabs.count():
+            self.current_bus_detail_tabs.setCurrentIndex(current_bus_detail_tab)
         if isinstance(editor_tab, int) and 0 <= editor_tab < self.editor_tabs.count():
             self.editor_tabs.setCurrentIndex(editor_tab)
         if isinstance(property_tab, int) and 0 <= property_tab < self.property_tabs.count():
@@ -5516,6 +5801,13 @@ class MainWindow(QMainWindow):
             self._active_report_index = report_tab
             self.report_pages.setCurrentIndex(report_tab)
             self.report_tabs.setCurrentIndex(report_tab)
+        if (
+            project_bus_selection_overridden
+            and isinstance(project_bus_name, str)
+            and project_bus_name
+            and project_bus_name != self._current_event_bus_name()
+        ):
+            self._select_project_bus_by_name(project_bus_name)
         self._apply_scrollable_widget_state(self._current_property_scroll_widget(), state.get("property_scroll"))
         self._apply_scrollable_widget_state(self.contents_tabs.currentWidget(), state.get("contents_scroll"))
         self._apply_scrollable_widget_state(self.log_output, state.get("log_scroll"))
@@ -5549,6 +5841,8 @@ class MainWindow(QMainWindow):
         current_results_title = self._report_page_titles[self._active_report_index].replace("当前：", "")
         event_workspace_title = self.events_workspace_tabs.tabText(self.events_workspace_tabs.currentIndex())
         resources_workspace_title = self.contents_tabs.tabText(self.contents_tabs.currentIndex())
+        buses_workspace_title = self.buses_workspace_tabs.tabText(self.buses_workspace_tabs.currentIndex())
+        current_bus_detail_title = self.current_bus_detail_tabs.tabText(self.current_bus_detail_tabs.currentIndex())
 
         self.events_workspace_status_label.setText(
             f"已选事件 {selected_event_count} | 当前子页 {event_workspace_title} | {WWISE_OUTPUT_BUS_LABEL} {current_event_bus}。"
@@ -5568,10 +5862,10 @@ class MainWindow(QMainWindow):
                 f"当前浏览 {resources_workspace_title}，已选片段 {selected_clip_count}。先做片段编排，再进批处理或预览镜像。"
             )
         self.buses_workspace_status_label.setText(
-            f"{WWISE_BUS_VIEW_LABEL} {current_project_bus} | {WWISE_OUTPUT_BUS_LABEL} {current_event_bus} | {WWISE_DEFAULT_BUS_LABEL} {self.default_bus_combo.currentText() or '-'}。"
+            f"当前页 {buses_workspace_title}{' / ' + current_bus_detail_title if buses_workspace_title == '当前 Bus' else ''} | {WWISE_BUS_VIEW_LABEL} {current_project_bus} | {WWISE_OUTPUT_BUS_LABEL} {current_event_bus} | {WWISE_DEFAULT_BUS_LABEL} {self.default_bus_combo.currentText() or '-'}。"
         )
         self.buses_overview_hint_label.setText(
-            f"当前浏览 Bus {current_project_bus}。左侧只保留导航与工程设置，主画布用于路由和输出调整。"
+            f"当前浏览 {buses_workspace_title}{' / ' + current_bus_detail_title if buses_workspace_title == '当前 Bus' else ''} / Bus {current_project_bus}。左侧只保留导航与工程设置，主画布按页签拆分路由、工程总览和 GameSync。"
         )
         gamesync_tab_title = self.gamesync_workspace_tabs.tabText(self.gamesync_workspace_tabs.currentIndex())
         total_gamesync_count = sum(len(self._gamesync_entries.get(key, [])) for key in ("game_parameters", "state_groups", "switch_groups"))
@@ -5699,13 +5993,15 @@ class MainWindow(QMainWindow):
         index = tab_map.get(category)
         if index is not None:
             if category == "音频属性":
-                self._activate_workspace_mode("buses")
+                self._activate_workspace_mode("events")
+                self.events_workspace_tabs.setCurrentIndex(1)
             elif category == "生成":
                 self._activate_workspace_mode("build")
             elif category == "工程":
                 self._activate_workspace_mode("buses")
             else:
                 self._activate_workspace_mode("events")
+                self.events_workspace_tabs.setCurrentIndex(0)
             self.editor_tabs.setCurrentIndex(0)
             self.property_tabs.setCurrentIndex(index)
             self._update_object_bus_status()
@@ -5713,7 +6009,7 @@ class MainWindow(QMainWindow):
     def show_loudness_view(self) -> None:
         self._activate_workspace_mode("events")
         self.editor_tabs.setCurrentIndex(2)
-        self.events_workspace_tabs.setCurrentIndex(1)
+        self.events_workspace_tabs.setCurrentIndex(2)
         self._update_object_bus_status()
 
     def _toggle_preview_transport_pause(self) -> None:
@@ -7055,96 +7351,100 @@ class MainWindow(QMainWindow):
         return -1
 
     def _load_selected_project_bus_details(self) -> None:
-        row = self._selected_project_bus_index()
-        has_selection = row >= 0
-        self.project_bus_name_edit.setEnabled(has_selection)
-        self.project_bus_parent_combo.setEnabled(has_selection)
-        self.project_bus_volume_spin.setEnabled(has_selection)
-        self.project_bus_mute_check.setEnabled(has_selection)
-        self.project_bus_remove_button.setEnabled(len(self._project_bus_configs) > 2 and has_selection)
-        self.inline_bus_set_default_button.setEnabled(has_selection)
-        self.inline_bus_to_master_button.setEnabled(has_selection)
-        self.inline_bus_open_parent_button.setEnabled(has_selection)
-        if not has_selection:
-            if self._active_project_bus_name == "Master":
-                child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == "Master"]
-                effective_linear = self._project_bus_effective_linear("Master")
+        self._loading_project_bus_details = True
+        try:
+            row = self._selected_project_bus_index()
+            has_selection = row >= 0
+            self.project_bus_name_edit.setEnabled(has_selection)
+            self.project_bus_parent_combo.setEnabled(has_selection)
+            self.project_bus_volume_spin.setEnabled(has_selection)
+            self.project_bus_mute_check.setEnabled(has_selection)
+            self.project_bus_remove_button.setEnabled(len(self._project_bus_configs) > 2 and has_selection)
+            self.inline_bus_set_default_button.setEnabled(has_selection)
+            self.inline_bus_to_master_button.setEnabled(has_selection)
+            self.inline_bus_open_parent_button.setEnabled(has_selection)
+            if not has_selection:
+                if self._active_project_bus_name == "Master":
+                    child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == "Master"]
+                    effective_linear = self._project_bus_effective_linear("Master")
+                    self.project_bus_name_edit.clear()
+                    self.project_bus_parent_combo.clear()
+                    self.project_bus_volume_spin.setValue(0.0)
+                    self.project_bus_mute_check.setChecked(False)
+                    self.project_bus_export_label.setText("主 Bus，已写入 BusConfigs；Unity 初始化会恢复主 Bus 的音量与静音。")
+                    self.project_bus_route_label.setText("Master")
+                    self._rebuild_project_bus_route_bar(["Master"], child_names=child_names, effective_linear=effective_linear)
+                    self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: " + (", ".join(child_names) if child_names else "-"))
+                    self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
+                    self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
+                    self.inline_bus_group.setTitle(f"{WWISE_PROPERTY_EDITOR_TITLE}: {WWISE_MASTER_AUDIO_BUS_TITLE}")
+                    self.inline_bus_set_default_button.setEnabled(False)
+                    self.inline_bus_to_master_button.setEnabled(False)
+                    self.inline_bus_open_parent_button.setEnabled(False)
+                    self.project_bus_summary_label.setText("当前查看主 Bus；详细音量与静音可直接在右侧主 Bus 编辑区调整。")
+                    self.inline_bus_name_chip.setText("Bus Master")
+                    self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
+                    self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
+                    self.inline_bus_export_chip.setText("导出 BusConfigs")
+                    self._load_bus_binding_editors(self._project_master_bus_config())
+                    return
+                self._active_project_bus_name = ""
                 self.project_bus_name_edit.clear()
                 self.project_bus_parent_combo.clear()
                 self.project_bus_volume_spin.setValue(0.0)
                 self.project_bus_mute_check.setChecked(False)
-                self.project_bus_export_label.setText("主 Bus，已写入 BusConfigs；Unity 初始化会恢复主 Bus 的音量与静音。")
-                self.project_bus_route_label.setText("Master")
-                self._rebuild_project_bus_route_bar(["Master"], child_names=child_names, effective_linear=effective_linear)
-                self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: " + (", ".join(child_names) if child_names else "-"))
-                self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
-                self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
-                self.inline_bus_group.setTitle(f"{WWISE_PROPERTY_EDITOR_TITLE}: {WWISE_MASTER_AUDIO_BUS_TITLE}")
+                self.project_bus_export_label.setText("未选择 Bus")
+                self.project_bus_route_label.setText("未选择 Bus")
+                self._rebuild_project_bus_route_bar([])
+                self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: -")
+                self.project_bus_effective_value.setText("0%")
+                self.project_bus_effective_bar.setValue(0)
+                self.inline_bus_group.setTitle(WWISE_PROPERTY_EDITOR_TITLE)
                 self.inline_bus_set_default_button.setEnabled(False)
                 self.inline_bus_to_master_button.setEnabled(False)
                 self.inline_bus_open_parent_button.setEnabled(False)
-                self.project_bus_summary_label.setText("当前查看主 Bus；详细音量与静音可直接在右侧主 Bus 编辑区调整。")
-                self.inline_bus_name_chip.setText("Bus Master")
+                self.project_bus_summary_label.setText("在左侧选择 Bus 后，可在属性编辑器中直接编辑当前 Bus。")
+                self.inline_bus_name_chip.setText("Bus -")
                 self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
                 self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
-                self.inline_bus_export_chip.setText("导出 BusConfigs")
-                self._load_bus_binding_editors(self._project_master_bus_config())
+                self.inline_bus_export_chip.setText("导出 -")
+                self._load_bus_binding_editors(None)
                 return
-            self._active_project_bus_name = ""
-            self.project_bus_name_edit.clear()
-            self.project_bus_parent_combo.clear()
-            self.project_bus_volume_spin.setValue(0.0)
-            self.project_bus_mute_check.setChecked(False)
-            self.project_bus_export_label.setText("未选择 Bus")
-            self.project_bus_route_label.setText("未选择 Bus")
-            self._rebuild_project_bus_route_bar([])
-            self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: -")
-            self.project_bus_effective_value.setText("0%")
-            self.project_bus_effective_bar.setValue(0)
-            self.inline_bus_group.setTitle(WWISE_PROPERTY_EDITOR_TITLE)
-            self.inline_bus_set_default_button.setEnabled(False)
-            self.inline_bus_to_master_button.setEnabled(False)
-            self.inline_bus_open_parent_button.setEnabled(False)
-            self.project_bus_summary_label.setText("在左侧选择 Bus 后，可在属性编辑器中直接编辑当前 Bus。")
-            self.inline_bus_name_chip.setText("Bus -")
-            self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} -")
-            self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} -")
-            self.inline_bus_export_chip.setText("导出 -")
-            self._load_bus_binding_editors(None)
-            return
-        config = self._project_bus_configs[row]
-        bus_name = str(config["name"])
-        self._active_project_bus_name = bus_name
-        self.project_bus_name_edit.setText(bus_name)
-        self._refresh_project_bus_parent_options(bus_name, str(config.get("parent_bus", "Master")))
-        self.project_bus_volume_spin.setValue(float(config["volume_db"]))
-        self.project_bus_mute_check.setChecked(bool(config["is_muted"]))
-        role_text = WWISE_DEFAULT_BUS_LABEL if self.default_bus_combo.currentText() == bus_name else "普通 Bus"
-        route_text = " -> ".join(self._project_bus_route_names(bus_name))
-        child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == bus_name]
-        effective_linear = self._project_bus_effective_linear(bus_name)
-        self.project_bus_route_label.setText(route_text)
-        self._rebuild_project_bus_route_bar(
-            self._project_bus_route_names(bus_name),
-            child_names=child_names,
-            effective_linear=effective_linear,
-        )
-        self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: " + (", ".join(child_names) if child_names else "-"))
-        self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
-        self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
-        self.project_bus_export_label.setText(f"{role_text}，已写入 BusConfigs；Unity 初始化会按该路由恢复音量与静音。")
-        self.inline_bus_group.setTitle(f"{WWISE_PROPERTY_EDITOR_TITLE}: {bus_name}")
-        self.inline_bus_set_default_button.setEnabled(self.default_bus_combo.currentText() != bus_name)
-        parent_bus_name = str(config.get("parent_bus", "Master") or "Master")
-        self.inline_bus_open_parent_button.setEnabled(parent_bus_name != "Master")
-        self.inline_bus_name_chip.setText(f"Bus {bus_name}")
-        self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} {parent_bus_name}")
-        self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} 是" if self.default_bus_combo.currentText() == bus_name else f"{WWISE_DEFAULT_BUS_LABEL} 否")
-        self.inline_bus_export_chip.setText("导出 BusConfigs")
-        self._load_bus_binding_editors(config)
-        self.project_bus_summary_label.setText(
-            f"当前选中：{bus_name}\n{WWISE_ROUTING_LABEL}: {route_text}\n{WWISE_CHILD_BUSES_LABEL}: {', '.join(child_names) if child_names else '无'}\n常用编辑已整合到属性编辑器。"
-        )
+            config = self._project_bus_configs[row]
+            bus_name = str(config["name"])
+            self._active_project_bus_name = bus_name
+            self.project_bus_name_edit.setText(bus_name)
+            self._refresh_project_bus_parent_options(bus_name, str(config.get("parent_bus", "Master")))
+            self.project_bus_volume_spin.setValue(float(config["volume_db"]))
+            self.project_bus_mute_check.setChecked(bool(config["is_muted"]))
+            role_text = WWISE_DEFAULT_BUS_LABEL if self.default_bus_combo.currentText() == bus_name else "普通 Bus"
+            route_text = " -> ".join(self._project_bus_route_names(bus_name))
+            child_names = [str(item["name"]) for item in self._project_bus_child_configs() if str(item.get("parent_bus", "Master")) == bus_name]
+            effective_linear = self._project_bus_effective_linear(bus_name)
+            self.project_bus_route_label.setText(route_text)
+            self._rebuild_project_bus_route_bar(
+                self._project_bus_route_names(bus_name),
+                child_names=child_names,
+                effective_linear=effective_linear,
+            )
+            self.project_bus_children_label.setText(f"{WWISE_CHILD_BUSES_LABEL}: " + (", ".join(child_names) if child_names else "-"))
+            self.project_bus_effective_value.setText(f"{effective_linear * 100:.0f}%")
+            self.project_bus_effective_bar.setValue(int(effective_linear * 100.0))
+            self.project_bus_export_label.setText(f"{role_text}，已写入 BusConfigs；Unity 初始化会按该路由恢复音量与静音。")
+            self.inline_bus_group.setTitle(f"{WWISE_PROPERTY_EDITOR_TITLE}: {bus_name}")
+            self.inline_bus_set_default_button.setEnabled(self.default_bus_combo.currentText() != bus_name)
+            parent_bus_name = str(config.get("parent_bus", "Master") or "Master")
+            self.inline_bus_open_parent_button.setEnabled(parent_bus_name != "Master")
+            self.inline_bus_name_chip.setText(f"Bus {bus_name}")
+            self.inline_bus_parent_chip.setText(f"{WWISE_PARENT_BUS_LABEL} {parent_bus_name}")
+            self.inline_bus_default_chip.setText(f"{WWISE_DEFAULT_BUS_LABEL} 是" if self.default_bus_combo.currentText() == bus_name else f"{WWISE_DEFAULT_BUS_LABEL} 否")
+            self.inline_bus_export_chip.setText("导出 BusConfigs")
+            self._load_bus_binding_editors(config)
+            self.project_bus_summary_label.setText(
+                f"当前选中：{bus_name}\n{WWISE_ROUTING_LABEL}: {route_text}\n{WWISE_CHILD_BUSES_LABEL}: {', '.join(child_names) if child_names else '无'}\n常用编辑已整合到属性编辑器。"
+            )
+        finally:
+            self._loading_project_bus_details = False
 
     def _sync_project_bus_editor_to_state(
         self,
@@ -7153,6 +7453,8 @@ class MainWindow(QMainWindow):
         selected_bus_name: str | None = None,
     ) -> bool:
         target_bus_name = bus_name or self.current_project_bus_name()
+        if target_bus_name == "Master":
+            return True
         row = self._project_bus_index_by_name(target_bus_name)
         if row < 0:
             return True
@@ -7232,7 +7534,7 @@ class MainWindow(QMainWindow):
                 self._select_project_bus_by_name(previous_bus_name)
                 return
             if not self._loading_event:
-                self.projectSettingsChanged.emit()
+                self._queue_project_settings_changed("project-bus-selection")
         if not self._loading_event and not self._syncing_project_bus_selection:
             self._project_bus_selection_overridden = True
         self._load_selected_project_bus_details()
@@ -7248,7 +7550,7 @@ class MainWindow(QMainWindow):
             ):
                 return False
             if not self._loading_event:
-                self.projectSettingsChanged.emit()
+                self._queue_project_settings_changed("project-bus-selection")
 
         self._syncing_project_bus_selection = True
         self.project_bus_list.blockSignals(True)
@@ -7437,26 +7739,35 @@ class MainWindow(QMainWindow):
         self._emit_project_settings_changed()
 
     def current_event_form_data(self) -> dict[str, object]:
+        return {
+            **self.current_event_identity_form_data(),
+            **self.current_audio_form_data(),
+        }
+
+    def current_event_identity_form_data(self) -> dict[str, object]:
+        return {
+            "id": self.event_id_edit.text().strip(),
+            "display_name": self.display_name_edit.text().strip(),
+            "steal_policy": self.steal_policy_combo.currentText(),
+            "cooldown_seconds": self.cooldown_spin.value(),
+            "max_instances": self.max_instances_spin.value(),
+            "notes": self.notes_edit.toPlainText().strip(),
+        }
+
+    def current_audio_form_data(self) -> dict[str, object]:
         self._sync_event_binding_editor_to_state("rtpc")
         self._sync_event_binding_editor_to_state("state")
         self._sync_event_binding_editor_to_state("switch")
         return {
-            "id": self.event_id_edit.text().strip(),
-            "display_name": self.display_name_edit.text().strip(),
             "bus": self._current_event_bus_name(),
             "play_mode": self._current_play_mode(),
-            "steal_policy": self.steal_policy_combo.currentText(),
             "load_policy": self.load_policy_combo.currentText(),
-            "source_audio_format": self.source_audio_format_combo.currentText(),
-            "runtime_audio_format": self.runtime_audio_format_combo.currentText(),
             "volume_db": self.volume_spin.value(),
             "volume_rand_min_db": self.volume_rand_min_spin.value(),
             "volume_rand_max_db": self.volume_rand_max_spin.value(),
             "pitch_cents": int(self.pitch_spin.value()),
             "pitch_rand_min_cents": self.pitch_rand_min_spin.value(),
             "pitch_rand_max_cents": self.pitch_rand_max_spin.value(),
-            "cooldown_seconds": self.cooldown_spin.value(),
-            "max_instances": self.max_instances_spin.value(),
             "combo_pitch_step_cents": self.combo_pitch_step_spin.value() * 100,
             "combo_reset_seconds": self.combo_reset_spin.value(),
             "combo_max_step": self.combo_max_step_spin.value(),
@@ -7471,7 +7782,6 @@ class MainWindow(QMainWindow):
                 }
                 for variant in self._event_switch_variants
             ],
-            "notes": self.notes_edit.toPlainText().strip(),
         }
 
     def current_bulk_clip_form_data(self) -> dict[str, object]:
@@ -7737,6 +8047,30 @@ class MainWindow(QMainWindow):
         result = QMessageBox.question(self, APP_NAME, label)
         return result == QMessageBox.StandardButton.Yes
 
+    def ask_audio_import_create_events(self, import_count: int) -> bool | None:
+        result = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"本次将创建 {import_count} 个 Audio Object。是否同时创建同名 Event？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if result == QMessageBox.StandardButton.Cancel:
+            return None
+        return result == QMessageBox.StandardButton.Yes
+
+    def ask_audio_import_binding_mode(self, audio_name: str) -> str | None:
+        result = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"Audio“{audio_name}”已存在源音频。是否替换为本次拖入内容？\n选择“否”将把新资源追加到当前 Audio。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Cancel:
+            return None
+        return "replace" if result == QMessageBox.StandardButton.Yes else "append"
+
     def confirm_save_before_close(self) -> str:
         result = QMessageBox.question(
             self,
@@ -7842,6 +8176,10 @@ class MainWindow(QMainWindow):
             if payload is not None and payload[0] == "source_binding":
                 self.report_detail_label.setText("Source Binding 请在片段列表中批量重命名。")
                 return
+        if self._focus_is_within(self.audio_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "audios"):
+            self.set_active_property_category("音频属性")
+            self.bus_combo.setFocus()
+            return
             self.renameSelectedRequested.emit()
             return
         if self._focus_is_within(self.clip_table) and self.selected_clip_ids():
@@ -7859,6 +8197,10 @@ class MainWindow(QMainWindow):
         if self._focus_is_within(self.source_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "sources"):
             self._locate_selected_source_asset()
             return
+        if self._focus_is_within(self.audio_tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "audios"):
+            self.set_active_property_category("音频属性")
+            self.bus_combo.setFocus()
+            return
         if self._focus_is_within(self.tree) or (self._focus_is_within(self.tree_filter_edit) and self._active_explorer_page_key() == "events"):
             payload = self._selected_tree_payload()
             if payload is None:
@@ -7871,9 +8213,7 @@ class MainWindow(QMainWindow):
                 self.clip_asset_detail_edit.selectAll()
                 return
             if payload[0] == "event":
-                self.set_active_property_category("事件")
-                self.event_id_edit.setFocus()
-                self.event_id_edit.selectAll()
+                self.reportTargetRequested.emit("audio", payload[1])
                 return
             self.set_active_property_category("工程")
             self.export_root_edit.setFocus()
@@ -8084,6 +8424,8 @@ class MainWindow(QMainWindow):
         self.preview_transport_restart_button.clicked.connect(self.restartPreviewRequested.emit)
         self.preview_transport_stop_button.clicked.connect(self.stopPreviewEventRequested.emit)
         self.events_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
+        self.buses_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
+        self.current_bus_detail_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.gamesync_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.contents_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.clear_meter_button.clicked.connect(self.clear_peak_hold)
@@ -8095,12 +8437,12 @@ class MainWindow(QMainWindow):
         self.clip_table.itemSelectionChanged.connect(self._sync_clip_detail_from_table)
         self.event_id_edit.editingFinished.connect(self._emit_event_properties_changed)
         self.display_name_edit.editingFinished.connect(self._emit_event_properties_changed)
-        self.bus_combo.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.bus_combo.currentIndexChanged.connect(self._emit_audio_properties_changed)
         self.bus_combo.currentIndexChanged.connect(self._sync_current_event_bus_selection)
-        self.play_mode_combo.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.play_mode_combo.currentIndexChanged.connect(self._emit_audio_properties_changed)
         self.play_mode_combo.currentIndexChanged.connect(self._sync_event_mode_ui)
         self.steal_policy_combo.currentIndexChanged.connect(self._emit_event_properties_changed)
-        self.load_policy_combo.currentIndexChanged.connect(self._emit_event_properties_changed)
+        self.load_policy_combo.currentIndexChanged.connect(self._emit_audio_properties_changed)
         self.source_audio_format_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
         self.runtime_audio_format_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
         self.default_bus_combo.currentIndexChanged.connect(self._emit_project_settings_changed)
@@ -8156,8 +8498,12 @@ class MainWindow(QMainWindow):
         self.source_browser_filter_combo.currentIndexChanged.connect(lambda _index: self._refresh_source_browser_tree())
         self.source_browser_locate_button.clicked.connect(self._locate_selected_source_asset)
         self.source_browser_copy_button.clicked.connect(self._copy_selected_source_asset_path)
-        self.source_browser_locate_event_button.clicked.connect(self._locate_selected_source_reference_event)
-        self.source_browser_add_to_event_button.clicked.connect(self._append_selected_source_to_current_event)
+        self.source_browser_locate_event_button.clicked.connect(self._locate_selected_source_reference_audio)
+        self.source_browser_add_to_event_button.clicked.connect(self._append_selected_source_to_current_audio)
+        self.audio_browser_locate_event_button.clicked.connect(self._locate_selected_audio_reference_event)
+        self.audio_browser_open_bindings_button.clicked.connect(self._open_selected_audio_bindings)
+        self.event_open_audio_workspace_button.clicked.connect(lambda: self.set_active_property_category("音频属性"))
+        self.event_locate_audio_browser_button.clicked.connect(self.focus_current_audio_browser)
         self.gamesync_browser_tabs.currentChanged.connect(lambda _index: self._update_gamesync_browser_status())
         self.gamesync_parameter_browser_list.itemSelectionChanged.connect(self._update_gamesync_browser_status)
         self.gamesync_state_browser_list.itemSelectionChanged.connect(self._update_gamesync_browser_status)
@@ -8238,58 +8584,58 @@ class MainWindow(QMainWindow):
         self.import_template_tags_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
         self.export_root_browse_button.clicked.connect(self._request_export_root_browse)
         self.export_root_edit.editingFinished.connect(self._emit_project_settings_changed)
-        self.volume_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.volume_rand_min_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.volume_rand_max_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.pitch_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.pitch_rand_min_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.pitch_rand_max_spin.valueChanged.connect(self._emit_event_properties_changed)
+        self.volume_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.volume_rand_min_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.volume_rand_max_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.pitch_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.pitch_rand_min_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.pitch_rand_max_spin.valueChanged.connect(self._emit_audio_properties_changed)
         self.cooldown_spin.valueChanged.connect(self._emit_event_properties_changed)
         self.max_instances_spin.valueChanged.connect(self._emit_event_properties_changed)
         self.max_instances_spin.valueChanged.connect(self._sync_event_mode_ui)
-        self.combo_pitch_step_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.combo_reset_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.combo_max_step_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.avoid_repeat_check.checkStateChanged.connect(self._emit_event_properties_changed)
+        self.combo_pitch_step_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.combo_reset_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.combo_max_step_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.avoid_repeat_check.checkStateChanged.connect(self._emit_audio_properties_changed)
         self.notes_edit.textChanged.connect(self._emit_event_properties_changed)
-        self.tags_summary_edit.editingFinished.connect(self._emit_event_properties_changed)
+        self.tags_summary_edit.editingFinished.connect(self._emit_audio_properties_changed)
         self.event_rtpc_list.itemSelectionChanged.connect(lambda: self._load_event_binding_editor("rtpc"))
         self.event_rtpc_add_button.clicked.connect(lambda: self._create_event_binding("rtpc"))
         self.event_rtpc_remove_button.clicked.connect(lambda: self._remove_event_binding("rtpc"))
         self.event_rtpc_parameter_edit.currentIndexChanged.connect(self._handle_event_rtpc_curve_context_changed)
         self.event_rtpc_target_combo.currentIndexChanged.connect(self._handle_event_rtpc_curve_context_changed)
-        self.event_rtpc_scope_combo.currentIndexChanged.connect(self._emit_event_properties_changed)
-        self.event_rtpc_curve_table.pointsChanged.connect(self._emit_event_properties_changed)
+        self.event_rtpc_scope_combo.currentIndexChanged.connect(self._emit_audio_properties_changed)
+        self.event_rtpc_curve_table.pointsChanged.connect(self._emit_audio_properties_changed)
         self.event_rtpc_curve_table.selectionChanged.connect(lambda _index: self._sync_curve_interpolation_combo(self.event_rtpc_curve_table, self.event_rtpc_interpolation_combo))
         self.event_rtpc_curve_table.selectionChanged.connect(lambda _index: self._sync_curve_point_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
         self.event_rtpc_curve_table.pointPreviewChanged.connect(lambda: self._sync_curve_point_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
-        self.event_rtpc_interpolation_combo.currentIndexChanged.connect(lambda: self._update_curve_interpolation(self.event_rtpc_curve_table, self.event_rtpc_interpolation_combo, self._emit_event_properties_changed))
-        self.event_rtpc_add_point_button.clicked.connect(lambda: self._append_curve_point(self.event_rtpc_curve_table, self._emit_event_properties_changed))
-        self.event_rtpc_remove_point_button.clicked.connect(lambda: self._remove_curve_point(self.event_rtpc_curve_table, self._emit_event_properties_changed))
+        self.event_rtpc_interpolation_combo.currentIndexChanged.connect(lambda: self._update_curve_interpolation(self.event_rtpc_curve_table, self.event_rtpc_interpolation_combo, self._emit_audio_properties_changed))
+        self.event_rtpc_add_point_button.clicked.connect(lambda: self._append_curve_point(self.event_rtpc_curve_table, self._emit_audio_properties_changed))
+        self.event_rtpc_remove_point_button.clicked.connect(lambda: self._remove_curve_point(self.event_rtpc_curve_table, self._emit_audio_properties_changed))
         self.event_rtpc_selected_input_spin.valueChanged.connect(lambda _value: self._update_curve_point_from_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
         self.event_rtpc_selected_output_spin.valueChanged.connect(lambda _value: self._update_curve_point_from_controls(self.event_rtpc_curve_table, self.event_rtpc_selected_input_spin, self.event_rtpc_selected_output_spin))
         self.event_rtpc_snap_check.checkStateChanged.connect(lambda _state: self._apply_curve_snap_settings(self.event_rtpc_curve_table, self.event_rtpc_snap_check, self.event_rtpc_snap_x_spin, self.event_rtpc_snap_y_spin))
         self.event_rtpc_snap_x_spin.valueChanged.connect(lambda _value: self._apply_curve_snap_settings(self.event_rtpc_curve_table, self.event_rtpc_snap_check, self.event_rtpc_snap_x_spin, self.event_rtpc_snap_y_spin))
         self.event_rtpc_snap_y_spin.valueChanged.connect(lambda _value: self._apply_curve_snap_settings(self.event_rtpc_curve_table, self.event_rtpc_snap_check, self.event_rtpc_snap_x_spin, self.event_rtpc_snap_y_spin))
-        self.event_rtpc_notes_edit.textChanged.connect(self._emit_event_properties_changed)
+        self.event_rtpc_notes_edit.textChanged.connect(self._emit_audio_properties_changed)
         self.event_state_list.itemSelectionChanged.connect(lambda: self._load_event_binding_editor("state"))
         self.event_state_add_button.clicked.connect(lambda: self._create_event_binding("state"))
         self.event_state_remove_button.clicked.connect(lambda: self._remove_event_binding("state"))
         self.event_state_group_edit.currentIndexChanged.connect(lambda: self._refresh_event_state_name_options())
-        self.event_state_group_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
-        self.event_state_name_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
-        self.event_state_volume_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.event_state_pitch_spin.valueChanged.connect(self._emit_event_properties_changed)
-        self.event_state_mute_check.checkStateChanged.connect(self._emit_event_properties_changed)
-        self.event_state_notes_edit.textChanged.connect(self._emit_event_properties_changed)
+        self.event_state_group_edit.currentIndexChanged.connect(self._emit_audio_properties_changed)
+        self.event_state_name_edit.currentIndexChanged.connect(self._emit_audio_properties_changed)
+        self.event_state_volume_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.event_state_pitch_spin.valueChanged.connect(self._emit_audio_properties_changed)
+        self.event_state_mute_check.checkStateChanged.connect(self._emit_audio_properties_changed)
+        self.event_state_notes_edit.textChanged.connect(self._emit_audio_properties_changed)
         self.event_switch_list.itemSelectionChanged.connect(lambda: self._load_event_binding_editor("switch"))
         self.event_switch_add_button.clicked.connect(lambda: self._create_event_binding("switch"))
         self.event_switch_remove_button.clicked.connect(lambda: self._remove_event_binding("switch"))
         self.event_switch_group_edit.currentIndexChanged.connect(lambda: self._refresh_event_switch_name_options())
-        self.event_switch_group_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
-        self.event_switch_name_edit.currentIndexChanged.connect(self._emit_event_properties_changed)
-        self.event_switch_clip_ids_edit.editingFinished.connect(self._emit_event_properties_changed)
-        self.event_switch_notes_edit.textChanged.connect(self._emit_event_properties_changed)
+        self.event_switch_group_edit.currentIndexChanged.connect(self._emit_audio_properties_changed)
+        self.event_switch_name_edit.currentIndexChanged.connect(self._emit_audio_properties_changed)
+        self.event_switch_clip_ids_edit.editingFinished.connect(self._emit_audio_properties_changed)
+        self.event_switch_notes_edit.textChanged.connect(self._emit_audio_properties_changed)
         self.clip_source_detail_edit.editingFinished.connect(lambda: self._emit_selected_clip_detail_change("source_path", self.clip_source_detail_edit.text()))
         self.clip_asset_detail_edit.editingFinished.connect(lambda: self._emit_selected_clip_detail_change("asset_key", self.clip_asset_detail_edit.text()))
         self.clip_weight_detail_spin.valueChanged.connect(lambda value: self._emit_selected_clip_detail_change("weight", str(value)))
@@ -8341,9 +8687,13 @@ class MainWindow(QMainWindow):
         self.clip_table.rowsReordered.connect(self.reorderClipsRequested.emit)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+        self.source_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.source_tree.customContextMenuRequested.connect(self._show_source_tree_context_menu)
         self.source_tree.sourceSelected.connect(lambda _source_path: self._update_source_browser_status())
         self.source_tree.sourceActivated.connect(lambda _source_path: self._locate_selected_source_asset())
         self.source_tree.itemDoubleClicked.connect(lambda _item, _column: self._handle_open_shortcut())
+        self.audio_tree.audioSelected.connect(lambda _audio_id: self._update_audio_browser_status())
+        self.audio_tree.audioActivated.connect(lambda _audio_id: self._open_selected_audio_bindings())
         self.clip_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.clip_table.customContextMenuRequested.connect(self._show_clip_context_menu)
         self.tree.itemDoubleClicked.connect(lambda item, column: self._handle_open_shortcut())
@@ -8376,9 +8726,43 @@ class MainWindow(QMainWindow):
             self._sync_event_binding_editor_to_state("switch")
             self.eventPropertiesChanged.emit()
 
+    def _emit_audio_properties_changed(self, *args) -> None:
+        if not self._loading_event and self.property_group.isEnabled():
+            self._sync_event_binding_editor_to_state("rtpc")
+            self._sync_event_binding_editor_to_state("state")
+            self._sync_event_binding_editor_to_state("switch")
+            self.audioPropertiesChanged.emit()
+
     def _emit_project_settings_changed(self, *args) -> None:
+        sender = self.sender()
+        if sender is self.export_root_edit and not self.export_root_edit.isModified():
+            return
+        if self._loading_project_bus_details:
+            return
         if not self._loading_event and self._sync_project_bus_editor_to_state(show_errors=True):
-            self.projectSettingsChanged.emit()
+            if sender is self.export_root_edit:
+                self.export_root_edit.setModified(False)
+            change_source = "project-settings-form"
+            if sender is self.export_root_edit:
+                change_source = "export-root"
+            elif sender is self.source_audio_format_combo:
+                change_source = "source-audio-format"
+            elif sender is self.runtime_audio_format_combo:
+                change_source = "runtime-audio-format"
+            elif sender is self.default_bus_combo:
+                change_source = "default-bus"
+            elif sender is self.auto_assign_bus_by_name_check:
+                change_source = "auto-assign-bus"
+            self._queue_project_settings_changed(change_source)
+
+    def _queue_project_settings_changed(self, source: str) -> None:
+        self._project_settings_change_source = source
+        self.projectSettingsChanged.emit()
+
+    def consume_project_settings_change_source(self) -> str:
+        source = self._project_settings_change_source
+        self._project_settings_change_source = ""
+        return source
 
     def _emit_gamesync_changed(self, *args) -> None:
         if not self._loading_gamesync:
@@ -10082,9 +10466,10 @@ class MainWindow(QMainWindow):
         self._emit_project_settings_changed()
 
     def _update_source_browser_status(self) -> None:
+        selected_entries = self.source_tree.selected_source_entries()
         entry = self.source_tree.current_source_entry()
-        if not entry:
-            self.source_browser_status_label.setText("选择一个源音频，可查看路径、引用事件和缺失状态。")
+        if not selected_entries or not entry:
+            self.source_browser_status_label.setText("选择一个源音频，可查看路径、引用 Audio 和缺失状态。")
             self.source_browser_locate_button.setEnabled(False)
             self.source_browser_copy_button.setEnabled(False)
             self.source_browser_locate_event_button.setEnabled(False)
@@ -10097,19 +10482,26 @@ class MainWindow(QMainWindow):
         if bool(entry.get("missing", False)):
             state_fragments.append("文件缺失")
         if bool(entry.get("unreferenced", False)):
-            state_fragments.append("当前未被事件引用")
+            state_fragments.append("当前未被 Audio 引用")
         if source_path and source_path in set(self._current_event_source_paths):
-            state_fragments.append("当前事件已绑定")
+            state_fragments.append("当前 Audio 已绑定")
         state_text = "；".join(state_fragments) if state_fragments else "状态正常"
-        event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
-        event_preview = "、".join(event_ids[:4]) if event_ids else "-"
-        self.source_browser_status_label.setText(
-            f"{source_path}\n引用事件 {reference_count} 个：{event_preview}\n{state_text}"
-        )
+        audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
+        audio_preview = "、".join(audio_ids[:4]) if audio_ids else "-"
+        if len(selected_entries) > 1:
+            self.source_browser_status_label.setText(
+                f"已选择 {len(selected_entries)} 条源音频\n当前项：{source_path}\n引用 Audio {reference_count} 个：{audio_preview}\n{state_text}"
+            )
+        else:
+            self.source_browser_status_label.setText(
+                f"{source_path}\n引用 Audio {reference_count} 个：{audio_preview}\n{state_text}"
+            )
         self.source_browser_locate_button.setEnabled(bool(source_path))
-        self.source_browser_copy_button.setEnabled(bool(source_path))
-        self.source_browser_locate_event_button.setEnabled(bool(event_ids) or (bool(source_path) and source_path in set(self._current_event_source_paths)))
-        self.source_browser_add_to_event_button.setEnabled(bool(source_path) and bool(self._active_event_id))
+        self.source_browser_copy_button.setEnabled(any(str(item.get("source_path", "")).strip() for item in selected_entries))
+        self.source_browser_locate_event_button.setEnabled(bool(audio_ids) or (bool(source_path) and source_path in set(self._current_event_source_paths)))
+        self.source_browser_add_to_event_button.setEnabled(
+            any(str(item.get("source_path", "")).strip() for item in selected_entries) and bool(self._active_event_id)
+        )
 
     def _locate_selected_source_asset(self) -> None:
         entry = self.source_tree.current_source_entry()
@@ -10128,15 +10520,20 @@ class MainWindow(QMainWindow):
         self.report_detail_label.setToolTip(source_path)
 
     def _copy_selected_source_asset_path(self) -> None:
-        entry = self.source_tree.current_source_entry()
-        if not entry:
+        entries = self.source_tree.selected_source_entries()
+        if not entries:
             return
-        source_path = str(entry.get("source_path", "")).strip()
-        if not source_path:
+        source_paths = [str(entry.get("source_path", "")).strip() for entry in entries if str(entry.get("source_path", "")).strip()]
+        if not source_paths:
             return
-        QApplication.clipboard().setText(source_path)
-        self.report_detail_label.setText(f"已复制源路径：{source_path}")
-        self.report_detail_label.setToolTip(source_path)
+        copied_text = "\n".join(source_paths)
+        QApplication.clipboard().setText(copied_text)
+        if len(source_paths) == 1:
+            self.report_detail_label.setText(f"已复制源路径：{source_paths[0]}")
+            self.report_detail_label.setToolTip(source_paths[0])
+        else:
+            self.report_detail_label.setText(f"已复制 {len(source_paths)} 条源路径。")
+            self.report_detail_label.setToolTip(copied_text)
 
     def _follow_current_event_bus(self) -> None:
         self._project_bus_selection_overridden = False
@@ -10320,7 +10717,22 @@ class MainWindow(QMainWindow):
         if active_page == "sources":
             self._search_next_source_asset()
             return
+        if active_page == "audios":
+            self._search_next_audio_object()
+            return
         self._search_next_tree_event()
+
+    def _search_next_audio_object(self) -> None:
+        query = self.tree_filter_edit.text().strip()
+        if not query:
+            self.report_detail_label.setText("先输入 Audio 关键字，再执行搜索。")
+            return
+        audio_id = self.audio_tree.select_next_matching_audio(query)
+        if audio_id is None:
+            self.report_detail_label.setText(f"没有找到匹配“{query}”的 Audio。")
+            return
+        self.report_detail_label.setText(f"已定位 Audio：{audio_id}")
+        self.report_detail_label.setToolTip(audio_id)
 
     def _search_next_project_bus(self) -> None:
         query = self.tree_filter_edit.text().strip().lower()
@@ -10390,6 +10802,7 @@ class MainWindow(QMainWindow):
         if not selected_path:
             return
         self.export_root_edit.setText(selected_path)
+        self.export_root_edit.setModified(True)
         self._emit_project_settings_changed()
 
     def _build_toolbar_section_label(self, title: str) -> QLabel:

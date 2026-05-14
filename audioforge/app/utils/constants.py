@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_NAME = "AudioForge"
-APP_VERSION = "0.07.0"
+APP_VERSION = "0.09.0"
 PROJECT_EXTENSION = ".afproj"
-SCHEMA_VERSION = 2
-PROJECT_VERSION = 1
+SCHEMA_VERSION = 3
+PROJECT_VERSION = 2
 DEFAULT_BUSES = ["BGM", "SFX", "UI"]
 DEFAULT_EXPORT_DIRNAME = "Export"
 DEFAULT_RUNTIME_DATA_FILENAME = "AudioData.json"

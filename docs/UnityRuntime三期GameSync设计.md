@@ -1,12 +1,12 @@
 # AudioForge Unity Runtime 三期 Game Sync 设计
 
-当前文档同步日期：2026-05-13
+当前文档同步日期：2026-05-14
 
 ## 文档定位
 
-本文档记录 phase3 中 Unity runtime 对 RTPC、State、Switch 的已落地实现与继续演进边界。它既是当前 `SchemaVersion = 2` 的实现说明，也是后续继续向 Wwise 靠拢时的技术基线。
+本文档记录 phase3 中 Unity runtime 对 RTPC、State、Switch 的已落地实现与继续演进边界。它当前以 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]` 的实现为准，也是后续继续向 Wwise 靠拢时的技术基线。
 
-当前仓库主线已经支持 `SchemaVersion = 2`，同时保留对 `SchemaVersion = 1` payload 的兼容初始化路径。
+当前仓库主线当前以 `SchemaVersion = 3` 为主，运行时主数据结构已经切到顶层 `AudioObjects` 与 `Events[AudioId]`。
 
 ## 1. 当前落地面与剩余缺口
 
@@ -264,11 +264,12 @@ phase3 第一阶段建议只实现：
 - State / Switch / RTPC API 可返回默认空状态。
 - 继续按 phase2 的旧逻辑播放。
 
-### 8.2 v2 初始化
+### 8.2 v3 初始化
 
-当读取到 `SchemaVersion = 2` 时：
+当读取到 `SchemaVersion = 3` 时：
 
-- 解析新增顶层字段。
+- 解析顶层 `AudioObjects`、`Events`、Game Sync 与总线字段。
+- 为 `Event.AudioId -> AudioObject` 建立主真源映射。
 - 初始化全局默认 RTPC / State。
 - 为 Switch 准备 emitter 作用域存储。
 - 缺失必要字段时明确报错并拒绝进入 Ready 状态。
@@ -281,8 +282,8 @@ phase3 第一阶段建议只实现：
 2. 为两个 emitter 设置不同 Switch，同一事件命中不同分支。
 3. 设置局部 RTPC 后，同一事件在不同 emitter 上产生不同音量或音高。
 4. 在未注册 emitter 的场景下，Switch 使用默认值或明确拒绝。
-5. v1 payload 与 v2 payload 都能被 runtime 正确区分并初始化。
+5. v3 payload 中 `Event.AudioId` 与目标 `AudioObject.Id` 能被正确关联并初始化。
 
 ## 10. 结论
 
-phase3 runtime 的核心工作已经不是给当前 `PlayEvent` 再塞几个可选参数，而是把完整的 Game Sync 控制层落成了可运行基线。当前后续工作的重点不再是“是否做 Schema v2”，而是继续补齐持续调制、复杂容器和更强的场景侧验证。
+phase3 runtime 的核心工作已经不是给当前 `PlayEvent` 再塞几个可选参数，而是把完整的 Game Sync 控制层和 `AudioObjects + Events[AudioId]` 数据主链落成了可运行基线。当前后续工作的重点不再是“是否做 Schema v2”，而是继续补齐持续调制、复杂容器和更强的场景侧验证。

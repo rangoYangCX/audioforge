@@ -75,6 +75,72 @@ public static class AudioForgeJsonAdapter
             database.SwitchGroups.Add(group);
         }
 
+        var audioObjectMap = new Dictionary<string, AudioForgeAudioObjectConfig>();
+        var audioObjectsObject = root.ContainsKey("AudioObjects") ? root["AudioObjects"] as Dictionary<string, object> : null;
+        if (audioObjectsObject != null)
+        {
+            foreach (var pair in audioObjectsObject)
+            {
+                var audioPayload = pair.Value as Dictionary<string, object>;
+                if (audioPayload == null)
+                {
+                    continue;
+                }
+
+                var audioConfig = new AudioForgeAudioObjectConfig
+                {
+                    AudioId = pair.Key,
+                    DisplayName = ReadString(audioPayload, "DisplayName"),
+                    Bus = ReadString(audioPayload, "Bus"),
+                    PlayMode = ReadString(audioPayload, "PlayMode"),
+                    AvoidImmediateRepeat = ReadBool(audioPayload, "AvoidImmediateRepeat"),
+                    VolumeDb = ReadFloat(audioPayload, "VolumeDb"),
+                    VolumeRandMinDb = ReadFloatArrayValue(audioPayload, "VolumeRandDb", 0),
+                    VolumeRandMaxDb = ReadFloatArrayValue(audioPayload, "VolumeRandDb", 1),
+                    PitchCents = ReadInt(audioPayload, "PitchCents"),
+                    PitchRandMinCents = ReadIntArrayValue(audioPayload, "PitchRandCents", 0),
+                    PitchRandMaxCents = ReadIntArrayValue(audioPayload, "PitchRandCents", 1),
+                    LoadPolicy = ReadString(audioPayload, "LoadPolicy"),
+                    ComboPitchStepCents = ReadInt(audioPayload, "ComboPitchStepCents"),
+                    ComboResetSeconds = ReadFloat(audioPayload, "ComboResetSeconds"),
+                    ComboMaxStep = ReadInt(audioPayload, "ComboMaxStep"),
+                    RtpcBindings = ReadRtpcBindings(audioPayload, "RtpcBindings"),
+                    StateOverrides = ReadStateOverrides(audioPayload, "StateOverrides"),
+                    SwitchVariants = ReadSwitchVariants(audioPayload, "SwitchVariants"),
+                };
+                audioConfig.DefaultClipIds.AddRange(ReadStringList(audioPayload, "DefaultClipIds"));
+
+                var clips = audioPayload.ContainsKey("Clips") ? audioPayload["Clips"] as IList : null;
+                if (clips != null)
+                {
+                    foreach (var clipObject in clips)
+                    {
+                        var clipPayload = clipObject as Dictionary<string, object>;
+                        if (clipPayload == null)
+                        {
+                            continue;
+                        }
+
+                        audioConfig.Clips.Add(new AudioForgeClipConfig
+                        {
+                            ClipId = ReadString(clipPayload, "ClipId"),
+                            AssetKey = ReadString(clipPayload, "AssetKey"),
+                            Weight = ReadInt(clipPayload, "Weight"),
+                            TrimStartMs = ReadInt(clipPayload, "TrimStartMs"),
+                            TrimEndMs = ReadInt(clipPayload, "TrimEndMs"),
+                            FadeInMs = ReadInt(clipPayload, "FadeInMs"),
+                            FadeOutMs = ReadInt(clipPayload, "FadeOutMs"),
+                            LoopStartMs = ReadInt(clipPayload, "LoopStartMs"),
+                            LoopEndMs = ReadInt(clipPayload, "LoopEndMs"),
+                        });
+                    }
+                }
+
+                database.AudioObjects.Add(audioConfig);
+                audioObjectMap[audioConfig.AudioId] = audioConfig;
+            }
+        }
+
         IList busConfigsObject = root.ContainsKey("BusConfigs") ? root["BusConfigs"] as IList : null;
         if (busConfigsObject != null)
         {
@@ -143,53 +209,18 @@ public static class AudioForgeJsonAdapter
             var eventConfig = new AudioForgeEventConfig
             {
                 EventId = pair.Key,
-                Bus = ReadString(eventPayload, "Bus"),
-                PlayMode = ReadString(eventPayload, "PlayMode"),
-                AvoidImmediateRepeat = ReadBool(eventPayload, "AvoidImmediateRepeat"),
-                VolumeDb = ReadFloat(eventPayload, "VolumeDb"),
-                VolumeRandMinDb = ReadFloatArrayValue(eventPayload, "VolumeRandDb", 0),
-                VolumeRandMaxDb = ReadFloatArrayValue(eventPayload, "VolumeRandDb", 1),
-                PitchCents = ReadInt(eventPayload, "PitchCents"),
-                PitchRandMinCents = ReadIntArrayValue(eventPayload, "PitchRandCents", 0),
-                PitchRandMaxCents = ReadIntArrayValue(eventPayload, "PitchRandCents", 1),
                 MaxInstances = ReadInt(eventPayload, "MaxInstances"),
                 CooldownSeconds = ReadFloat(eventPayload, "CooldownSeconds"),
                 StealPolicy = ReadString(eventPayload, "StealPolicy"),
-                LoadPolicy = ReadString(eventPayload, "LoadPolicy"),
-                ComboPitchStepCents = ReadInt(eventPayload, "ComboPitchStepCents"),
-                ComboResetSeconds = ReadFloat(eventPayload, "ComboResetSeconds"),
-                ComboMaxStep = ReadInt(eventPayload, "ComboMaxStep"),
-                RtpcBindings = ReadRtpcBindings(eventPayload, "RtpcBindings"),
-                StateOverrides = ReadStateOverrides(eventPayload, "StateOverrides"),
-                SwitchVariants = ReadSwitchVariants(eventPayload, "SwitchVariants"),
+                AudioId = ReadString(eventPayload, "AudioId"),
             };
-            eventConfig.DefaultClipIds.AddRange(ReadStringList(eventPayload, "DefaultClipIds"));
 
-            var clips = eventPayload["Clips"] as IList;
-            if (clips != null)
+            if (string.IsNullOrEmpty(eventConfig.AudioId) || !audioObjectMap.TryGetValue(eventConfig.AudioId, out var audioConfig))
             {
-                foreach (var clipObject in clips)
-                {
-                    var clipPayload = clipObject as Dictionary<string, object>;
-                    if (clipPayload == null)
-                    {
-                        continue;
-                    }
-
-                    eventConfig.Clips.Add(new AudioForgeClipConfig
-                    {
-                        ClipId = ReadString(clipPayload, "ClipId"),
-                        AssetKey = ReadString(clipPayload, "AssetKey"),
-                        Weight = ReadInt(clipPayload, "Weight"),
-                        TrimStartMs = ReadInt(clipPayload, "TrimStartMs"),
-                        TrimEndMs = ReadInt(clipPayload, "TrimEndMs"),
-                        FadeInMs = ReadInt(clipPayload, "FadeInMs"),
-                        FadeOutMs = ReadInt(clipPayload, "FadeOutMs"),
-                        LoopStartMs = ReadInt(clipPayload, "LoopStartMs"),
-                        LoopEndMs = ReadInt(clipPayload, "LoopEndMs"),
-                    });
-                }
+                throw new InvalidOperationException("Event is missing a valid AudioId reference: " + pair.Key);
             }
+
+            eventConfig.Audio = audioConfig;
 
             database.Events.Add(eventConfig);
         }

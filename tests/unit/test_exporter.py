@@ -31,10 +31,12 @@ def test_runtime_exporter_writes_bundle_and_assets(tmp_path: Path) -> None:
     payload = json.loads(result.data_file.read_text(encoding="utf-8"))
     manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
     report = json.loads(result.report_file.read_text(encoding="utf-8"))
+    audio_id = project.events["UiClick"].audio_id
 
-    assert payload["SchemaVersion"] == 2
+    assert payload["SchemaVersion"] == 3
     assert payload["RuntimeAudioFormat"] == "wav"
-    assert payload["Events"]["UiClick"]["Bus"] == "UI"
+    assert payload["Events"]["UiClick"]["AudioId"] == audio_id
+    assert payload["AudioObjects"][audio_id]["Bus"] == "UI"
     assert manifest["Assets"][0]["ExportPath"] == "ui/click_primary.wav"
     assert report["EventCount"] == 1
     assert report["ClipCount"] == 1
@@ -98,20 +100,23 @@ def test_runtime_exporter_writes_schema_v2_gamesync_payload(tmp_path: Path) -> N
     payload = json.loads(result.data_file.read_text(encoding="utf-8"))
     manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
     ui_click = payload["Events"]["UiClick"]
+    ui_click_audio = payload["AudioObjects"][project.events["UiClick"].audio_id]
     ui_bus = next(config for config in payload["BusConfigs"] if config["Name"] == "BGM")
 
-    assert payload["SchemaVersion"] == 2
+    assert payload["SchemaVersion"] == 3
     assert payload["GameParameters"][0]["Name"] == "PlayerSpeed"
     assert payload["StateGroups"][0]["DefaultState"] == "Explore"
     assert payload["StateGroups"][0]["StateEffects"][0]["StateName"] == "Combat"
     assert payload["SwitchGroups"][0]["UseGameParameter"] is True
     assert payload["SwitchGroups"][0]["Thresholds"][0]["SwitchName"] == "Grass"
     assert payload["SwitchGroups"][0]["SwitchEffects"][0]["SwitchName"] == "Stone"
-    assert ui_click["RtpcBindings"][0]["Scope"] == "Emitter"
-    assert ui_click["RtpcBindings"][0]["CurvePoints"][1]["Interpolation"] == "Constant"
-    assert ui_click["StateOverrides"][0]["GroupName"] == "CombatState"
-    assert ui_click["SwitchVariants"][0]["ClipIds"] == [variant_clip.id]
-    assert variant_clip.id in ui_click["Clips"][1]["ClipId"]
+    assert ui_click["AudioId"] == project.events["UiClick"].audio_id
+    assert ui_click_audio["PlayMode"] == "Random"
+    assert ui_click_audio["RtpcBindings"][0]["Scope"] == "Emitter"
+    assert ui_click_audio["RtpcBindings"][0]["CurvePoints"][1]["Interpolation"] == "Constant"
+    assert ui_click_audio["StateOverrides"][0]["GroupName"] == "CombatState"
+    assert ui_click_audio["SwitchVariants"][0]["ClipIds"] == [variant_clip.id]
+    assert variant_clip.id in ui_click_audio["Clips"][1]["ClipId"]
     assert ui_bus["RtpcBindings"][0]["Target"] == "BusVolumeDb"
     assert ui_bus["StateOverrides"][0]["StateName"] == "Combat"
     assert {asset["AssetKey"] for asset in manifest["Assets"]} == {"ui/click_primary", "ui/click_surface"}
@@ -154,9 +159,10 @@ def test_runtime_exporter_only_writes_active_binding_for_one_shot(tmp_path: Path
 
     payload = json.loads(result.data_file.read_text(encoding="utf-8"))
     manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
+    audio_payload = payload["AudioObjects"][project.events["UiClick"].audio_id]
 
-    assert payload["Events"]["UiClick"]["PlayMode"] == "OneShot"
-    assert [clip["AssetKey"] for clip in payload["Events"]["UiClick"]["Clips"]] == ["ui/click_alternate"]
+    assert audio_payload["PlayMode"] == "OneShot"
+    assert [clip["AssetKey"] for clip in audio_payload["Clips"]] == ["ui/click_alternate"]
     assert {asset["AssetKey"] for asset in manifest["Assets"]} == {"ui/click_alternate"}
 
 
@@ -176,9 +182,10 @@ def test_runtime_exporter_only_writes_active_bindings_for_random_mode(tmp_path: 
 
     payload = json.loads(result.data_file.read_text(encoding="utf-8"))
     manifest = json.loads(result.manifest_file.read_text(encoding="utf-8"))
+    audio_payload = payload["AudioObjects"][project.events["UiClick"].audio_id]
 
-    assert payload["Events"]["UiClick"]["PlayMode"] == "Random"
-    assert [clip["AssetKey"] for clip in payload["Events"]["UiClick"]["Clips"]] == ["ui/click_primary"]
+    assert audio_payload["PlayMode"] == "Random"
+    assert [clip["AssetKey"] for clip in audio_payload["Clips"]] == ["ui/click_primary"]
     assert {asset["AssetKey"] for asset in manifest["Assets"]} == {"ui/click_primary"}
 
 
@@ -199,8 +206,9 @@ def test_runtime_exporter_overwrites_existing_bundle_atomically(tmp_path: Path) 
     assert not export_root.with_name("Export.bak").exists()
 
     payload = json.loads(result.data_file.read_text(encoding="utf-8"))
+    audio_id = project.events["UiClick"].audio_id
     assert payload["ProjectName"] == "InternalReleaseSample"
-    assert payload["Events"]["UiClick"]["Bus"] == "UI"
+    assert payload["AudioObjects"][audio_id]["Bus"] == "UI"
 
 
 def test_runtime_exporter_restores_previous_bundle_when_commit_replace_fails(

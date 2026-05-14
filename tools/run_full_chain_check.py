@@ -183,24 +183,73 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
     invalid_bus_events: list[str] = []
     manifest_missing_for_clip: list[str] = []
     manifest_runtime_mismatch: list[str] = []
-    missing_schema_v2_fields: list[str] = []
+    schema_field_issues: list[str] = []
+    audio_object_map = audio_data.get("AudioObjects", {}) if isinstance(audio_data, dict) else {}
 
     if schema_version >= 2:
         for field_name in ("GameParameters", "StateGroups", "SwitchGroups"):
             if not isinstance(audio_data.get(field_name, None), list):
-                missing_schema_v2_fields.append(f"top_level:{field_name}")
+                schema_field_issues.append(f"top_level:{field_name}")
+    if schema_version >= 3 and not isinstance(audio_object_map, dict):
+        schema_field_issues.append("top_level:AudioObjects")
 
     for event_id, payload in events.items():
         if not isinstance(payload, dict):
             details.append(f"event_payload_invalid={event_id}")
             continue
-        if schema_version >= 2:
-            for field_name in ("DefaultClipIds", "RtpcBindings", "StateOverrides", "SwitchVariants"):
-                if not isinstance(payload.get(field_name, None), list):
-                    missing_schema_v2_fields.append(f"event:{event_id}:{field_name}")
-        clips = payload.get("Clips", [])
+
+        effective_payload = payload
+        if schema_version >= 3:
+            for field_name in ("MaxInstances", "CooldownSeconds", "StealPolicy"):
+                if field_name not in payload:
+                    schema_field_issues.append(f"event:{event_id}:{field_name}")
+            audio_id = str(payload.get("AudioId", "")).strip()
+            if not audio_id:
+                schema_field_issues.append(f"event:{event_id}:AudioId")
+                audio_payload = None
+            else:
+                audio_payload = audio_object_map.get(audio_id)
+            if not isinstance(audio_payload, dict):
+                schema_field_issues.append(f"audio_object:{event_id}:{audio_id or '-'}")
+                audio_payload = None
+            else:
+                effective_payload = audio_payload
+                for field_name in (
+                    "AudioId",
+                    "DisplayName",
+                    "Bus",
+                    "PlayMode",
+                    "AvoidImmediateRepeat",
+                    "VolumeDb",
+                    "VolumeRandDb",
+                    "PitchCents",
+                    "PitchRandCents",
+                    "LoadPolicy",
+                    "DefaultClipIds",
+                    "Clips",
+                    "RtpcBindings",
+                    "StateOverrides",
+                    "SwitchVariants",
+                ):
+                    if field_name not in audio_payload:
+                        schema_field_issues.append(f"audio:{audio_id}:{field_name}")
+                if audio_payload.get("PlayMode") == "Combo":
+                    for field_name in ("ComboPitchStepCents", "ComboResetSeconds", "ComboMaxStep"):
+                        if field_name not in audio_payload:
+                            schema_field_issues.append(f"audio:{audio_id}:{field_name}")
+        elif schema_version >= 2:
+            for field_name in ("MaxInstances", "CooldownSeconds", "StealPolicy"):
+                if field_name not in payload:
+                    schema_field_issues.append(f"event:{event_id}:{field_name}")
+            audio_payload = payload.get("Audio")
+            if not isinstance(audio_payload, dict):
+                schema_field_issues.append(f"event:{event_id}:Audio")
+                audio_payload = None
+            else:
+                effective_payload = audio_payload
+        clips = effective_payload.get("Clips", []) if isinstance(effective_payload, dict) else []
         actual_clip_count += len(clips)
-        bus_name = payload.get("Bus", "")
+        bus_name = effective_payload.get("Bus", "") if isinstance(effective_payload, dict) else ""
         if bus_name and bus_name not in buses:
             invalid_bus_events.append(f"{event_id}:{bus_name}")
         for clip in clips:
@@ -238,7 +287,7 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
                 continue
             for field_name in ("RtpcBindings", "StateOverrides"):
                 if not isinstance(config.get(field_name, None), list):
-                    missing_schema_v2_fields.append(f"bus:{config.get('Name', '')}:{field_name}")
+                    schema_field_issues.append(f"bus:{config.get('Name', '')}:{field_name}")
 
     runtime_format = audio_data.get("RuntimeAudioFormat", "") if isinstance(audio_data, dict) else ""
     for asset_key, asset in manifest_by_key.items():
@@ -251,9 +300,9 @@ def check_runtime_contract(export_dir: Path) -> CheckResult:
     if manifest_runtime_mismatch:
         passed = False
         details.extend(f"manifest_runtime_format_mismatch={entry}" for entry in manifest_runtime_mismatch)
-    if missing_schema_v2_fields:
+    if schema_field_issues:
         passed = False
-        details.extend(f"missing_schema_v2_field={entry}" for entry in missing_schema_v2_fields)
+        details.extend(f"missing_schema_field={entry}" for entry in schema_field_issues)
 
     details.append(f"schema_version={schema_version or 'unknown'}")
     details.append(f"runtime_audio_format={runtime_format}")

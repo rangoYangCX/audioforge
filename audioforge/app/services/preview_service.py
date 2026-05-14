@@ -135,11 +135,12 @@ class PreviewService:
             state.active_until_times.pop(0)
             stolen_oldest = True
 
-        volume_db = event.volume_db + self._rng.uniform(event.volume_rand_min_db, event.volume_rand_max_db)
-        pitch_cents = event.pitch_cents + int(round(self._rng.uniform(event.pitch_rand_min_cents, event.pitch_rand_max_cents)))
+        audio = event.audio
+        volume_db = audio.volume_db + self._rng.uniform(audio.volume_rand_min_db, audio.volume_rand_max_db)
+        pitch_cents = audio.pitch_cents + int(round(self._rng.uniform(audio.pitch_rand_min_cents, audio.pitch_rand_max_cents)))
         volume_db, pitch_cents, is_muted = self.resolve_mix_adjustment(
-            event.rtpc_bindings,
-            event.state_overrides,
+            audio.rtpc_bindings,
+            audio.state_overrides,
             base_volume_db=volume_db,
             base_pitch_cents=pitch_cents,
             preview_gamesync=preview_context,
@@ -172,8 +173,8 @@ class PreviewService:
 
         combo_step = self._resolve_combo_step(event, state, trigger_time)
         combo_pitch_cents = 0
-        if event.play_mode == "Combo":
-            combo_pitch_cents = combo_step * event.combo_pitch_step_cents
+        if audio.play_mode == "Combo":
+            combo_pitch_cents = combo_step * audio.combo_pitch_step_cents
 
         playback_duration_seconds = self._preview_hold_seconds
         if preview_duration_resolver is not None:
@@ -262,27 +263,29 @@ class PreviewService:
         state.active_until_times = [expiry for expiry in state.active_until_times if expiry > now]
 
     def _resolve_combo_step(self, event: EventModel, state: PreviewEventState, trigger_time: float) -> int:
-        if event.play_mode != "Combo":
+        audio = event.audio
+        if audio.play_mode != "Combo":
             state.combo_step = 0
             return 0
-        if state.last_trigger_time is None or trigger_time - state.last_trigger_time > event.combo_reset_seconds:
+        if state.last_trigger_time is None or trigger_time - state.last_trigger_time > audio.combo_reset_seconds:
             state.combo_step = 0
         else:
             state.combo_step += 1
-        if event.combo_max_step > 0:
-            state.combo_step = min(state.combo_step, event.combo_max_step)
+        if audio.combo_max_step > 0:
+            state.combo_step = min(state.combo_step, audio.combo_max_step)
         return state.combo_step
 
     def _select_clip(self, event: EventModel, state: PreviewEventState, runtime_clips: list[ClipModel]) -> ClipModel | None:
-        if event.play_mode == "OneShot":
+        audio = event.audio
+        if audio.play_mode == "OneShot":
             return runtime_clips[0] if runtime_clips else None
-        if event.play_mode == "Sequence":
+        if audio.play_mode == "Sequence":
             clip = runtime_clips[state.sequence_index % len(runtime_clips)]
             state.sequence_index = (state.sequence_index + 1) % len(runtime_clips)
             return clip
 
         candidates = list(runtime_clips)
-        if event.avoid_immediate_repeat and state.last_clip_id is not None and len(candidates) > 1:
+        if audio.avoid_immediate_repeat and state.last_clip_id is not None and len(candidates) > 1:
             filtered = [clip for clip in candidates if clip.id != state.last_clip_id]
             if filtered:
                 candidates = filtered
@@ -303,8 +306,9 @@ class PreviewService:
         game_parameters: list[GameParameterModel],
         switch_groups: list[SwitchGroupModel],
     ) -> list[ClipModel]:
-        clips_by_id = {clip.id: clip for clip in event.clips}
-        for variant in event.switch_variants:
+        audio = event.audio
+        clips_by_id = {clip.id: clip for clip in audio.clips}
+        for variant in audio.switch_variants:
             if not variant.group_name.strip():
                 continue
             if self._resolve_switch_value(variant.group_name, switch_groups, game_parameters, preview_gamesync) != variant.switch_name:
@@ -313,7 +317,7 @@ class PreviewService:
             if matched_clips:
                 return matched_clips
         default_clips = effective_event_clips(event)
-        return default_clips if default_clips else list(event.clips)
+        return default_clips if default_clips else list(audio.clips)
 
     def _apply_active_gamesync_effects(
         self,
