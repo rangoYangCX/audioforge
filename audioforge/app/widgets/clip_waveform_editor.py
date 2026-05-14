@@ -9,9 +9,9 @@ except Exception:  # pragma: no cover - optional runtime dependency fallback
     np = None
     sf = None
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 
 class ClipWaveformEditor(QWidget):
@@ -22,6 +22,7 @@ class ClipWaveformEditor(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(196)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setToolTip("拖动左右边界设置裁剪范围，拖动内部手柄设置淡入与淡出。")
@@ -40,6 +41,12 @@ class ClipWaveformEditor(QWidget):
         self._status_text = "选择片段后，可直接在这里编辑裁剪与淡入淡出。"
         self._drag_handle: str | None = None
         self._handle_hit_radius = 16.0
+
+    def sizeHint(self) -> QSize:
+        return QSize(520, 248)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(320, 196)
 
     def clear(self) -> None:
         self._source_path = ""

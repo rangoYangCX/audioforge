@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "audioforge"
-version = "0.09.0"
+version = "0.09.1"
 description = "Data-driven audio middleware authoring tool for Unity integration"
 readme = "README.md"
 requires-python = ">=3.11"

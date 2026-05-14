@@ -122,7 +122,7 @@ def write_package_readme(target_path: Path) -> None:
 
 1. 将整个包目录放到 Unity 项目的 `Packages/` 下，或通过 `Packages/manifest.json` 的本地路径方式引用。
 2. 将工具导出的 `AudioData.json`、`AudioManifest.json` 和导出音频资源放到 `Assets/StreamingAssets/AudioForge/`。
-3. 先阅读 `Documentation~/Docs/QuickStart.md`，再按 `Documentation~/Docs/Canonical/UnitySDK对接规范.md` 接入业务事件与总线。
+3. 先阅读 `Documentation~/Docs/QuickStart.md`，再按 `Documentation~/Docs/Canonical/UnitySDK输出规范.md` 和 `Documentation~/Docs/Canonical/UnitySDK对接规范.md` 接入业务事件与总线。
 
 ## 一期到当前的差异入口
 
@@ -170,6 +170,7 @@ def add_release_docs(workspace: Path, docs_root: Path) -> None:
     docs_targets = {
         workspace / "CHANGELOG.md": canonical_root / "CHANGELOG.md",
         workspace / "docs" / "UnitySDK对接规范.md": canonical_root / "UnitySDK对接规范.md",
+        workspace / "docs" / "UnitySDK输出规范.md": canonical_root / "UnitySDK输出规范.md",
         workspace / "docs" / "UnitySDK一期到当前变化总览.md": canonical_root / "UnitySDK一期到当前变化总览.md",
         workspace / "docs" / "Unity场景联调清单.md": canonical_root / "Unity场景联调清单.md",
         workspace / "docs" / "releases" / f"v{APP_VERSION}-github-release.md": canonical_root / "GitHubRelease.md",

@@ -8,11 +8,34 @@
 - 每个版本至少记录：新增能力、行为变化、修复项、验证结果。
 - Git 提交负责记录实现细节；本文件负责回答“这一版具体给用户带来了什么变化”。
 
-当前已补录的版本范围：0.03 - 0.09.0，并使用 `Unreleased` 记录尚未单独发版的维护更新。
+当前已补录的版本范围：0.03 - 0.09.1，并使用 `Unreleased` 记录尚未单独发版的维护更新。
 
 ## [Unreleased]
 
 - 暂无未发布变更。
+
+## [0.09.1] - 2026-05-14
+
+### Added
+
+- 新增 `docs/UnitySDK输出规范.md`，明确未来 Unity SDK 交付统一遵循 `com.audioforge.runtime` UPM 根目录结构，以及桌面版到 UPM semver 的版本映射规则。
+- Windows 桌面发布目录开始内嵌 `SDK/com.audioforge.runtime/`，避免 Unity 程序还要从仓库源码或独立包目录里手动拼装本地 UPM 包。
+
+### Changed
+
+- Unity SDK 打包脚本现会把 `UnitySDK输出规范.md` 一并同步到包内 `Documentation~/Docs/Canonical/`，保证包内外文档口径一致。
+- README、开发文档、Unity 对接文档、包内说明和 release note 已统一刷新到 0.09.1 与 UPM SDK 输出规范口径。
+- 源音频树默认选择模式由 `MultiSelection` 调整为 `ExtendedSelection`，更接近资源管理器式交互，同时保留批量编辑入口。
+
+### Fixed
+
+- 修复片段编辑台中波形区容易被下方操作按钮与说明卡片挤压的问题；当前片段编辑区优先保证波形可用高度，并把批量反馈卡片压缩为轻量提示条。
+
+### Validation
+
+- `pytest tests/unit/test_event_tree_widget.py tests/unit/test_main_controller_layout.py`：106 项通过。
+- `python tools/run_unity_package_release.py --skip-pytest`：PASS，生成 `dist/AudioForgeUnityPackage-0.09.1/`、`dist/AudioForgeUnityPackage-0.09.1.zip` 和 `reports/unity_package_release/` 签收材料。
+- `python tools/build_windows_exe.py`：PASS，生成 `dist/AudioForge-0.09.1-windows/`、`dist/AudioForge-0.09.1-windows.zip`，并内嵌 `SDK/com.audioforge.runtime/`。
 
 ## [0.09.0] - 2026-05-14
 

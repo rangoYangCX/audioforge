@@ -145,7 +145,7 @@ def embed_signoff_in_release(report_root: Path, release_root: Path) -> None:
     if not release_root.exists():
         return
 
-    verification_root = release_root / "Verification"
+    verification_root = release_root / "Documentation~" / "Verification"
     verification_root.mkdir(parents=True, exist_ok=True)
 
     for file_name in ("unity_package_release_signoff.json", "unity_package_release_signoff.md"):

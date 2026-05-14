@@ -21,6 +21,7 @@
 4. 执行 `python tools/run_full_chain_check.py` 时，会同时检查独立包和验证镜像是否一致。
 5. 如果要输出可直接交付的压缩包，执行 `python tools/package_unity_integration_package.py`，会生成版本化目录包和 zip，并自动把 canonical 文档副本与验证报告装入包内。
 6. 如果要做一轮完整的 Unity 包交付签收，执行 `python tools/run_unity_package_release.py --skip-pytest`，会依次完成同步、全链路检查、打包，并输出签收报告。
+7. 包根目录结构、版本映射和文档入口约束统一以 `docs/UnitySDK输出规范.md` 为准，源码目录本身不再单独维护另一套交付骨架说明。
 
 ## SDK 对接包内容
 
@@ -32,27 +33,29 @@
 - `Documentation~/Docs/`：包内对接入口与 canonical 文档副本。
 - `Documentation~/Examples/`：带注释的示范代码文件，不会自动进入 Unity 工程，需要按需手工复制。
 - `Documentation~/Verification/`：最近一次机器验证报告与内部签收摘要。
+- `Documentation~/Docs/Canonical/UnitySDK输出规范.md`：当前唯一优先维护的 SDK 输出骨架规范。
 - `README.md`：包根总说明。
 
 ## 和第一期相比，这包现在多了什么
 
-- 包内文档新增 `Docs/一期对比变化总览.md`，Unity 同学拿到包后可以先用一页文档看清楚“一期到当前”的真实差异。
+- 包内文档新增 `Documentation~/Docs/一期对比变化总览.md`，Unity 同学拿到包后可以先用一页文档看清楚“一期到当前”的真实差异。
 - 对接规范已经把 `PlayMode = OneShot`、有效 Clip 集合和 editor-only 边界写清楚，不需要再从编辑器实现里反推 Unity 端应该怎么理解。
 - 包内验证材料会随重新打包一起刷新，交接时可以同时给目录包、zip 和签收摘要，而不是只给一份运行时代码目录。
 - 当前包内 runtime 已正式进入“Event 动作层 + AudioObject 声音层”契约：Unity runtime 直接消费顶层 `AudioObjects` 与 `Events[AudioId]`，不再依赖事件内嵌 `Audio` 或扁平镜像字段。
+- 从 0.09.1 起，包内还新增明确的输出规范副本，交付目录不再允许回退成旧的 `Assets/AudioForgeRuntime` 裸目录心智。
 
 ## 2026-05-14 版本说明
 
-- 0.09.0 这轮发布的重点是 Schema 3 与 Audio Object 主模型冻结：运行时代码目录仍维持同一套 SDK，但契约已明确要求 `SchemaVersion = 3` 走顶层 `AudioObjects + Events[AudioId]`。
+- 0.09.1 这轮发布的重点是冻结 Unity SDK 的 UPM 输出规范，并把 0.09.0 已落地的 Schema 3 / Audio Object 主模型口径完整固化进包内外文档。
 - 当前参考运行时代码仍位于 `unity_package/Assets/AudioForgeRuntime`，并已直接消费 `AudioObjects` 与 `AudioId` 引用，不再依赖嵌套 `Audio` 或扁平字段回退。
-- 如果你只看代码目录，容易误以为这次只是数据层重命名；真正需要同步给 Unity 的，是“Event 只负责触发行为，声音层全部归 AudioObject”的运行时语义。
+- 如果你只看代码目录，容易误以为这次只是数据层重命名；真正需要同步给 Unity 的，是“Event 只负责触发行为，声音层全部归 AudioObject”的运行时语义，以及整个 SDK 交付都已固定为 `com.audioforge.runtime` 的 UPM 包根目录。
 
 ## 打包产物
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.09.0/`
-- `AudioForgeUnityPackage-0.09.0.zip`
+- `AudioForgeUnityPackage-0.09.1/`
+- `AudioForgeUnityPackage-0.09.1.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 
@@ -63,7 +66,7 @@
 
 1. 将 `dist/AudioForgeUnityPackage-<version>/` 目录整体放到目标 Unity 项目的 `Packages/` 下，或通过本地路径方式引入该包。
 2. 将工具导出的 `AudioData.json`、`AudioManifest.json` 和 `Assets/**` 放到 `Assets/StreamingAssets/AudioForge/`。
-3. 先阅读包内 `Documentation~/Docs/QuickStart.md`，再按 `Documentation~/Docs/Canonical/UnitySDK对接规范.md` 或 `unity_validation/README.md` 完成初始化和空项目验证。
+3. 先阅读包内 `Documentation~/Docs/QuickStart.md`，再按 `Documentation~/Docs/Canonical/UnitySDK输出规范.md`、`Documentation~/Docs/Canonical/UnitySDK对接规范.md` 或 `unity_validation/README.md` 完成初始化和空项目验证。
 
 ## Inspector 搜索
 

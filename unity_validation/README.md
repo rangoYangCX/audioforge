@@ -18,7 +18,7 @@
 
 已经准备好的内容位于仓库中的独立包目录。你只需要在 Unity Hub 里手动新建一个空项目，再把 `unity_package/Assets/AudioForgeRuntime` 目录整体复制进去，就可以开始验证。
 
-如果你准备直接把 SDK 交给 Unity 开发同学，优先使用 `python tools/package_unity_integration_package.py` 生成的 `dist/AudioForgeUnityPackage-<version>.zip`。从 2026-05-07 起，该包会额外包含 `Docs/`、`Examples/` 和 `Verification/` 三层交接材料，不必再手工拼文档。
+如果你准备直接把 SDK 交给 Unity 开发同学，优先使用 `python tools/package_unity_integration_package.py` 生成的 `dist/AudioForgeUnityPackage-<version>.zip`。从 2026-05-07 起，该包会额外包含 `Documentation~/Docs/`、`Documentation~/Examples/` 和 `Documentation~/Verification/` 三层交接材料，不必再手工拼文档；包根目录规范统一以 `docs/UnitySDK输出规范.md` 为准。
 
 当前 `unity_validation` 目录本身已经整理成更接近示例工程骨架的结构：
 
