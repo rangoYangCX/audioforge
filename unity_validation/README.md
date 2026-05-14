@@ -1,7 +1,7 @@
 # Unity Empty Project Validation
 
 > 本文档只负责说明 Unity 空项目验证步骤。
-> SDK 对接边界、运行时契约、字段语义、接入建议与验收标准，统一以 `docs/UnitySDK对接规范.md` 为准；后续不在本文档中维护并行版本的详细对接说明。
+> SDK 对接边界、运行时契约、字段语义、接入建议与验收标准，统一以 `docs/unity/UnitySDK对接规范.md` 为准；后续不在本文档中维护并行版本的详细对接说明。
 
 > 当前文档同步日期：2026-05-14。
 
@@ -18,7 +18,7 @@
 
 已经准备好的内容位于仓库中的独立包目录。你只需要在 Unity Hub 里手动新建一个空项目，再把 `unity_package/Assets/AudioForgeRuntime` 目录整体复制进去，就可以开始验证。
 
-如果你准备直接把 SDK 交给 Unity 开发同学，优先使用 `python tools/package_unity_integration_package.py` 生成的 `dist/AudioForgeUnityPackage-<version>.zip`。从 2026-05-07 起，该包会额外包含 `Documentation~/Docs/`、`Documentation~/Examples/` 和 `Documentation~/Verification/` 三层交接材料，不必再手工拼文档；包根目录规范统一以 `docs/UnitySDK输出规范.md` 为准。
+如果你准备直接把 SDK 交给 Unity 开发同学，优先使用 `python tools/package_unity_integration_package.py` 生成的 `dist/AudioForgeUnityPackage-<version>.zip`。从 2026-05-07 起，该包会额外包含 `Documentation~/Docs/`、`Documentation~/Examples/` 和 `Documentation~/Verification/` 三层交接材料，不必再手工拼文档；包根目录规范统一以 `docs/unity/UnitySDK输出规范.md` 为准。
 
 当前 `unity_validation` 目录本身已经整理成更接近示例工程骨架的结构：
 

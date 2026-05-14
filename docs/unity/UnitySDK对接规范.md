@@ -4,7 +4,7 @@ AudioForge Unity 端对接开发文档
 > 之后涉及 SDK 对接、运行时契约、接入步骤、联调边界和验收标准的更新，优先维护本文档；其他文档仅保留概述、背景或验证补充，不再承载并行版本的详细对接说明。
 
 > 当前文档同步日期：2026-05-14。
-> 当前工具版本：AudioForge 0.09.0。
+> 当前工具版本：AudioForge 0.09.1。
 
 0.1 版本增量
 
@@ -39,7 +39,7 @@ AudioForge Unity 端对接开发文档
 
 - 当前相对第一期，运行时层真正需要 Unity 程序关注的不再只有 `OneShot`；当前还新增了 `SchemaVersion = 3`、项目级 `AudioObjects`、项目级 Game Sync 定义、Audio/总线级 Game Sync 绑定、emitter context 与 child effects。
 - 编辑器层新增了对象浏览器三分页、事件树 bindings 弹窗、`Enabled` / `Active` 切换、拖拽追加反馈、OneShot 图标和智能总线分配工程设置；这些 editor-only 状态本身仍不会原样写进导出，但其过滤后的结果与 GameSync 绑定会进入当前 `AudioData.json`。
-- 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
+- 如果 Unity 同学仍按一期心智理解 SDK，可以先读 `docs/unity/migration/UnitySDK一期到当前变化总览.md`；拿到交付包时，包内对应入口是 `Docs/一期对比变化总览.md`。
 - 当前仓库附带的 Unity 参考运行时代码已经能够消费新版导出结果；如果项目内是自研 runtime，则需要同步补齐 v2 解析、Game Sync API 与 emitter 作用域。
 
 0.3 当前 GameSync 口径

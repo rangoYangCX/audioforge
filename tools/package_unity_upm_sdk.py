@@ -169,10 +169,13 @@ def add_release_docs(workspace: Path, docs_root: Path) -> None:
     canonical_root = docs_root / "Canonical"
     docs_targets = {
         workspace / "CHANGELOG.md": canonical_root / "CHANGELOG.md",
-        workspace / "docs" / "UnitySDK对接规范.md": canonical_root / "UnitySDK对接规范.md",
-        workspace / "docs" / "UnitySDK输出规范.md": canonical_root / "UnitySDK输出规范.md",
-        workspace / "docs" / "UnitySDK一期到当前变化总览.md": canonical_root / "UnitySDK一期到当前变化总览.md",
-        workspace / "docs" / "Unity场景联调清单.md": canonical_root / "Unity场景联调清单.md",
+        workspace / "docs" / "guides" / "AudioForge使用说明.md": canonical_root / "AudioForge使用说明.md",
+        workspace / "docs" / "guides" / "AudioForge音频设计速查.md": canonical_root / "AudioForge音频设计速查.md",
+        workspace / "docs" / "guides" / "AudioForge研发接入速查.md": canonical_root / "AudioForge研发接入速查.md",
+        workspace / "docs" / "unity" / "UnitySDK对接规范.md": canonical_root / "UnitySDK对接规范.md",
+        workspace / "docs" / "unity" / "UnitySDK输出规范.md": canonical_root / "UnitySDK输出规范.md",
+        workspace / "docs" / "unity" / "migration" / "UnitySDK一期到当前变化总览.md": canonical_root / "UnitySDK一期到当前变化总览.md",
+        workspace / "docs" / "unity" / "validation" / "Unity场景联调清单.md": canonical_root / "Unity场景联调清单.md",
         workspace / "docs" / "releases" / f"v{APP_VERSION}-github-release.md": canonical_root / "GitHubRelease.md",
         workspace / "unity_validation" / "README.md": canonical_root / "UnityValidationREADME.md",
     }

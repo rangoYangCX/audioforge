@@ -36,7 +36,7 @@
 
 ## 建议的对接动作
 
-1. 先读 `docs/UnitySDK对接规范.md` 里关于 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、GameSync 字段和 editor-only 边界的最新说明。
+1. 先读 `docs/unity/UnitySDK对接规范.md` 里关于 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、GameSync 字段和 editor-only 边界的最新说明。
 2. 再拿最新打包目录 `dist/AudioForgeUnityPackage-0.09.0/` 或 zip 里的文档副本走一遍 Quick Start。
 3. 如果项目里自己写过 runtime 解析层，先确认是否仍把顶层契约硬编码成只有 `BusConfigs` 与 `Events`。
 4. 如果项目里自己写过 `PlayMode` 或 emitter 触发逻辑，确认没有遗漏 `OneShot`、`RegisterEmitter`、`SetSwitch`、`SetGameParameter` 这类新增路径。

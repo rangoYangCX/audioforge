@@ -22,7 +22,7 @@
 
 ### Added
 
-- 新增 `docs/UnitySDK输出规范.md`，明确未来 Unity SDK 交付统一遵循 `com.audioforge.runtime` UPM 根目录结构，以及桌面版到 UPM semver 的版本映射规则。
+- 新增 `docs/unity/UnitySDK输出规范.md`，明确未来 Unity SDK 交付统一遵循 `com.audioforge.runtime` UPM 根目录结构，以及桌面版到 UPM semver 的版本映射规则。
 - Windows 桌面发布目录开始内嵌 `SDK/com.audioforge.runtime/`，避免 Unity 程序还要从仓库源码或独立包目录里手动拼装本地 UPM 包。
 
 ### Changed

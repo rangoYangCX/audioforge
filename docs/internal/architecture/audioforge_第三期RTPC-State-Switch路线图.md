@@ -1,43 +1,68 @@
-# AudioForge 第三期 RTPC / State / Switch 实施计划
+# AudioForge 第三期 RTPC / State / Switch 路线图
 
-当前文档同步日期：2026-05-13
+当前文档同步日期：2026-05-14
 
-## 目标
+> 当前状态：phase3 主链已经落地，本文档不再作为“待开始的实施计划”，而是作为阶段总结和后续演进路线保留。
 
-这份计划定义 AudioForge phase3 的正式目标：把 Wwise 中最关键的 Game Sync 语义，即 RTPC、State、Switch，系统地接入 AudioForge 工程模型、导出契约和 Unity runtime。
+## 1. 本阶段已经完成什么
 
-phase3 的目标不是只补一个编辑器面板，也不是在现有事件字段上继续叠加零散参数，而是补上一层项目级控制模型，使 AudioForge 首次具备更接近 Wwise 的运行时控制表达能力。
+当前主线已经完成以下落地：
 
-## 当前状态更新
-
-2026-05-13 当前主线已完成以下落地：
-
-1. 工程模型、导出器与 `.afproj` 序列化已支持项目级 Game Parameter、State Group、Switch Group，以及事件/总线级 RTPC、State、Switch 绑定。
-2. `SchemaVersion = 2` 已进入当前导出链路，Unity runtime / validation 已同步支持 v2 初始化与 v1 兼容。
+1. 工程模型、导出器与 `.afproj` 序列化支持项目级 `GameParameters`、`StateGroups`、`SwitchGroups`。
+2. 当前正式导出契约已经升级到 `SchemaVersion = 3`，主结构为 `AudioObjects + Events[AudioId]`。
 3. 工具端已落地 GameSync 工作区、State/Switch 子项效果编辑、RTPC 图形曲线编辑器和试听中心 GameSync 控件。
-4. Unity runtime 已具备 emitter context、State/Switch/RTPC API、Switch Variant 选片、child effects 应用与 smoke 验证。
+4. Unity runtime 已具备 emitter context、State / Switch / RTPC API、child effects 消费与 smoke 验证。
 
-因此本文档后续更多用于解释阶段拆分、边界和剩余工作，而不是说明“是否开始做 phase3”。
+## 2. 当前冻结语义
 
-## 结论先行
+- RTPC：连续 Game Parameter，用于实时驱动属性。
+- State：全局离散模式，用于切换 Event / Bus 属性覆盖。
+- Switch：emitter / game object 作用域的离散分支选择，用于切换事件内部变体。
 
-- RTPC：按连续 Game Parameter 处理，用于实时驱动属性。
-- State：按全局离散模式处理，用于切换 Event / Bus 属性覆盖。
-- Switch：按 emitter / game object 生效的离散分支选择处理，用于切换事件内部的变体或容器分支。
+这三者继续保持分离，不退化成统一“事件参数表”。
 
-这三者不能合并为同一类“事件参数”。如果在数据模型或 runtime API 上把三者混成一个概念，后续行为会持续偏离 Wwise 心智。
+## 3. 当前阶段结论
 
-## 本期范围
+- phase3 已经不再是“规划中”的能力，而是当前主线的一部分。
+- 运行时和编辑器的正式契约锚点已经从 schema v2 进一步收口到 schema v3。
+- 当前更需要维护的是剩余演进项、验证边界和后续优先级，而不是重新描述第一轮实施步骤。
 
-### 要做的事
+## 4. 后续仍待继续增强的部分
 
-1. 在工程模型中引入项目级 Game Sync 定义。
-2. 设计并实现 Schema v2 草案。
-3. 设计并逐步实现 Unity runtime 的 Game Sync 控制层。
-4. 让 Event / Bus 能表达与 RTPC / State / Switch 相关的绑定与覆盖规则。
-5. 补齐验证样例、测试面和文档说明。
+### 4.1 Runtime 持续调制
 
-### 本期不做的事
+- active voice 的持续 RTPC 调制仍可继续增强。
+- State 过渡插值与更丰富的切换策略仍未完全展开。
+
+### 4.2 Switch 容器复杂度
+
+- 当前已经覆盖项目级定义、emitter 作用域和基本分支选片。
+- 更复杂的 Switch Container 层级与组合条件仍可继续扩展。
+
+### 4.3 场景侧自动化签收
+
+- 当前已有 validation smoke。
+- 仍建议继续补更完整的目标场景实播签收与自动化覆盖。
+
+## 5. 设计边界继续有效
+
+### 5.1 先守契约，再扩 UI
+
+任何后续增强都必须先守住当前 `SchemaVersion = 3` 主契约和 Unity runtime 边界，而不是先扩 authoring UI 再回填语义。
+
+### 5.2 emitter 作用域不能回退
+
+Switch 与局部 RTPC 依赖 emitter / game object 语义；后续扩展只允许继续增强，不允许回退成全局值模型。
+
+### 5.3 不借 phase3 夹带 editor-only 状态
+
+布局、筛选、临时选择等 editor-only 状态仍不得进入运行时导出契约。
+
+## 6. 配套阅读
+
+- 当前 runtime 设计：`docs/unity/architecture/UnityRuntime三期GameSync设计.md`
+- 当前主契约：`docs/unity/UnitySDK对接规范.md`
+- Schema 3 主模型设计：`docs/internal/architecture/audioforge_Audio对象层Schema3迁移设计.md`
 
 1. 不在 phase3 第一轮同时完成全部 authoring UI 的商业化润色。
 2. 不把 profiler、远程回传、Capture 协议和运行时可视化联调桥绑进同一阶段。
