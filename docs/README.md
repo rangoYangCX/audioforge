@@ -34,6 +34,7 @@
 - Schema 3 设计：`internal/architecture/audioforge_Audio对象层Schema3迁移设计.md`
 - GameSync 路线：`internal/architecture/audioforge_第三期RTPC-State-Switch路线图.md`
 - 桌面工具产品化：`internal/product/audioforge_桌面工具产品化路线图.md`
+- 结果坞专项：`internal/product/audioforge_底部结果坞极简重构专项开发说明.md`
 - 中间件评估：`internal/research/audioforge_主流音频中间件评估与优化报告.md`
 
 ## 3. 按主题阅读
@@ -54,6 +55,7 @@
 
 - `internal/architecture/audioforge_Audio对象层Schema3迁移设计.md`
 - `internal/architecture/audioforge_第三期RTPC-State-Switch路线图.md`
+- `internal/product/audioforge_底部结果坞极简重构专项开发说明.md`
 - `unity/architecture/UnityRuntime三期GameSync设计.md`
 
 ### 历史与归档
