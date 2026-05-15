@@ -8,30 +8,20 @@
 - 每个版本至少记录：新增能力、行为变化、修复项、验证结果。
 - Git 提交负责记录实现细节；本文件负责回答“这一版具体给用户带来了什么变化”。
 
-当前已补录的版本范围：0.03 - 0.09.1，并使用 `Unreleased` 记录尚未单独发版的维护更新。
+当前已补录的版本范围：0.03 - 0.09.2，并使用 `Unreleased` 记录尚未单独发版的维护更新。
 
-## [Unreleased]
+## [0.09.2] - 2026-05-15
 
-- 试听 GameSync 条现可直接显示当前命中的作用域来源：RTPC 会区分 `Emitter / Global / Default`，State 固定标记为 `Global`，Switch 会区分 `Manual / Mapped / Default`，并额外显示映射参数是否来自 `Emitter` 或 `Global` 回退。
-- PreviewService 新增 GameSync 解释快照，资源与事件试听在不改导出契约的前提下可回显“为什么是这个结果”，减少把 State / Switch / RTPC 混看成一个参数区的误判。
-- Unity runtime 与 validation runtime 现新增 `SetEmitterGameParameter` / `GetEmitterGameParameter` / `ResetEmitterGameParameter`、`ResetGlobalGameParameter`、`ResetState`、`ResetSwitch`，并补齐 `SetSwitch(emitter, ...)` / `GetSwitch(emitter, ...)` 口径；旧 `SetGameParameter(...)` 与旧顺序 `SetSwitch(...)` 继续保留兼容转发。
-- Unity SDK 对接规范与 runtime GameSync 架构文档已同步刷新到“world / emitter”新命名，EventPlayer 与 validation runner 示例调用也已统一切到新 API。
+- 底部区域重构为完整试听中心，移除了波形编辑、Bus 视图和结果卡片等非核心入口。
+- 试听 GameSync 条现可直接显示当前命中的作用域来源，减少把三类 GameSync 混看的误判。
+- Unity runtime 新增 SetEmitterGameParameter 等 API，旧接口保留兼容转发。
+- Unity SDK 文档已同步到新命名。
 
-- 资源工作区的片段编辑台现支持按可用宽度切换 `wide / medium / compact` 布局；波形操作区和底部动作区会在窄宽度下自动重排，事件页、Bus 页等通用双列工作区也会在小分辨率下切换为纵向堆叠，降低 Windows / mac 小屏幕拥挤问题。
-- 修复片段编辑台响应式重排时误销毁 `QLabel` / 按钮底层 Qt 对象的问题，避免切换事件或片段时触发 `Internal C++ object already deleted`。
-- 全链路 full flow 测试已统一改到 `SchemaVersion = 3` 口径：运行时断言改为从 `Events[AudioId]` 跳转到 `AudioObjects` 检查 `PlayMode`、`AvoidImmediateRepeat`、`Clips` 等声音层字段。
-- mac 打包测试已改为校验 `.spec` 中的运行时依赖收集逻辑；Windows 打包脚本现重新补齐 `SDK/com.audioforge.runtime/` 内嵌步骤，保证桌面发布目录与文档承诺一致。
-- `pyproject.toml` 版本锚点已同步刷新到 `0.09.1`，并补齐 Unity 包 README / Unity 对接文档 / 一期迁移总览中的 0.09.1 产物目录引用。
+- 片段编辑台支持 wide/medium/compact 响应式布局，修复重排时误销毁 Qt 控件的问题。
+- 全链路测试统一到 Schema 3 口径。
+- 修复 Switch 映射参数忽略 Global 回退的问题。
 
-- `pytest tests/unit`：159 项通过。
-- `python tools/run_unity_package_release.py --skip-pytest`：PASS，生成 `dist/AudioForgeUnityPackage-0.09.1/`、`dist/AudioForgeUnityPackage-0.09.1.zip` 和 `reports/unity_package_release/` 签收材料。
-- `python tools/build_windows_exe.py`：PASS，生成 `dist/AudioForge-0.09.1-windows/`、`dist/AudioForge-0.09.1-windows.zip`，并确认包含 `SDK/com.audioforge.runtime/`。
-
-- 工程保存改为可迁移模式：保存 `.afproj` 时会把引用到的源音频收纳进同名工程目录 `ProjectName/Sources/`，文件内统一写相对路径；重新打开时再解析回绝对路径，便于整包迁移后继续编辑、试听与构建。
-- 相对 `ExportRoot` 的解析现改为以工程文件位置为锚点，而不是当前进程工作目录，避免工程迁移后构建落到错误目录。
-- mac 启动现补齐 Qt 高 DPI 配置与 `Fusion` 样式兜底，降低 `.app` 在 Retina / mac 原生样式下出现比例异常的概率。
-- `PlaybackService` 现为 `pygame.mixer` 增加多档初始化兜底、sample rate 变化重初始化和空 channel 失败提示，避免 mac 上“看起来触发了试听、实际上没分配到播放通道”的静默失败。
-- `tools/build_macos_app.py` 现显式收集 `pygame`、`numpy`、`scipy`、`soundfile` 运行库，降低 mac 打包后本地试听依赖缺失的问题。
+- `pytest tests/unit/test_main_controller_layout.py`：102 项通过，`pytest tests/unit/test_preview_service.py`：7 项通过。
 
 ## [0.09.1] - 2026-05-14
 

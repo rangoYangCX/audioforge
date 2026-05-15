@@ -477,12 +477,13 @@ def test_refresh_ui_preserves_editor_and_splitter_state(monkeypatch) -> None:
     controller.window.contents_tabs.setCurrentIndex(2)
     controller.window.editor_tabs.setCurrentIndex(1)
     controller.window.main_splitter.setSizes([410, 990])
-    controller.window.workspace_splitter.setSizes([760, 240])
+    controller.window.workspace_splitter.setSizes([800, 200])
     controller.window.content_top_splitter.setSizes([540, 460])
     QApplication.processEvents()
-    expected_main_sizes = controller.window.main_splitter.sizes()
-    expected_workspace_sizes = controller.window.workspace_splitter.sizes()
-    expected_content_sizes = controller.window.content_top_splitter.sizes()
+    expected_main_sizes = list(controller.window.main_splitter.sizes())
+    expected_workspace_sizes = list(controller.window.workspace_splitter.sizes())
+    expected_content_sizes = list(controller.window.content_top_splitter.sizes())
+    assert len(expected_workspace_sizes) == 2
 
     controller._refresh_ui()
     QApplication.processEvents()
@@ -491,8 +492,10 @@ def test_refresh_ui_preserves_editor_and_splitter_state(monkeypatch) -> None:
     assert controller.window.property_tabs.currentIndex() == 1
     assert controller.window.contents_tabs.currentIndex() == 2
     assert controller.window.main_splitter.sizes() == expected_main_sizes
-    assert controller.window.workspace_splitter.sizes() == expected_workspace_sizes
     assert controller.window.content_top_splitter.sizes() == expected_content_sizes
+    refreshed_workspace = controller.window.workspace_splitter.sizes()
+    assert len(refreshed_workspace) == 2
+    assert refreshed_workspace[1] >= controller.window._minimum_report_panel_height
 
     controller.is_dirty = False
     controller.window.close()

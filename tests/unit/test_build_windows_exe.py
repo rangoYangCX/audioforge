@@ -15,7 +15,7 @@ def test_build_windows_exe_embeds_unity_sdk_into_release_directory(monkeypatch) 
     )
 
     workspace = Path("C:/AudioForgeWorkspace")
-    release_root = workspace / "dist" / "AudioForge-0.09.1-windows"
+    release_root = workspace / "dist" / "AudioForge-0.09.2-windows"
 
     build_windows_exe._embed_unity_sdk(workspace, release_root)
 
