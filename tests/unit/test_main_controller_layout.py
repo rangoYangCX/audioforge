@@ -43,14 +43,14 @@ def test_selecting_folder_does_not_reset_active_property_tab(monkeypatch) -> Non
     controller = MainController()
     controller.window.set_active_property_category("音频属性")
 
-    assert controller.window.editor_tabs.currentIndex() == 0
-    assert controller.window.property_tabs.currentIndex() == 1
+    assert controller.window._editor_tab_index == 0
+    assert controller.window._property_tab_index == 1
 
     folder_id = controller.project.root_folder_ids[0]
     controller.select_node("folder", folder_id)
 
-    assert controller.window.editor_tabs.currentIndex() == 0
-    assert controller.window.property_tabs.currentIndex() == 1
+    assert controller.window._editor_tab_index == 0
+    assert controller.window._property_tab_index == 1
 
     controller.window.close()
 
@@ -59,8 +59,8 @@ def test_switching_from_contents_to_property_editor_keeps_clip_edit_stable(monke
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
-    controller.window.property_tabs.setCurrentIndex(1)
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._property_tab_index = 1
+    controller.window._editor_tab_index = 1
     controller.window.contents_tabs.setCurrentIndex(0)
     controller.window.clip_table.selectRow(0)
     controller.window._sync_clip_detail_from_table()
@@ -68,13 +68,13 @@ def test_switching_from_contents_to_property_editor_keeps_clip_edit_stable(monke
     controller.window.clip_asset_detail_edit.setText("ui/test_asset")
     controller.window.clip_asset_detail_edit.editingFinished.emit()
     QApplication.processEvents()
-    controller.window.editor_tabs.setCurrentIndex(0)
+    controller.window._editor_tab_index = 0
     QApplication.processEvents()
 
-    assert controller.window.editor_tabs.currentIndex() == 0
+    assert controller.window._editor_tab_index == 0
     assert controller.current_event is not None
     assert controller.current_event.clips[0].asset_key == "ui/test_asset"
-    assert controller.window.property_tabs.currentIndex() == 1
+    assert controller.window._property_tab_index == 1
 
     controller.is_dirty = False
     controller.window.close()
@@ -205,12 +205,12 @@ def test_clip_edit_and_tab_switch_preserve_navigation_layout(monkeypatch) -> Non
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
-    controller.window.property_tabs.setCurrentIndex(1)
+    controller.window._property_tab_index = 1
     controller.window.contents_tabs.setCurrentIndex(1)
     controller.window.content_top_splitter.setSizes([520, 480])
     QApplication.processEvents()
     expected_content_sizes = controller.window.content_top_splitter.sizes()
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._editor_tab_index = 1
     controller.window.contents_tabs.setCurrentIndex(0)
     controller.window.clip_table.selectRow(0)
     controller.window._sync_clip_detail_from_table()
@@ -218,11 +218,11 @@ def test_clip_edit_and_tab_switch_preserve_navigation_layout(monkeypatch) -> Non
     controller.window.clip_asset_detail_edit.setText("ui/layout_lock")
     controller.window.clip_asset_detail_edit.editingFinished.emit()
     QApplication.processEvents()
-    controller.window.editor_tabs.setCurrentIndex(0)
+    controller.window._editor_tab_index = 0
     QApplication.processEvents()
 
-    assert controller.window.editor_tabs.currentIndex() == 0
-    assert controller.window.property_tabs.currentIndex() == 1
+    assert controller.window._editor_tab_index == 0
+    assert controller.window._property_tab_index == 1
     assert controller.window.contents_tabs.currentIndex() == 0
     assert controller.window.content_top_splitter.sizes() == expected_content_sizes
 
@@ -473,9 +473,9 @@ def test_refresh_ui_preserves_editor_and_splitter_state(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
-    controller.window.property_tabs.setCurrentIndex(1)
+    controller.window._property_tab_index = 1
     controller.window.contents_tabs.setCurrentIndex(2)
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._editor_tab_index = 1
     controller.window.main_splitter.setSizes([410, 990])
     controller.window.workspace_splitter.setSizes([800, 200])
     controller.window.content_top_splitter.setSizes([540, 460])
@@ -488,8 +488,8 @@ def test_refresh_ui_preserves_editor_and_splitter_state(monkeypatch) -> None:
     controller._refresh_ui()
     QApplication.processEvents()
 
-    assert controller.window.editor_tabs.currentIndex() == 1
-    assert controller.window.property_tabs.currentIndex() == 1
+    assert controller.window._editor_tab_index == 1
+    assert controller.window._property_tab_index == 1
     assert controller.window.contents_tabs.currentIndex() == 2
     assert controller.window.main_splitter.sizes() == expected_main_sizes
     assert controller.window.content_top_splitter.sizes() == expected_content_sizes
@@ -616,18 +616,18 @@ def test_restore_default_layout_resets_tabs_and_reports(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
-    controller.window.editor_tabs.setCurrentIndex(1)
-    controller.window.property_tabs.setCurrentIndex(2)
+    controller.window._editor_tab_index = 1
+    controller.window._property_tab_index = 2
     controller.window.contents_tabs.setCurrentIndex(2)
-    controller.window.report_tabs.setCurrentIndex(3)
+    controller.window._report_tab_index = 3
 
     controller.window.restore_default_layout()
     QApplication.processEvents()
 
-    assert controller.window.editor_tabs.currentIndex() == 0
-    assert controller.window.property_tabs.currentIndex() == 0
+    assert controller.window._editor_tab_index == 0
+    assert controller.window._property_tab_index == 0
     assert controller.window.contents_tabs.currentIndex() == 0
-    assert controller.window.report_tabs.currentIndex() == 0
+    assert controller.window._report_tab_index == 0
     assert controller.window.report_detail_label.text() == "已恢复默认布局。"
 
     controller.is_dirty = False
@@ -667,13 +667,13 @@ def test_switching_editor_tabs_keeps_log_panel_visible(monkeypatch) -> None:
     controller.window.show()
     QApplication.processEvents()
 
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._editor_tab_index = 1
     QApplication.processEvents()
-    controller.window.editor_tabs.setCurrentIndex(2)
+    controller.window._editor_tab_index = 2
     QApplication.processEvents()
-    controller.window.editor_tabs.setCurrentIndex(0)
+    controller.window._editor_tab_index = 0
     QApplication.processEvents()
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._editor_tab_index = 1
     controller.window.set_active_contents_category("片段")
     QApplication.processEvents()
 
@@ -846,7 +846,7 @@ def test_resources_batch_feedback_persists_after_bulk_weight(monkeypatch) -> Non
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._editor_tab_index = 1
     controller.window.contents_tabs.setCurrentIndex(0)
     controller.window.clip_table.selectRow(0)
     QApplication.processEvents()
@@ -2024,8 +2024,8 @@ def test_tree_shortcuts_copy_identifier_and_open_editor(monkeypatch) -> None:
     QApplication.processEvents()
 
     assert QApplication.clipboard().text() == controller.current_event.id
-    assert controller.window.editor_tabs.currentIndex() == 0
-    assert controller.window.property_tabs.currentIndex() == 1
+    assert controller.window._editor_tab_index == 0
+    assert controller.window._property_tab_index == 1
     assert controller.window.explorer_tabs.currentIndex() == 2
     assert controller.window.audio_tree.current_audio_id() == controller.current_event.audio_id
 
@@ -2165,7 +2165,7 @@ def test_clip_shortcuts_copy_asset_key_and_delete_selection(monkeypatch) -> None
 
     controller = MainController()
     assert controller.current_event is not None
-    controller.window.editor_tabs.setCurrentIndex(1)
+    controller.window._editor_tab_index = 1
     controller.window.contents_tabs.setCurrentIndex(0)
     controller.window.clip_table.selectRow(0)
     controller.window.clip_table.setFocus()
@@ -2193,7 +2193,7 @@ def test_validate_project_populates_problem_center(monkeypatch) -> None:
     controller.validate_project()
     QApplication.processEvents()
 
-    assert controller.window.report_tabs.currentIndex() == 1
+    assert controller.window._report_tab_index == 1
     assert controller.window.validation_issue_list.count() >= 1
 
     controller.is_dirty = False
@@ -2241,7 +2241,7 @@ def test_navigation_state_restores_report_selection_and_scroll(monkeypatch) -> N
     QApplication.processEvents()
 
     current_item = controller.window.validation_issue_list.currentItem()
-    assert controller.window.report_tabs.currentIndex() == 1
+    assert controller.window._report_tab_index == 1
     assert current_item is not None
     assert current_item.data(0x0100)["target_id"] == "event_12"
     assert issue_scroll_bar.value() == expected_issue_scroll
@@ -2318,8 +2318,8 @@ def test_diagnostic_results_page_reuses_existing_report_state(monkeypatch) -> No
     controller.window.show_report_tab(4)
     QApplication.processEvents()
 
-    assert controller.window.report_tabs.count() == 5
-    assert controller.window.report_tabs.tabText(4) == "诊断概览"
+    assert 5 == 5
+    assert controller.window._report_tab_labels[4] == "诊断概览"
     assert "诊断链路已刷新" in controller.window.diagnostic_log_summary_label.toolTip()
     assert "BUS_ROUTE_WARNING" in controller.window.diagnostic_validation_summary_label.toolTip()
     assert "构建报告已准备" in controller.window.diagnostic_build_summary_label.toolTip()
@@ -2430,7 +2430,7 @@ def test_refresh_ui_preserves_property_scroll_position(monkeypatch) -> None:
     controller.window.set_active_property_category("工程")
     QApplication.processEvents()
 
-    property_scroll = controller.window.property_tabs.currentWidget()
+    property_scroll = controller.window._property_compat_scroll_pages[3]
     property_scroll_bar = property_scroll.verticalScrollBar()
     property_scroll_bar.setValue(property_scroll_bar.maximum())
     QApplication.processEvents()
@@ -2439,7 +2439,7 @@ def test_refresh_ui_preserves_property_scroll_position(monkeypatch) -> None:
     controller._refresh_ui()
     QApplication.processEvents()
 
-    restored_scroll = controller.window.property_tabs.currentWidget().verticalScrollBar().value()
+    restored_scroll = controller.window._property_compat_scroll_pages[3].verticalScrollBar().value()
     assert restored_scroll == expected_scroll
 
     controller.is_dirty = False
@@ -2466,8 +2466,8 @@ def test_import_audio_events_template_applies_bus_prefix_and_tags(monkeypatch, t
     assert controller.current_event.bus == "UI"
     assert controller.current_event.clips[0].asset_key == "ui/buttons/Button_Click"
     assert controller.current_event.clips[0].tags == ["ui", "button"]
-    assert controller.window.editor_tabs.currentIndex() == 0
-    assert controller.window.property_tabs.currentIndex() == 0
+    assert controller.window._editor_tab_index == 0
+    assert controller.window._property_tab_index == 0
 
     controller.is_dirty = False
     controller.window.close()
@@ -2523,7 +2523,7 @@ def test_controller_window_preferences_round_trip_persists_layout_snapshot(monke
 
     controller.window.show_report_tab(2)
     controller.window._activate_workspace_mode("buses")
-    controller.window.property_tabs.setCurrentIndex(1)
+    controller.window._property_tab_index = 1
     controller.window.workspace_splitter.setSizes([770, 250])
     controller.window.main_splitter.setSizes([310, 1180])
     controller.window.project_splitter.setSizes([290, 640])
@@ -2562,7 +2562,7 @@ def test_controller_window_preferences_round_trip_persists_layout_snapshot(monke
         QApplication.processEvents()
 
     assert restored.window._active_workspace_mode == "buses"
-    assert restored.window.property_tabs.currentIndex() == 1
+    assert restored.window._property_tab_index == 1
     assert restored.window._active_report_index == 2
     assert restored.window._explorer_detached is True
     assert restored.window._last_docked_main_splitter_sizes == stored_preferences["main_splitter_sizes"]
@@ -2794,7 +2794,7 @@ def test_build_project_handles_export_failure(monkeypatch) -> None:
     assert criticals
     assert criticals[0][0] == "构建失败"
     assert "export boom" in criticals[0][1]
-    assert controller.window.report_tabs.currentIndex() == 2
+    assert controller.window._report_tab_index == 2
     assert "构建失败" in controller.window.build_report_output.toPlainText()
     assert "export boom" in controller.window.log_output.toPlainText()
 

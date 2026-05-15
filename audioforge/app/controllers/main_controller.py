@@ -3872,7 +3872,7 @@ class MainController(QObject):
                 output_text=f"输出：{event.bus} / {self.project.settings.export_root}",
                 has_parent=folder_id is not None,
             )
-            if self.window.property_tabs.currentIndex() == 3:
+            if self.window._property_tab_index == 3:
                 self.window.set_active_property_category("事件")
             return
 

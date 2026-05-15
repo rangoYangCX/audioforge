@@ -115,7 +115,7 @@ from audioforge.app.widgets.event_tree import EventTreeWidget, decode_source_bin
 from audioforge.app.widgets.loudness_history_plot import LoudnessHistoryPlot
 from audioforge.app.widgets.rtpc_curve_editor import RtpcCurveEditor
 from audioforge.app.widgets.source_tree import SOURCE_ASSET_MIME_TYPE, SourceTreeWidget
-from audioforge.app.views.shell_components import AppShell, CompatibilityTabWidget, DetachedToolWindow, TaskSidebar
+from audioforge.app.views.shell_components import AppShell, DetachedToolWindow, TaskSidebar
 
 
 class ProjectBusTreeWidget(QTreeWidget):
@@ -1788,6 +1788,7 @@ class MainWindow(QMainWindow):
         self.audio_top_splitter.addWidget(self.loudness_group)
         self.audio_top_splitter.setStretchFactor(0, 2)
         self.audio_top_splitter.setStretchFactor(1, 3)
+        self._responsive_two_column_splitters.append(self.audio_top_splitter)
 
         self.generation_settings_group = QGroupBox("生成设置")
         generation_settings_layout = QFormLayout(self.generation_settings_group)
@@ -1964,6 +1965,7 @@ class MainWindow(QMainWindow):
         self.project_splitter.addWidget(self.project_bus_browser_hint_group)
         self.project_splitter.addWidget(project_right_panel)
         self.project_splitter.setStretchFactor(1, 1)
+        self._responsive_two_column_splitters.append(self.project_splitter)
 
         clip_list_group = QGroupBox("片段列表")
         clip_list_layout = QVBoxLayout(clip_list_group)
@@ -2121,19 +2123,11 @@ class MainWindow(QMainWindow):
             2: self._build_property_compat_scroll("生成兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实编辑已迁到“构建交付”工作区。"),
             3: self._build_property_compat_scroll("工程兼容页", "旧兼容接口仍会把这一页视作可滚动属性页；真实工程配置已收口到独立工作区。"),
         }
-        self.property_tabs = CompatibilityTabWidget()
-        self.property_tabs.addTab(QWidget(), "事件")
-        self.property_tabs.addTab(QWidget(), "音频属性")
-        self.property_tabs.addTab(QWidget(), "生成")
-        self.property_tabs.addTab(QWidget(), "工程")
-        self.property_tabs.set_current_widget_resolver(self._current_property_compat_widget)
-        self.property_tabs.hide()
+        self._property_tab_index: int = 0
+        self._property_tab_labels: list[str] = ["事件", "音频属性", "生成", "工程"]
 
-        self.editor_tabs = QTabWidget()
-        self.editor_tabs.addTab(QWidget(), load_app_icon("event"), "属性编辑器")
-        self.editor_tabs.addTab(QWidget(), load_app_icon("content"), "内容编辑器")
-        self.editor_tabs.addTab(QWidget(), load_app_icon("audio"), "响度监视器")
-        self.editor_tabs.hide()
+        self._editor_tab_index: int = 0
+        self._editor_tab_labels: list[str] = ["属性编辑器", "内容编辑器", "响度监视器"]
 
         self.events_workspace = self._build_events_workspace()
         self.resources_workspace = self._build_resources_workspace()
@@ -2156,13 +2150,8 @@ class MainWindow(QMainWindow):
             self.report_pages.addWidget(self._report_pages[index])
         self._active_report_index = 0
 
-        self.report_tabs = QTabWidget()
-        self.report_tabs.addTab(QWidget(), "日志")
-        self.report_tabs.addTab(QWidget(), "校验报告")
-        self.report_tabs.addTab(QWidget(), "构建报告")
-        self.report_tabs.addTab(QWidget(), "响度扫描")
-        self.report_tabs.addTab(QWidget(), "诊断概览")
-        self.report_tabs.hide()
+        self._report_tab_index: int = 0
+        self._report_tab_labels: list[str] = ["日志", "校验报告", "构建报告", "响度扫描", "诊断概览"]
 
         self.report_header = QFrame()
         self.report_header.setObjectName("ReportHeader")
@@ -4302,36 +4291,36 @@ class MainWindow(QMainWindow):
         if mode == "logs-results":
             self._active_report_index = 0
             self.report_pages.setCurrentIndex(0)
-            self.report_tabs.setCurrentIndex(0)
+            self._report_tab_index = 0
             mode = "results"
         elif mode == "validation-results":
             self._active_report_index = 1
             self.report_pages.setCurrentIndex(1)
-            self.report_tabs.setCurrentIndex(1)
+            self._report_tab_index = 1
             mode = "results"
         elif mode == "build-results":
             self._active_report_index = 2
             self.report_pages.setCurrentIndex(2)
-            self.report_tabs.setCurrentIndex(2)
+            self._report_tab_index = 2
             mode = "results"
         elif mode == "loudness-results":
             self._active_report_index = 3
             self.report_pages.setCurrentIndex(3)
-            self.report_tabs.setCurrentIndex(3)
+            self._report_tab_index = 3
             mode = "results"
         if mode == "home":
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["home"])
         elif mode == "resources":
             self._mount_workspace_surface("resources")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["resources"])
-            self.editor_tabs.setCurrentIndex(1)
+            self._editor_tab_index = 1
             self.contents_tabs.setCurrentIndex(0)
             self._set_content_top_splitter_sizes(self._default_focus_content_splitter_sizes)
         elif mode == "events":
             self._mount_workspace_surface("events")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["events"])
-            self.editor_tabs.setCurrentIndex(0)
-            self.property_tabs.setCurrentIndex(0)
+            self._editor_tab_index = 0
+            self._property_tab_index = 0
             self.events_workspace_tabs.setCurrentIndex(0)
         elif mode == "gamesync":
             self._mount_workspace_surface("gamesync")
@@ -4340,8 +4329,8 @@ class MainWindow(QMainWindow):
         elif mode == "buses":
             self._mount_workspace_surface("buses")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["buses"])
-            self.editor_tabs.setCurrentIndex(0)
-            self.property_tabs.setCurrentIndex(1)
+            self._editor_tab_index = 0
+            self._property_tab_index = 1
             self._project_bus_selection_overridden = False
             self._sync_current_event_bus_selection(force=True)
         elif mode == "validation":
@@ -4349,12 +4338,12 @@ class MainWindow(QMainWindow):
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["validation"])
             self._active_report_index = 1
             self.report_pages.setCurrentIndex(1)
-            self.report_tabs.setCurrentIndex(1)
+            self._report_tab_index = 1
         elif mode == "build":
             self._mount_workspace_surface("build")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["build"])
-            self.editor_tabs.setCurrentIndex(0)
-            self.property_tabs.setCurrentIndex(2)
+            self._editor_tab_index = 0
+            self._property_tab_index = 2
         elif mode == "results":
             self._mount_workspace_surface("results")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["results"])
@@ -5896,7 +5885,7 @@ class MainWindow(QMainWindow):
 
     def _current_workspace_context_text(self) -> str:
         mode_title = self.shell_mode_title_label.text()
-        editor_index = self.editor_tabs.currentIndex()
+        editor_index = self._editor_tab_index
         if self._active_workspace_mode == "home":
             editor_title = "欢迎页"
         elif self._active_workspace_mode in {"validation", "results"}:
@@ -5912,7 +5901,7 @@ class MainWindow(QMainWindow):
         elif self._active_workspace_mode == "resources":
             editor_title = f"资源整理/{self.contents_tabs.tabText(self.contents_tabs.currentIndex())}"
         elif editor_index == 0:
-            editor_title = f"属性/{self.property_tabs.tabText(self.property_tabs.currentIndex())}"
+            editor_title = f"属性/{self._property_tab_labels[self._property_tab_index]}"
         elif editor_index == 1:
             editor_title = f"内容/{self.contents_tabs.tabText(self.contents_tabs.currentIndex())}"
         else:
@@ -6010,8 +5999,8 @@ class MainWindow(QMainWindow):
             "buses_workspace_tab": self.buses_workspace_tabs.currentIndex(),
             "current_bus_detail_tab": self.current_bus_detail_tabs.currentIndex(),
             "explorer_tab": self.explorer_tabs.currentIndex(),
-            "editor_tab": self.editor_tabs.currentIndex(),
-            "property_tab": self.property_tabs.currentIndex(),
+            "editor_tab": self._editor_tab_index,
+            "property_tab": self._property_tab_index,
             "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
             "gamesync_workspace_tab": self.gamesync_workspace_tabs.currentIndex(),
             "contents_tab": self.contents_tabs.currentIndex(),
@@ -6061,20 +6050,20 @@ class MainWindow(QMainWindow):
             self.buses_workspace_tabs.setCurrentIndex(buses_workspace_tab)
         if isinstance(current_bus_detail_tab, int) and 0 <= current_bus_detail_tab < self.current_bus_detail_tabs.count():
             self.current_bus_detail_tabs.setCurrentIndex(current_bus_detail_tab)
-        if isinstance(editor_tab, int) and 0 <= editor_tab < self.editor_tabs.count():
-            self.editor_tabs.setCurrentIndex(editor_tab)
-        if isinstance(property_tab, int) and 0 <= property_tab < self.property_tabs.count():
-            self.property_tabs.setCurrentIndex(property_tab)
+        if isinstance(editor_tab, int) and 0 <= editor_tab < len(self._editor_tab_labels):
+            self._editor_tab_index = editor_tab
+        if isinstance(property_tab, int) and 0 <= property_tab < len(self._property_tab_labels):
+            self._property_tab_index = property_tab
         if isinstance(events_workspace_tab, int) and 0 <= events_workspace_tab < self.events_workspace_tabs.count():
             self.events_workspace_tabs.setCurrentIndex(events_workspace_tab)
         if isinstance(gamesync_workspace_tab, int) and 0 <= gamesync_workspace_tab < self.gamesync_workspace_tabs.count():
             self.gamesync_workspace_tabs.setCurrentIndex(gamesync_workspace_tab)
         if isinstance(contents_tab, int) and 0 <= contents_tab < self.contents_tabs.count():
             self.contents_tabs.setCurrentIndex(contents_tab)
-        if isinstance(report_tab, int) and 0 <= report_tab < len(self._report_page_titles):
+        if isinstance(report_tab, int) and 0 <= report_tab < len(self._report_tab_labels):
             self._active_report_index = report_tab
             self.report_pages.setCurrentIndex(report_tab)
-            self.report_tabs.setCurrentIndex(report_tab)
+            self._report_tab_index = report_tab
         if (
             project_bus_selection_overridden
             and isinstance(project_bus_name, str)
@@ -6275,13 +6264,13 @@ class MainWindow(QMainWindow):
             else:
                 self._activate_workspace_mode("events")
                 self.events_workspace_tabs.setCurrentIndex(0)
-            self.editor_tabs.setCurrentIndex(0)
-            self.property_tabs.setCurrentIndex(index)
+            self._editor_tab_index = 0
+            self._property_tab_index = index
             self._update_object_bus_status()
 
     def show_loudness_view(self) -> None:
         self._activate_workspace_mode("events")
-        self.editor_tabs.setCurrentIndex(2)
+        self._editor_tab_index = 2
         self.events_workspace_tabs.setCurrentIndex(2)
         self._update_object_bus_status()
 
@@ -6446,7 +6435,7 @@ class MainWindow(QMainWindow):
             self._activate_workspace_mode("build")
         else:
             self._activate_workspace_mode("resources")
-        self.editor_tabs.setCurrentIndex(1)
+        self._editor_tab_index = 1
         if category == "片段":
             self.contents_tabs.setCurrentIndex(0)
             self._set_content_top_splitter_sizes(self._default_focus_content_splitter_sizes)
@@ -6703,7 +6692,7 @@ class MainWindow(QMainWindow):
         return self._wrap_scrollable_page(content)
 
     def _current_property_compat_widget(self) -> QWidget | None:
-        index = self.property_tabs.currentIndex()
+        index = self._property_tab_index
         if index == 0:
             return self.event_design_scroll
         return self._property_compat_scroll_pages.get(index)
@@ -7096,12 +7085,12 @@ class MainWindow(QMainWindow):
             "workspace_splitter_sizes": self.workspace_splitter.sizes(),
             "main_splitter_sizes": self._effective_main_splitter_sizes(),
             "explorer_tab": self.explorer_tabs.currentIndex(),
-            "active_editor_tab": self.editor_tabs.currentIndex(),
+            "active_editor_tab": self._editor_tab_index,
             "inspector_splitter_sizes": None,
             "content_top_splitter_sizes": self.content_top_splitter.sizes(),
             "active_contents_tab": self.contents_tabs.currentIndex(),
             "workspace_mode": self._active_workspace_mode,
-            "property_tab": self.property_tabs.currentIndex(),
+            "property_tab": self._property_tab_index,
             "events_workspace_tab": self.events_workspace_tabs.currentIndex(),
             "gamesync_workspace_tab": self.gamesync_workspace_tabs.currentIndex(),
             "contents_tab": self.contents_tabs.currentIndex(),
@@ -7139,8 +7128,8 @@ class MainWindow(QMainWindow):
         navigation_state = {
             "workspace_mode": preferences.get("workspace_mode", self._active_workspace_mode),
             "explorer_tab": preferences.get("explorer_tab", self.explorer_tabs.currentIndex()),
-            "editor_tab": preferences.get("active_editor_tab", self.editor_tabs.currentIndex()),
-            "property_tab": preferences.get("property_tab", self.property_tabs.currentIndex()),
+            "editor_tab": preferences.get("active_editor_tab", self._editor_tab_index),
+            "property_tab": preferences.get("property_tab", self._property_tab_index),
             "events_workspace_tab": preferences.get("events_workspace_tab", self.events_workspace_tabs.currentIndex()),
             "gamesync_workspace_tab": preferences.get("gamesync_workspace_tab", self.gamesync_workspace_tabs.currentIndex()),
             "contents_tab": preferences.get("contents_tab", preferences.get("active_contents_tab", self.contents_tabs.currentIndex())),
@@ -8150,7 +8139,7 @@ class MainWindow(QMainWindow):
         self.report_detail_label.setToolTip(detail)
         if activate_results:
             self.report_pages.setCurrentIndex(2)
-            self.report_tabs.setCurrentIndex(2)
+            self._report_tab_index = 2
         self._update_workspace_summary_labels()
         self.buildStatusUpdated.emit(summary, detail)
 
@@ -8189,7 +8178,7 @@ class MainWindow(QMainWindow):
             return
         self._active_report_index = index
         self.report_pages.setCurrentIndex(index)
-        self.report_tabs.setCurrentIndex(index)
+        self._report_tab_index = index
         report_title = self._report_page_titles[index]
         self.report_focus_label.setText(report_title)
         self.workspace_report_focus_label.setText(report_title)
@@ -8461,13 +8450,13 @@ class MainWindow(QMainWindow):
         self.attach_explorer_panel()
         self._set_workspace_splitter_sizes(self._default_workspace_splitter_sizes)
         self._set_main_splitter_sizes(self._default_main_splitter_sizes)
-        self.editor_tabs.setCurrentIndex(0)
-        self.property_tabs.setCurrentIndex(0)
+        self._editor_tab_index = 0
+        self._property_tab_index = 0
         self._set_content_top_splitter_sizes(self._default_content_top_splitter_sizes)
         self.contents_tabs.setCurrentIndex(0)
         self._active_report_index = 0
         self.report_pages.setCurrentIndex(0)
-        self.report_tabs.setCurrentIndex(0)
+        self._report_tab_index = 0
         self.report_detail_label.setText("已恢复默认布局。")
         self._activate_workspace_mode("events")
         self._update_object_bus_status()
@@ -8484,17 +8473,17 @@ class MainWindow(QMainWindow):
             return
         if panel_key == "property":
             self._activate_workspace_mode("events")
-            self.editor_tabs.setCurrentIndex(0)
+            self._editor_tab_index = 0
             self._set_main_splitter_sizes([int(main_total * 0.18), int(main_total * 0.82)])
         elif panel_key == "contents":
             self._activate_workspace_mode("resources")
-            self.editor_tabs.setCurrentIndex(1)
+            self._editor_tab_index = 1
             self._set_main_splitter_sizes([int(main_total * 0.18), int(main_total * 0.82)])
             self.contents_tabs.setCurrentIndex(0)
             self._set_content_top_splitter_sizes(self._default_focus_content_splitter_sizes)
         elif panel_key == "meter":
             self._activate_workspace_mode("events")
-            self.editor_tabs.setCurrentIndex(2)
+            self._editor_tab_index = 2
             self._set_main_splitter_sizes([int(main_total * 0.18), int(main_total * 0.82)])
         elif panel_key == "log":
             self._activate_workspace_mode("results")
@@ -11325,15 +11314,6 @@ class MainWindow(QMainWindow):
         self.reference_bus_value_button.setIcon(load_app_icon("bus"))
         self.reference_assets_value_button.setIcon(load_app_icon("content"))
         self.reference_generation_value_button.setIcon(load_app_icon("generate"))
-        self.property_tabs.setTabIcon(0, load_app_icon("event"))
-        self.property_tabs.setTabIcon(1, load_app_icon("audio"))
-        self.property_tabs.setTabIcon(2, load_app_icon("generate"))
-        self.property_tabs.setTabIcon(3, load_app_icon("bus"))
-        self.report_tabs.setTabIcon(0, load_app_icon("report"))
-        self.report_tabs.setTabIcon(1, load_app_icon("validate"))
-        self.report_tabs.setTabIcon(2, load_app_icon("generate"))
-        self.report_tabs.setTabIcon(3, load_app_icon("audio"))
-        self.report_tabs.setTabIcon(4, load_app_icon("report"))
         self.zoom_out_button.setText("A-")
         self.zoom_out_button.setIcon(load_app_icon("content"))
         self.zoom_out_button.setToolTip("缩小界面")

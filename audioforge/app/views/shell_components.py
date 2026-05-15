@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from audioforge.app.utils.constants import WWISE_MASTER_MIXER_TITLE
 
@@ -115,19 +113,3 @@ class AppShell(QFrame):
         body_layout.addWidget(sidebar)
         body_layout.addWidget(content, 1)
         layout.addWidget(body, 1)
-
-
-class CompatibilityTabWidget(QTabWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        self._current_widget_resolver: Callable[[], QWidget | None] | None = None
-
-    def set_current_widget_resolver(self, resolver: Callable[[], QWidget | None]) -> None:
-        self._current_widget_resolver = resolver
-
-    def currentWidget(self) -> QWidget | None:  # type: ignore[override]
-        if self._current_widget_resolver is not None:
-            widget = self._current_widget_resolver()
-            if widget is not None:
-                return widget
-        return super().currentWidget()
