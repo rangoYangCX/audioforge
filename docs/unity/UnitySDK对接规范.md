@@ -45,7 +45,7 @@ AudioForge Unity 端对接开发文档
 0.3 当前 GameSync 口径
 
 - 当前仓库主线已经支持 `SchemaVersion = 3`，运行时主契约不再只有 `BusConfigs` 与 `Events`，而是额外包含项目级 `AudioObjects`、`GameParameters`、`StateGroups`、`SwitchGroups` 和 Audio/总线级 Game Sync 区块。
-- 参考 runtime 已实现 `HasGameParameter`、`HasStateGroup`、`HasSwitchGroup`、`RegisterEmitter`、`SetState`、`SetSwitch`、`SetGlobalGameParameter`、`SetGameParameter` 及对应播放求值路径。
+- 参考 runtime 已实现 `HasGameParameter`、`HasStateGroup`、`HasSwitchGroup`、`RegisterEmitter`、`SetState`、`SetSwitch`、`SetGlobalGameParameter`、`SetEmitterGameParameter` 及对应播放求值路径。
 - 若你当前接入的仍是旧版 phase2 或 phase3-schema2 导出物，请继续沿用历史 SDK 包；当前最新包与本文档默认以 v3 口径实现，不再承担旧 schema 回退。
 
 0. 当前状态
@@ -206,11 +206,25 @@ AudioForgeUnityPackage-<version>/
 - `void SetBusVolume(string busName, float linearVolume)`
 - `void SetBusMuted(string busName, bool isMuted)`
 - `void SetGlobalGameParameter(string name, float value)`
-- `void SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)`
+- `void ResetGlobalGameParameter(string name)`
+- `void SetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name, float value)`
+- `float GetGlobalGameParameter(string name)`
+- `float GetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name)`
+- `void ResetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name)`
 - `void SetState(string groupName, string stateName)`
-- `void SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)`
+- `string GetState(string groupName)`
+- `void ResetState(string groupName)`
+- `void SetSwitch(AudioForgeEmitterHandle emitter, string groupName, string switchName)`
+- `string GetSwitch(AudioForgeEmitterHandle emitter, string groupName)`
+- `void ResetSwitch(AudioForgeEmitterHandle emitter, string groupName)`
 - `void SetUnityEventVolumeOffsetDb(string eventId, float volumeDbOffset)`
 - `void SetResourceProvider(IAudioForgeResourceProvider resourceProvider)`
+
+兼容说明：
+
+- 旧的 `SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)` / `GetGameParameter(string name, AudioForgeEmitterHandle emitter)` 仍保留为 emitter 语义别名。
+- 旧顺序的 `SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)` / `GetSwitch(string groupName, AudioForgeEmitterHandle emitter)` 仍保留转发。
+- 新接入代码、SDK 示例和 validation 用例统一使用 `SetEmitterGameParameter(...)` 与 `SetSwitch(emitter, ...)` 口径。
 
 如果项目需要更完整接入，建议再预留：
 

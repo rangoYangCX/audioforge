@@ -166,6 +166,41 @@ def test_preview_gamesync_change_retriggers_current_event_audition(monkeypatch) 
     controller.window.close()
 
 
+def test_preview_gamesync_resolution_labels_show_global_and_mapped_sources(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.project.game_parameters = [GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)]
+    controller.project.state_groups = [StateGroupModel(name="CombatState", states=["Explore", "Combat"], default_state="Explore")]
+    controller.project.switch_groups = [
+        SwitchGroupModel(
+            name="SurfaceType",
+            switches=["Grass", "Stone"],
+            default_switch="Grass",
+            use_game_parameter=True,
+            mapped_game_parameter="PlayerSpeed",
+        )
+    ]
+    controller._refresh_ui()
+    QApplication.processEvents()
+
+    controller.window.preview_parameter_name_combo.setCurrentText("PlayerSpeed")
+    controller.window.preview_parameter_scope_combo.setCurrentText("Global")
+    controller.window.preview_parameter_value_spin.setValue(6.0)
+    controller.window.preview_state_group_combo.setCurrentText("CombatState")
+    controller.window.preview_switch_group_combo.setCurrentText("SurfaceType")
+    QApplication.processEvents()
+
+    assert controller.window.preview_parameter_source_chip.text() == "Global"
+    assert controller.window.preview_state_scope_chip.text() == "Global"
+    assert controller.window.preview_switch_source_chip.text() == "Mapped"
+    assert controller.window.preview_switch_parameter_source_chip.text() == "参数 Global"
+    assert "PlayerSpeed" in controller.window.preview_gamesync_summary_label.text()
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_clip_edit_and_tab_switch_preserve_navigation_layout(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 

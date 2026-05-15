@@ -492,6 +492,7 @@ class MainController(QObject):
         self.window.select_audio_browser_audio(self.selected_audio_id)
         self.window.set_gamesync_entries(self._build_gamesync_entries())
         self.window.set_gamesync_definitions(self.project.game_parameters, self.project.state_groups, self.project.switch_groups)
+        self._sync_preview_gamesync_resolution()
         self.window.set_project_settings(self.project.settings)
         self._sync_preview_bus_mixer()
         self.sync_preview_bus_editor()
@@ -1569,6 +1570,25 @@ class MainController(QObject):
             switches=payload.get("switches", {}),
         )
 
+    def _sync_preview_gamesync_resolution(self) -> None:
+        payload = self.window.current_preview_gamesync_context_data()
+        snapshot = self.preview_service.build_preview_resolution_snapshot(
+            PreviewGameSyncContext(
+                global_game_parameters=payload.get("global_parameters", {}),
+                emitter_game_parameters=payload.get("emitter_parameters", {}),
+                states=payload.get("states", {}),
+                switches=payload.get("switches", {}),
+            ),
+            game_parameters=self.project.game_parameters,
+            state_groups=self.project.state_groups,
+            switch_groups=self.project.switch_groups,
+            selected_parameter_name=str(payload.get("selected_parameter_name", "")),
+            selected_parameter_scope=str(payload.get("selected_parameter_scope", "Emitter")),
+            selected_state_group=str(payload.get("selected_state_group", "")),
+            selected_switch_group=str(payload.get("selected_switch_group", "")),
+        )
+        self.window.set_preview_gamesync_resolution_snapshot(snapshot)
+
     def _resolve_preview_event_mix(self, event: EventModel) -> tuple[float, int, bool]:
         return self.preview_service.resolve_mix_adjustment(
             event.rtpc_bindings,
@@ -1616,6 +1636,7 @@ class MainController(QObject):
         )
 
     def update_preview_gamesync_from_form(self) -> None:
+        self._sync_preview_gamesync_resolution()
         event = self.current_event
         if event is None:
             return

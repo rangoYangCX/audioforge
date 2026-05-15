@@ -18,7 +18,7 @@
 - 冷却、实例上限与基础调试记录
 - 项目级 Game Parameter、State Group、Switch Group 定义解析
 - emitter / game object 作用域与 emitter handle 注册
-- `SetGlobalGameParameter` / `SetGameParameter` / `SetState` / `SetSwitch` API
+- `SetGlobalGameParameter` / `SetEmitterGameParameter` / `SetState` / `SetSwitch` API
 - Event / Bus 的 RTPC、StateOverride 求值与 Event SwitchVariant 选片
 - State / Switch child effects 应用与 validation smoke
 
@@ -148,19 +148,27 @@ phase3 第一轮不建议把 Switch 直接挂到 Bus 上，避免把对象级分
 ### 4.2 RTPC API
 
 - `void SetGlobalGameParameter(string name, float value)`
-- `void SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)`
+- `void ResetGlobalGameParameter(string name)`
+- `void SetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name, float value)`
 - `float GetGlobalGameParameter(string name)`
-- `float GetGameParameter(string name, AudioForgeEmitterHandle emitter)`
+- `float GetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name)`
+- `void ResetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name)`
+
+兼容期内，旧的 `SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)` / `GetGameParameter(string name, AudioForgeEmitterHandle emitter)` 仍作为 emitter 语义别名保留。
 
 ### 4.3 State API
 
 - `void SetState(string groupName, string stateName)`
 - `string GetState(string groupName)`
+- `void ResetState(string groupName)`
 
 ### 4.4 Switch API
 
-- `void SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)`
-- `string GetSwitch(string groupName, AudioForgeEmitterHandle emitter)`
+- `void SetSwitch(AudioForgeEmitterHandle emitter, string groupName, string switchName)`
+- `string GetSwitch(AudioForgeEmitterHandle emitter, string groupName)`
+- `void ResetSwitch(AudioForgeEmitterHandle emitter, string groupName)`
+
+兼容期内，旧顺序的 `SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)` / `GetSwitch(string groupName, AudioForgeEmitterHandle emitter)` 仍保留转发，以便旧项目平滑迁移。
 
 ### 4.5 播放 API
 

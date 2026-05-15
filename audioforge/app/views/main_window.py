@@ -1035,6 +1035,7 @@ class MainWindow(QMainWindow):
         self.preview_parameter_scope_combo = QComboBox()
         self.preview_parameter_scope_combo.addItems(["Global", "Emitter"])
         self.preview_parameter_current_label = QLabel("0")
+        self.preview_parameter_source_chip = QLabel("Default")
         self.preview_parameter_min_label = QLabel("0")
         self.preview_parameter_max_label = QLabel("0")
         self.preview_parameter_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1049,9 +1050,13 @@ class MainWindow(QMainWindow):
         self.preview_state_section_label = QLabel("State")
         self.preview_state_group_combo = QComboBox()
         self.preview_state_name_combo = QComboBox()
+        self.preview_state_scope_chip = QLabel("Global")
         self.preview_switch_section_label = QLabel("Switch")
         self.preview_switch_group_combo = QComboBox()
         self.preview_switch_name_combo = QComboBox()
+        self.preview_switch_source_chip = QLabel("Default")
+        self.preview_switch_parameter_source_chip = QLabel("参数 -")
+        self.preview_gamesync_summary_label = QLabel("当前没有额外的 GameSync 覆盖。")
         self.export_root_edit = QLineEdit()
         self.export_root_edit.setPlaceholderText("./Export")
         self.export_root_browse_button = QPushButton("选择目录")
@@ -1649,6 +1654,15 @@ class MainWindow(QMainWindow):
         self.preview_parameter_current_label.setProperty("role", "previewTransportReadout")
         self.preview_parameter_min_label.setProperty("role", "previewTransportCaption")
         self.preview_parameter_max_label.setProperty("role", "previewTransportCaption")
+        for chip in [
+            self.preview_parameter_source_chip,
+            self.preview_state_scope_chip,
+            self.preview_switch_source_chip,
+            self.preview_switch_parameter_source_chip,
+        ]:
+            chip.setProperty("role", "busHeaderChip")
+        self.preview_gamesync_summary_label.setProperty("role", "previewTransportCaption")
+        self.preview_gamesync_summary_label.setWordWrap(True)
         for combo in [
             self.preview_parameter_name_combo,
             self.preview_parameter_scope_combo,
@@ -1675,6 +1689,7 @@ class MainWindow(QMainWindow):
         rtpc_header_layout.addWidget(self.preview_parameter_section_label)
         rtpc_header_layout.addWidget(self.preview_parameter_name_combo)
         rtpc_header_layout.addWidget(self.preview_parameter_scope_combo)
+        rtpc_header_layout.addWidget(self.preview_parameter_source_chip)
         rtpc_header_layout.addStretch(1)
         rtpc_header_layout.addWidget(self.preview_parameter_current_label)
         rtpc_layout.addLayout(rtpc_header_layout)
@@ -1687,6 +1702,7 @@ class MainWindow(QMainWindow):
         rtpc_value_layout.addWidget(self.preview_parameter_max_label)
         rtpc_value_layout.addWidget(self.preview_parameter_value_spin)
         rtpc_layout.addLayout(rtpc_value_layout)
+        rtpc_layout.addWidget(self.preview_gamesync_summary_label)
 
         preview_modes_layout = QGridLayout(self.preview_gamesync_modes_frame)
         preview_modes_layout.setContentsMargins(10, 6, 10, 6)
@@ -1695,9 +1711,12 @@ class MainWindow(QMainWindow):
         preview_modes_layout.addWidget(self.preview_state_section_label, 0, 0)
         preview_modes_layout.addWidget(self.preview_state_group_combo, 0, 1)
         preview_modes_layout.addWidget(self.preview_state_name_combo, 0, 2)
+        preview_modes_layout.addWidget(self.preview_state_scope_chip, 0, 3)
         preview_modes_layout.addWidget(self.preview_switch_section_label, 1, 0)
         preview_modes_layout.addWidget(self.preview_switch_group_combo, 1, 1)
         preview_modes_layout.addWidget(self.preview_switch_name_combo, 1, 2)
+        preview_modes_layout.addWidget(self.preview_switch_source_chip, 1, 3)
+        preview_modes_layout.addWidget(self.preview_switch_parameter_source_chip, 1, 4)
 
         preview_gamesync_layout.addWidget(self.preview_rtpc_transport_frame, 1)
         preview_gamesync_layout.addWidget(self.preview_gamesync_modes_frame, 0)
@@ -9941,10 +9960,6 @@ class MainWindow(QMainWindow):
             return
         group_name = self.preview_state_group_combo.currentText().strip()
         self._preview_gamesync_state["selected_state_group"] = group_name
-        if group_name:
-            states = self._preview_gamesync_state.get("states", {})
-            if isinstance(states, dict) and not str(states.get(group_name, "")).strip():
-                states[group_name] = self._preview_default_state_name(group_name)
         self._load_preview_gamesync_editor()
         self.previewGameSyncChanged.emit()
 
@@ -9964,10 +9979,6 @@ class MainWindow(QMainWindow):
             return
         group_name = self.preview_switch_group_combo.currentText().strip()
         self._preview_gamesync_state["selected_switch_group"] = group_name
-        if group_name:
-            switches = self._preview_gamesync_state.get("switches", {})
-            if isinstance(switches, dict) and not str(switches.get(group_name, "")).strip():
-                switches[group_name] = self._preview_default_switch_name(group_name)
         self._load_preview_gamesync_editor()
         self.previewGameSyncChanged.emit()
 
@@ -9998,6 +10009,16 @@ class MainWindow(QMainWindow):
             "selected_state_group": str(self._preview_gamesync_state.get("selected_state_group", "")),
             "selected_switch_group": str(self._preview_gamesync_state.get("selected_switch_group", "")),
         }
+
+    def set_preview_gamesync_resolution_snapshot(self, snapshot) -> None:
+        self.preview_parameter_source_chip.setText(str(getattr(snapshot, "parameter_source", "Default") or "Default"))
+        self.preview_state_scope_chip.setText("Global")
+        self.preview_switch_source_chip.setText(str(getattr(snapshot, "switch_mode", "Default") or "Default"))
+        switch_parameter_source = str(getattr(snapshot, "switch_parameter_source", "None") or "None")
+        self.preview_switch_parameter_source_chip.setText("参数 -" if switch_parameter_source in {"None", ""} else f"参数 {switch_parameter_source}")
+        summary = str(getattr(snapshot, "summary", "") or "当前没有额外的 GameSync 覆盖。")
+        self.preview_gamesync_summary_label.setText(summary)
+        self.preview_gamesync_summary_label.setToolTip(summary)
 
     def current_gamesync_form_data(self) -> dict[str, object]:
         self._sync_gamesync_editor_to_state("game_parameters")

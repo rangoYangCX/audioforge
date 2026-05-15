@@ -75,6 +75,26 @@ class PreviewResult:
     is_muted: bool = False
 
 
+@dataclass(slots=True)
+class PreviewGameSyncResolutionSnapshot:
+    parameter_name: str = ""
+    parameter_scope: str = "Emitter"
+    parameter_source: str = "Default"
+    parameter_value: float = 0.0
+    parameter_summary: str = "未选择 RTPC。"
+    state_group: str = ""
+    state_value: str = ""
+    state_source: str = "Default"
+    state_summary: str = "当前没有 State 作用。"
+    switch_group: str = ""
+    switch_value: str = ""
+    switch_mode: str = "Default"
+    switch_parameter_name: str = ""
+    switch_parameter_source: str = "None"
+    switch_summary: str = "当前使用默认 Switch。"
+    summary: str = "当前没有额外的 GameSync 覆盖。"
+
+
 class PreviewService:
     def __init__(self, seed: int | None = None, preview_hold_seconds: float = 0.25) -> None:
         self._rng = random.Random(seed)
@@ -259,6 +279,78 @@ class PreviewService:
         )
         return volume_db, is_muted
 
+    def build_preview_resolution_snapshot(
+        self,
+        preview_gamesync: PreviewGameSyncContext | None = None,
+        *,
+        game_parameters: list[GameParameterModel] | None = None,
+        state_groups: list[StateGroupModel] | None = None,
+        switch_groups: list[SwitchGroupModel] | None = None,
+        selected_parameter_name: str = "",
+        selected_parameter_scope: str = "Emitter",
+        selected_state_group: str = "",
+        selected_switch_group: str = "",
+    ) -> PreviewGameSyncResolutionSnapshot:
+        preview_context = preview_gamesync or PreviewGameSyncContext()
+        resolved_scope = selected_parameter_scope if selected_parameter_scope in {"Emitter", "Global"} else "Emitter"
+        parameter_source, parameter_value = self._resolve_game_parameter_source(
+            selected_parameter_name,
+            resolved_scope,
+            game_parameters or [],
+            preview_context,
+        )
+        parameter_summary = "未选择 RTPC。"
+        if selected_parameter_name:
+            parameter_summary = f"RTPC {selected_parameter_name} 当前按 {resolved_scope} 绑定求值，命中 {parameter_source} {parameter_value:.2f}。"
+
+        state_value, state_source = self._resolve_state_resolution(
+            selected_state_group,
+            state_groups or [],
+            preview_context,
+        )
+        state_summary = "当前没有 State 作用。"
+        if selected_state_group:
+            state_summary = f"State {selected_state_group} 当前值 {state_value or '-'}，作用域固定为 Global。"
+
+        switch_value, switch_mode, switch_parameter_name, switch_parameter_source = self._resolve_switch_resolution(
+            selected_switch_group,
+            switch_groups or [],
+            game_parameters or [],
+            preview_context,
+        )
+        switch_summary = "当前使用默认 Switch。"
+        if selected_switch_group:
+            if switch_mode == "Manual":
+                switch_summary = f"Switch {selected_switch_group} 当前由试听对象手动指定为 {switch_value or '-'}。"
+            elif switch_mode == "Mapped":
+                switch_summary = f"Switch {selected_switch_group} 当前由参数 {switch_parameter_name or '-'} 的 {switch_parameter_source} 值映射到 {switch_value or '-'}。"
+            else:
+                switch_summary = f"Switch {selected_switch_group} 当前回退默认值 {switch_value or '-'}。"
+
+        summary_parts = [
+            parameter_summary,
+            state_summary if selected_state_group else "State 当前无额外覆盖。",
+            switch_summary if selected_switch_group else "Switch 当前回退默认路径。",
+        ]
+        return PreviewGameSyncResolutionSnapshot(
+            parameter_name=selected_parameter_name,
+            parameter_scope=resolved_scope,
+            parameter_source=parameter_source,
+            parameter_value=parameter_value,
+            parameter_summary=parameter_summary,
+            state_group=selected_state_group,
+            state_value=state_value,
+            state_source=state_source,
+            state_summary=state_summary,
+            switch_group=selected_switch_group,
+            switch_value=switch_value,
+            switch_mode=switch_mode,
+            switch_parameter_name=switch_parameter_name,
+            switch_parameter_source=switch_parameter_source,
+            switch_summary=switch_summary,
+            summary=" | ".join(summary_parts),
+        )
+
     def _cleanup_expired(self, state: PreviewEventState, now: float) -> None:
         state.active_until_times = [expiry for expiry in state.active_until_times if expiry > now]
 
@@ -410,6 +502,42 @@ class PreviewService:
             return float(parameter.default_value)
         return 0.0
 
+    def _resolve_game_parameter_source(
+        self,
+        name: str,
+        scope: str,
+        game_parameters: list[GameParameterModel],
+        preview_gamesync: PreviewGameSyncContext,
+    ) -> tuple[str, float]:
+        if not name.strip():
+            return "Default", 0.0
+        parameter = self._find_game_parameter(name, game_parameters)
+        normalized_name = parameter.name if parameter is not None else name.strip()
+        if scope == "Emitter" and normalized_name in preview_gamesync.emitter_game_parameters:
+            return "Emitter", self._clamp_game_parameter_value(parameter, preview_gamesync.emitter_game_parameters[normalized_name])
+        if normalized_name in preview_gamesync.global_game_parameters:
+            return "Global", self._clamp_game_parameter_value(parameter, preview_gamesync.global_game_parameters[normalized_name])
+        if parameter is not None:
+            return "Default", float(parameter.default_value)
+        return "Default", 0.0
+
+    def _resolve_state_resolution(
+        self,
+        group_name: str,
+        state_groups: list[StateGroupModel],
+        preview_gamesync: PreviewGameSyncContext,
+    ) -> tuple[str, str]:
+        if not group_name.strip():
+            return "", "Default"
+        group = self._find_state_group(group_name, state_groups)
+        normalized_name = group.name if group is not None else group_name.strip()
+        explicit_state = preview_gamesync.states.get(normalized_name, "").strip()
+        if explicit_state:
+            return explicit_state, "Global"
+        if group is not None:
+            return group.default_state, "Default"
+        return "", "Default"
+
     def _resolve_state_value(
         self,
         group_name: str,
@@ -447,6 +575,35 @@ class PreviewService:
                 if parameter_value >= minimum and parameter_value <= maximum:
                     return switch_name
         return group.default_switch
+
+    def _resolve_switch_resolution(
+        self,
+        group_name: str,
+        switch_groups: list[SwitchGroupModel],
+        game_parameters: list[GameParameterModel],
+        preview_gamesync: PreviewGameSyncContext,
+    ) -> tuple[str, str, str, str]:
+        if not group_name.strip():
+            return "", "Default", "", "None"
+        group = self._find_switch_group(group_name, switch_groups)
+        normalized_name = group.name if group is not None else group_name.strip()
+        explicit_switch = preview_gamesync.switches.get(normalized_name, "").strip()
+        if explicit_switch:
+            return explicit_switch, "Manual", "", "None"
+        if group is None:
+            return "", "Default", "", "None"
+        if group.use_game_parameter and group.mapped_game_parameter and group.switches:
+            parameter_source, parameter_value = self._resolve_game_parameter_source(
+                group.mapped_game_parameter,
+                "Emitter",
+                game_parameters,
+                preview_gamesync,
+            )
+            parameter = self._find_game_parameter(group.mapped_game_parameter, game_parameters)
+            for minimum, maximum, switch_name in self._switch_thresholds(group, parameter):
+                if parameter_value >= minimum and parameter_value <= maximum:
+                    return switch_name, "Mapped", group.mapped_game_parameter, parameter_source
+        return group.default_switch, "Default", group.mapped_game_parameter, "None"
 
     def _switch_thresholds(
         self,

@@ -176,3 +176,41 @@ def test_preview_service_mapped_switch_falls_back_to_global_parameter(tmp_path) 
     assert result.accepted is True
     assert result.clip_id == stone_clip.id
     assert result.asset_key == "footstep/stone_global"
+
+
+def test_preview_resolution_snapshot_reports_global_fallback_for_emitter_parameter() -> None:
+    service = PreviewService(seed=7)
+
+    snapshot = service.build_preview_resolution_snapshot(
+        PreviewGameSyncContext(global_game_parameters={"PlayerSpeed": 4.0}),
+        game_parameters=[GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)],
+        selected_parameter_name="PlayerSpeed",
+        selected_parameter_scope="Emitter",
+    )
+
+    assert snapshot.parameter_source == "Global"
+    assert snapshot.parameter_value == 4.0
+    assert "命中 Global 4.00" in snapshot.parameter_summary
+
+
+def test_preview_resolution_snapshot_reports_mapped_switch_parameter_source() -> None:
+    service = PreviewService(seed=7)
+
+    snapshot = service.build_preview_resolution_snapshot(
+        PreviewGameSyncContext(global_game_parameters={"PlayerSpeed": 10.0}),
+        game_parameters=[GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)],
+        switch_groups=[
+            SwitchGroupModel(
+                name="FootstepSurface",
+                switches=["Grass", "Stone"],
+                default_switch="Grass",
+                use_game_parameter=True,
+                mapped_game_parameter="PlayerSpeed",
+            )
+        ],
+        selected_switch_group="FootstepSurface",
+    )
+
+    assert snapshot.switch_mode == "Mapped"
+    assert snapshot.switch_value == "Stone"
+    assert snapshot.switch_parameter_source == "Global"

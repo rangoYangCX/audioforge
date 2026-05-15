@@ -167,7 +167,19 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         RefreshBusVolumes(masterBusName);
     }
 
-    public void SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)
+    public void ResetGlobalGameParameter(string name)
+    {
+        AudioForgeGameParameterConfig config;
+        if (!TryGetGameParameterConfig(name, out config))
+        {
+            return;
+        }
+
+        _globalGameParameters.Remove(config.Name);
+        RefreshBusVolumes(masterBusName);
+    }
+
+    public void SetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name, float value)
     {
         AudioForgeGameParameterConfig config;
         AudioForgeEmitterContext context;
@@ -178,6 +190,11 @@ public sealed class AudioForgeRuntime : MonoBehaviour
 
         context.LocalGameParameters[config.Name] = ClampGameParameterValue(config, value);
         RefreshBusVolumes(masterBusName);
+    }
+
+    public void SetGameParameter(string name, float value, AudioForgeEmitterHandle emitter)
+    {
+        SetEmitterGameParameter(emitter, name, value);
     }
 
     public float GetGlobalGameParameter(string name)
@@ -192,7 +209,7 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         return _globalGameParameters.TryGetValue(config.Name, out value) ? value : config.DefaultValue;
     }
 
-    public float GetGameParameter(string name, AudioForgeEmitterHandle emitter)
+    public float GetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name)
     {
         AudioForgeGameParameterConfig config;
         if (!TryGetGameParameterConfig(name, out config))
@@ -208,6 +225,24 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         return GetGlobalGameParameter(config.Name);
+    }
+
+    public float GetGameParameter(string name, AudioForgeEmitterHandle emitter)
+    {
+        return GetEmitterGameParameter(emitter, name);
+    }
+
+    public void ResetEmitterGameParameter(AudioForgeEmitterHandle emitter, string name)
+    {
+        AudioForgeGameParameterConfig config;
+        AudioForgeEmitterContext context;
+        if (!TryGetGameParameterConfig(name, out config) || !TryResolveEmitterContext(emitter, out context))
+        {
+            return;
+        }
+
+        context.LocalGameParameters.Remove(config.Name);
+        RefreshBusVolumes(masterBusName);
     }
 
     public void SetState(string groupName, string stateName)
@@ -234,6 +269,18 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         return _globalStates.TryGetValue(config.Name, out value) ? value : config.DefaultState;
     }
 
+    public void ResetState(string groupName)
+    {
+        AudioForgeStateGroupConfig config;
+        if (!TryGetStateGroupConfig(groupName, out config))
+        {
+            return;
+        }
+
+        _globalStates.Remove(config.Name);
+        RefreshBusVolumes(masterBusName);
+    }
+
     public void SetSwitch(string groupName, string switchName, AudioForgeEmitterHandle emitter)
     {
         AudioForgeSwitchGroupConfig config;
@@ -244,6 +291,11 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         context.LocalSwitches[config.Name] = string.IsNullOrWhiteSpace(switchName) ? config.DefaultSwitch : switchName.Trim();
+    }
+
+    public void SetSwitch(AudioForgeEmitterHandle emitter, string groupName, string switchName)
+    {
+        SetSwitch(groupName, switchName, emitter);
     }
 
     public string GetSwitch(string groupName, AudioForgeEmitterHandle emitter)
@@ -262,6 +314,23 @@ public sealed class AudioForgeRuntime : MonoBehaviour
         }
 
         return ResolveMappedSwitch(config, emitter);
+    }
+
+    public string GetSwitch(AudioForgeEmitterHandle emitter, string groupName)
+    {
+        return GetSwitch(groupName, emitter);
+    }
+
+    public void ResetSwitch(AudioForgeEmitterHandle emitter, string groupName)
+    {
+        AudioForgeSwitchGroupConfig config;
+        AudioForgeEmitterContext context;
+        if (!TryGetSwitchGroupConfig(groupName, out config) || !TryResolveEmitterContext(emitter, out context))
+        {
+            return;
+        }
+
+        context.LocalSwitches.Remove(config.Name);
     }
 
     /// <summary>

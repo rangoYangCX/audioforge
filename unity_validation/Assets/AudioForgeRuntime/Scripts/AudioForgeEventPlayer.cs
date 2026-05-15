@@ -61,10 +61,10 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
             return;
         }
         EnsureEmitterHandle(runtime);
-        runtime.SetSwitch(groupName, switchName, _emitterHandle);
+        runtime.SetSwitch(_emitterHandle, groupName, switchName);
     }
 
-    public void SetGameParameter(string name, float value)
+    public void SetEmitterGameParameter(string name, float value)
     {
         AudioForgeRuntime runtime = ResolveRuntime();
         if (runtime == null)
@@ -72,7 +72,12 @@ public sealed class AudioForgeEventPlayer : MonoBehaviour
             return;
         }
         EnsureEmitterHandle(runtime);
-        runtime.SetGameParameter(name, value, _emitterHandle);
+        runtime.SetEmitterGameParameter(_emitterHandle, name, value);
+    }
+
+    public void SetGameParameter(string name, float value)
+    {
+        SetEmitterGameParameter(name, value);
     }
 
     private void OnDestroy()

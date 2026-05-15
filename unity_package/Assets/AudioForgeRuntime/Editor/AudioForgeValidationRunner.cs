@@ -361,8 +361,8 @@ public static class AudioForgeValidationRunner
             {
                 AudioForgeGameParameterConfig parameter = database.GameParameters[0];
                 runtime.SetGlobalGameParameter(parameter.Name, parameter.MaxValue);
-                runtime.SetGameParameter(parameter.Name, parameter.MinValue, emitter);
-                float emitterValue = runtime.GetGameParameter(parameter.Name, emitter);
+                runtime.SetEmitterGameParameter(emitter, parameter.Name, parameter.MinValue);
+                float emitterValue = runtime.GetEmitterGameParameter(emitter, parameter.Name);
                 if (Mathf.Abs(emitterValue - parameter.MinValue) > 0.001f)
                 {
                     check.Passed = false;
@@ -407,8 +407,8 @@ public static class AudioForgeValidationRunner
             else
             {
                 AudioForgeSwitchVariantConfig variant = switchEvent.SwitchVariants[0];
-                runtime.SetSwitch(variant.GroupName, variant.SwitchName, emitter);
-                string resolvedSwitch = runtime.GetSwitch(variant.GroupName, emitter);
+                runtime.SetSwitch(emitter, variant.GroupName, variant.SwitchName);
+                string resolvedSwitch = runtime.GetSwitch(emitter, variant.GroupName);
                 if (!string.Equals(resolvedSwitch, variant.SwitchName, StringComparison.Ordinal))
                 {
                     check.Passed = false;
@@ -511,9 +511,9 @@ public static class AudioForgeValidationRunner
         }
 
         AudioForgeGameSyncEffectConfig baselineEffect = FindEffect(group.SwitchEffects, baselineSwitch);
-        runtime.SetSwitch(group.Name, baselineSwitch, emitter);
+        runtime.SetSwitch(emitter, group.Name, baselineSwitch);
         AudioForgeDebugEventRecord baselineRecord = PlayAndGetLatestRecord(runtime, eventConfig, emitter);
-        runtime.SetSwitch(group.Name, targetEffect.ValueName, emitter);
+        runtime.SetSwitch(emitter, group.Name, targetEffect.ValueName);
         AudioForgeDebugEventRecord effectRecord = PlayAndGetLatestRecord(runtime, eventConfig, emitter);
         if (!ValidateEffectPlayback(effectRecord, baselineRecord, targetEffect, baselineEffect, "switch_child_effects", check))
         {

@@ -12,6 +12,11 @@
 
 ## [Unreleased]
 
+- 试听 GameSync 条现可直接显示当前命中的作用域来源：RTPC 会区分 `Emitter / Global / Default`，State 固定标记为 `Global`，Switch 会区分 `Manual / Mapped / Default`，并额外显示映射参数是否来自 `Emitter` 或 `Global` 回退。
+- PreviewService 新增 GameSync 解释快照，资源与事件试听在不改导出契约的前提下可回显“为什么是这个结果”，减少把 State / Switch / RTPC 混看成一个参数区的误判。
+- Unity runtime 与 validation runtime 现新增 `SetEmitterGameParameter` / `GetEmitterGameParameter` / `ResetEmitterGameParameter`、`ResetGlobalGameParameter`、`ResetState`、`ResetSwitch`，并补齐 `SetSwitch(emitter, ...)` / `GetSwitch(emitter, ...)` 口径；旧 `SetGameParameter(...)` 与旧顺序 `SetSwitch(...)` 继续保留兼容转发。
+- Unity SDK 对接规范与 runtime GameSync 架构文档已同步刷新到“world / emitter”新命名，EventPlayer 与 validation runner 示例调用也已统一切到新 API。
+
 - 资源工作区的片段编辑台现支持按可用宽度切换 `wide / medium / compact` 布局；波形操作区和底部动作区会在窄宽度下自动重排，事件页、Bus 页等通用双列工作区也会在小分辨率下切换为纵向堆叠，降低 Windows / mac 小屏幕拥挤问题。
 - 修复片段编辑台响应式重排时误销毁 `QLabel` / 按钮底层 Qt 对象的问题，避免切换事件或片段时触发 `Internal C++ object already deleted`。
 - 全链路 full flow 测试已统一改到 `SchemaVersion = 3` 口径：运行时断言改为从 `Events[AudioId]` 跳转到 `AudioObjects` 检查 `PlayMode`、`AvoidImmediateRepeat`、`Clips` 等声音层字段。
