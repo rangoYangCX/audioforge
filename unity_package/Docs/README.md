@@ -7,12 +7,14 @@
 ## 包内建议阅读顺序
 
 1. `QuickStart.md`
-2. `一期对比变化总览.md`
-3. `../../README.md`
-4. `Canonical/UnitySDK对接规范.md`
-5. `Canonical/Unity场景联调清单.md`
-6. `../Examples/README.md`
-7. `../Verification/full_chain_report.md`
+2. `研发接入速查.md`
+3. `一期对比变化总览.md`
+4. `Canonical/AudioForge使用说明.md`
+5. `Canonical/AudioForge研发接入速查.md`
+6. `Canonical/UnitySDK对接规范.md`
+7. `Canonical/Unity场景联调清单.md`
+8. `../Examples/README.md`
+9. `../Verification/full_chain_report.md`
 
 当前包内 runtime 已支持 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、GameParameters / StateGroups / SwitchGroups、Audio/总线级 GameSync 绑定、emitter context 与 child effects smoke；当前正式把 Event 固定为动作层、把 AudioObject 固定为声音层。若项目内有自研 runtime，建议优先阅读 `Canonical/UnitySDK对接规范.md` 对齐当前契约。
 
@@ -28,7 +30,8 @@
 ## 交接建议
 
 1. 先用 `QuickStart.md` 跑通最小播放链路。
-2. 再按 `Canonical/UnitySDK对接规范.md` 接入业务事件、总线和资源加载策略。
-3. 最后根据 `Examples/` 里的示范代码，把参考脚本替换成项目自己的 AudioService、资源加载器和触发层。
+2. 再看 `研发接入速查.md`，快速确认当前契约、目录落位和最小验收标准。
+3. 然后按 `Canonical/UnitySDK对接规范.md` 接入业务事件、总线和资源加载策略。
+4. 最后根据 `Examples/` 里的示范代码，把参考脚本替换成项目自己的 AudioService、资源加载器和触发层。
 
 补充说明：当前这轮包内文档仍建议把 `一期对比变化总览.md` 当成第一份差异化入口，但请注意它已不再只覆盖 `OneShot`，而是会明确标出 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、GameSync，以及 Event / AudioObject 拆层契约变化。
