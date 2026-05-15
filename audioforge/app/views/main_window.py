@@ -1416,7 +1416,6 @@ class MainWindow(QMainWindow):
         self.task_sidebar = TaskSidebar()
         self.workspace_mode_stack = CurrentPageStack()
         self.activity_summary_label = QLabel("底部试听中心保持常驻，结果回看统一进入结果中心。")
-        self.activity_status_indicator = QLabel("等待校验、构建或日志结果。")
         self.events_workspace_status_label = QLabel("等待选择事件。")
         self.event_overview_hint_label = QLabel("从左侧概览快速切到参数、资源或结果页。")
         self.resources_workspace_status_label = QLabel("等待导入或选择片段。")
@@ -3874,9 +3873,6 @@ class MainWindow(QMainWindow):
         payload = item.data(Qt.ItemDataRole.UserRole) or {}
         return str(payload.get("detail", item.toolTip() or item.text())).strip()
 
-    def _update_activity_report_snapshot_labels(self) -> None:
-        self._update_activity_panel_status()
-
     def _update_diagnostic_snapshot_labels(self) -> None:
         snapshot = self._diagnostic_snapshot_data
         self._set_activity_summary_text(
@@ -6172,7 +6168,6 @@ class MainWindow(QMainWindow):
             f"当前结果页 {current_results_title}。这里统一回看日志、校验、构建、响度和诊断。"
         )
         self._update_diagnostic_snapshot_labels()
-        self._update_activity_report_snapshot_labels()
 
     def _build_report_center_page(
         self,
