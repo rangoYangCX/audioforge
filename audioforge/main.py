@@ -1,3 +1,4 @@
+import sitecustomize
 import os
 import logging
 import sys

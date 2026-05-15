@@ -3,8 +3,13 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
 
 from audioforge.app.models.audio_project import AudioProject, project_from_dict
 

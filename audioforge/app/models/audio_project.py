@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
+
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
 
 from audioforge.app.utils.constants import DEFAULT_BUSES, DEFAULT_PROJECT_NAME, PROJECT_VERSION
 

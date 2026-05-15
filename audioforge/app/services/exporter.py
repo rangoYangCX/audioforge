@@ -7,8 +7,13 @@ import shutil
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
 
 from audioforge.app.models.audio_project import AudioProject, ClipModel, EventModel, GameParameterModel, RtpcBindingModel, StateGroupModel, StateOverrideModel, SwitchGroupModel, SwitchVariantModel, ValidationIssue, effective_event_clips
 from audioforge.app.services.audio_processor import AudioProcessor
