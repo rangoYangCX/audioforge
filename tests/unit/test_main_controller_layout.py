@@ -543,7 +543,7 @@ def test_gamesync_workspace_and_explorer_tab_are_available(monkeypatch) -> None:
     controller.window.close()
 
 
-def test_activity_panel_defaults_to_compact_and_can_expand(monkeypatch) -> None:
+def test_activity_panel_shows_audition_center_and_status_indicator(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
@@ -551,25 +551,10 @@ def test_activity_panel_defaults_to_compact_and_can_expand(monkeypatch) -> None:
     controller.window.show()
     QApplication.processEvents()
 
-    compact_height = controller.window.workspace_splitter.sizes()[1]
-    assert compact_height == controller.window._minimum_report_panel_height
-    assert not controller.window.activity_detail_container.isVisible()
-    assert controller.window.activity_toggle_button.text() == "展开"
-
-    controller.window.activity_toggle_button.click()
-    QApplication.processEvents()
-
-    expanded_height = controller.window.workspace_splitter.sizes()[1]
-    assert expanded_height >= controller.window._expanded_report_panel_min_height
-    assert controller.window.activity_detail_container.isVisible()
-    assert controller.window.activity_toggle_button.text() == "收起"
-
-    controller.window.activity_toggle_button.click()
-    QApplication.processEvents()
-
-    assert controller.window.workspace_splitter.sizes()[1] == controller.window._minimum_report_panel_height
-    assert not controller.window.activity_detail_container.isVisible()
-    assert controller.window.activity_toggle_button.text() == "展开"
+    bottom_height = controller.window.workspace_splitter.sizes()[1]
+    assert bottom_height >= controller.window._minimum_report_panel_height
+    assert controller.window.activity_preview_host.isAncestorOf(controller.window.preview_gamesync_group)
+    assert hasattr(controller.window, "activity_status_indicator")
 
     controller.is_dirty = False
     controller.window.close()
@@ -602,7 +587,7 @@ def test_home_page_keeps_direct_workspace_entry_actions(monkeypatch) -> None:
     controller.window.close()
 
 
-def test_focus_panel_log_expands_activity_panel_and_restore_default_layout_compacts_it(monkeypatch) -> None:
+def test_focus_panel_log_switches_to_results_workspace(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 
     controller = MainController()
@@ -610,19 +595,15 @@ def test_focus_panel_log_expands_activity_panel_and_restore_default_layout_compa
     controller.window.show()
     QApplication.processEvents()
 
-    assert controller.window.workspace_splitter.sizes()[1] == controller.window._minimum_report_panel_height
-
     controller.window.focus_panel("log")
     QApplication.processEvents()
 
-    assert controller.window.workspace_splitter.sizes()[1] >= controller.window._expanded_report_panel_min_height
-    assert controller.window.activity_detail_container.isVisible()
+    assert controller.window.workspace_mode_stack.currentWidget() is controller.window._workspace_mode_pages.get("results")
 
     controller.window.restore_default_layout()
     QApplication.processEvents()
 
     assert controller.window.workspace_splitter.sizes()[1] == controller.window._minimum_report_panel_height
-    assert not controller.window.activity_detail_container.isVisible()
 
     controller.is_dirty = False
     controller.window.close()
@@ -2341,7 +2322,7 @@ def test_diagnostic_results_page_reuses_existing_report_state(monkeypatch) -> No
     assert "构建报告已准备" in controller.window.diagnostic_build_summary_label.toolTip()
     assert "响度扫描完成" in controller.window.diagnostic_loudness_summary_label.toolTip()
     assert controller.window.current_project_bus_name() in controller.window.diagnostic_bus_summary_label.toolTip()
-    assert controller.window.activity_diagnostic_summary_label.text().strip()
+    assert controller.window.activity_status_indicator.text().strip()
     assert controller.window.diagnostic_section_list.count() == 5
     current_item = controller.window.diagnostic_section_list.currentItem()
     assert current_item is not None
@@ -2898,19 +2879,14 @@ def test_tree_preview_actions_and_preview_strip_replace_bottom_transport_card(mo
     controller._publish_audition_session(session)
 
     preview_host = controller.window.activity_preview_host
-    current_page = controller.window._workspace_mode_pages["resources"]
 
     assert preview_host is not None
     assert preview_host.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
-    assert controller.window.activity_panel.isAncestorOf(controller.window.loudness_group)
-    assert controller.window.workspace_status_bar.isAncestorOf(controller.window.loudness_group) is False
-    assert current_page.isAncestorOf(controller.window.loudness_group) is False
-    assert controller.window.loudness_group.parentWidget() is preview_host
-    assert controller.window.activity_panel.height() >= controller.window.loudness_group.height()
+    assert controller.window.activity_panel.isAncestorOf(controller.window.preview_gamesync_group)
+    assert controller.window.activity_panel.isAncestorOf(controller.window.loudness_group) is False
     assert controller.window.loudness_group.isAncestorOf(controller.window.preview_waveform_strip)
     assert controller.window.preview_transport_title_label.wordWrap() is False
     assert controller.window.preview_transport_detail_label.wordWrap() is False
-    assert controller.window.preview_transport_detail_label.isVisible() is True
     assert controller.window.loudness_group.isAncestorOf(controller.window.preview_inline_momentary_max_value)
     assert controller.window.loudness_group.isAncestorOf(controller.window.preview_transport_play_button) is False
     assert controller.window.loudness_group.isAncestorOf(controller.window.preview_transport_metrics_frame) is False
