@@ -89,7 +89,7 @@ AudioForge Unity 端对接开发文档
 
 该命令会在 `dist/` 下生成版本化目录包和 zip。
 
-2026-05-14 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、Game Sync API、emitter context、child effects smoke，以及正式的 Event / AudioObject 职责拆层。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.09.0/`。
+2026-05-14 版本说明：当前建议重新生成 Unity SDK 包。主要原因已经不只是文档更新，而是 runtime 代码本体已同步进入 `SchemaVersion = 3`、`AudioObjects + Events[AudioId]`、Game Sync API、emitter context、child effects smoke，以及正式的 Event / AudioObject 职责拆层。重新打包后的目录名为 `dist/AudioForgeUnityPackage-0.09.1/`。
 
 自 2026-05-07 起，生成后的 SDK 包会统一带上以下交接层内容：
 

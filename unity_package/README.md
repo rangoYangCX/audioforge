@@ -43,7 +43,7 @@
 
 ## 2026-05-14 版本说明
 
-- 0.09.0 这轮发布的重点是 Schema 3 与 Audio Object 主模型冻结：运行时代码目录仍维持同一套 SDK，但契约已明确要求 `SchemaVersion = 3` 走顶层 `AudioObjects + Events[AudioId]`。
+- 0.09.1 这轮交付延续 Schema 3 与 Audio Object 主模型，并补齐了 UPM SDK 输出规范、包内文档一致性和编辑器工作台稳定性收口。
 - 当前参考运行时代码仍位于 `unity_package/Assets/AudioForgeRuntime`，并已直接消费 `AudioObjects` 与 `AudioId` 引用，不再依赖嵌套 `Audio` 或扁平字段回退。
 - 如果你只看代码目录，容易误以为这次只是数据层重命名；真正需要同步给 Unity 的，是“Event 只负责触发行为，声音层全部归 AudioObject”的运行时语义。
 
@@ -51,8 +51,8 @@
 
 执行 `python tools/package_unity_integration_package.py` 后，会在 `dist/` 下生成：
 
-- `AudioForgeUnityPackage-0.09.0/`
-- `AudioForgeUnityPackage-0.09.0.zip`
+- `AudioForgeUnityPackage-0.09.1/`
+- `AudioForgeUnityPackage-0.09.1.zip`
 
 执行 `python tools/run_unity_package_release.py --skip-pytest` 后，还会在 `reports/unity_package_release/` 下生成：
 

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from audioforge.app.utils.constants import APP_VERSION
+from tools.package_unity_upm_sdk import build_upm_runtime_sdk
 
 
 def _promote_built_directory(built_dir: Path, release_root: Path) -> None:
@@ -24,6 +25,11 @@ def _promote_built_directory(built_dir: Path, release_root: Path) -> None:
 
     shutil.copytree(built_dir, release_root)
     shutil.rmtree(built_dir, ignore_errors=True)
+
+
+def _embed_unity_sdk(workspace: Path, release_root: Path) -> None:
+    sdk_root = release_root / "SDK" / "com.audioforge.runtime"
+    build_upm_runtime_sdk(workspace, sdk_root)
 
 
 def main() -> int:
@@ -69,6 +75,7 @@ def main() -> int:
     if release_root.exists():
         shutil.rmtree(release_root)
     _promote_built_directory(built_dir, release_root)
+    _embed_unity_sdk(workspace, release_root)
     archive_path = dist_root / f"AudioForge-{APP_VERSION}-windows.zip"
     if archive_path.exists():
         archive_path.unlink()

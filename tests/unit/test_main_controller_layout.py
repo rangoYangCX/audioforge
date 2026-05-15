@@ -18,10 +18,12 @@ from PySide6.QtWidgets import QMessageBox
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QRect
 from PySide6.QtCore import QSize
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import QSplitter
 from PySide6.QtWidgets import QToolButton
+from shiboken6 import isValid
 
 
 def _wait_for_build_completion(controller: MainController, timeout_seconds: float = 10.0) -> None:
@@ -188,6 +190,58 @@ def test_clip_edit_and_tab_switch_preserve_navigation_layout(monkeypatch) -> Non
     assert controller.window.property_tabs.currentIndex() == 1
     assert controller.window.contents_tabs.currentIndex() == 0
     assert controller.window.content_top_splitter.sizes() == expected_content_sizes
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_clip_editor_switches_to_compact_layout_when_detail_column_is_narrow(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.show()
+    controller.window._activate_workspace_mode("resources")
+    QApplication.processEvents()
+
+    assert isValid(controller.window.clip_playhead_label)
+    controller.window.content_top_splitter.setSizes([540, 260])
+    QApplication.processEvents()
+    controller.window._apply_clip_editor_responsive_layout()
+    QApplication.processEvents()
+
+    sizes = controller.window.content_top_splitter.sizes()
+
+    assert controller.window._clip_editor_layout_mode == "compact"
+    assert controller.window.clip_waveform_action_panel.property("layoutMode") == "compact"
+    assert controller.window.clip_action_row.property("layoutMode") == "compact"
+    assert isValid(controller.window.clip_playhead_label)
+    assert sizes[1] >= sizes[0]
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
+def test_two_column_splitters_stack_vertically_at_compact_width(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    event_splitter = controller.window.findChild(QSplitter, "EventDesignPageSplitter")
+    route_splitter = controller.window.findChild(QSplitter, "CurrentBusRoutePageSplitter")
+
+    assert event_splitter is not None
+    assert route_splitter is not None
+
+    controller.window._apply_responsive_two_column_splitter(event_splitter, available_width=640)
+    controller.window._apply_responsive_two_column_splitter(route_splitter, available_width=640)
+
+    assert event_splitter.orientation() == Qt.Orientation.Vertical
+    assert route_splitter.orientation() == Qt.Orientation.Vertical
+
+    controller.window._apply_responsive_two_column_splitter(event_splitter, available_width=980)
+    controller.window._apply_responsive_two_column_splitter(route_splitter, available_width=980)
+
+    assert event_splitter.orientation() == Qt.Orientation.Horizontal
+    assert route_splitter.orientation() == Qt.Orientation.Horizontal
 
     controller.is_dirty = False
     controller.window.close()

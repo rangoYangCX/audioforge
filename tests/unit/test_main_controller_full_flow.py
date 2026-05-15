@@ -50,6 +50,11 @@ def _apply_event_form(
     window = controller.window
     window.event_id_edit.setText(event_id)
     window.display_name_edit.setText(display_name)
+    window.tags_summary_edit.setText(tags_text)
+    window.notes_edit.setPlainText(notes_text)
+    controller.update_current_event_from_form()
+    QApplication.processEvents()
+
     window.bus_combo.setCurrentText(bus)
     window.play_mode_combo.setCurrentText(play_mode)
     window.steal_policy_combo.setCurrentText(steal_policy)
@@ -65,10 +70,14 @@ def _apply_event_form(
     window.combo_reset_spin.setValue(combo_reset_seconds)
     window.combo_max_step_spin.setValue(combo_max_step)
     window.avoid_repeat_check.setChecked(avoid_immediate_repeat)
-    window.tags_summary_edit.setText(tags_text)
-    window.notes_edit.setPlainText(notes_text)
-    controller.update_current_event_from_form()
+    controller.update_current_audio_from_form()
     QApplication.processEvents()
+
+
+def _audio_payload(audio_data: dict[str, object], event_id: str) -> tuple[dict[str, object], dict[str, object]]:
+    event_payload = audio_data["Events"][event_id]
+    audio_payload = audio_data["AudioObjects"][event_payload["AudioId"]]
+    return event_payload, audio_payload
 
 
 def test_selected_build_preview_updates_scope_and_plan_labels(monkeypatch, tmp_path: Path) -> None:
@@ -332,21 +341,21 @@ def test_full_authoring_flow_from_wav_import_to_export(monkeypatch, tmp_path: Pa
     assert "UI_Click_Sequence" in event_enum
     assert "UI_Click_Combo" in event_enum
 
-    random_payload = audio_data["Events"]["UI_Click_Random_Main"]
-    assert random_payload["Bus"] == "SFX"
-    assert random_payload["PlayMode"] == "Random"
-    assert random_payload["AvoidImmediateRepeat"] is True
-    assert random_payload["VolumeDb"] == -2.5
-    assert random_payload["VolumeRandDb"] == [-1.5, 1.0]
-    assert random_payload["PitchCents"] == 100
-    assert random_payload["PitchRandCents"] == [-120, 180]
-    assert random_payload["CooldownSeconds"] == 0.35
-    assert random_payload["MaxInstances"] == 3
-    assert random_payload["StealPolicy"] == "StopOldest"
-    assert random_payload["LoadPolicy"] == "OnDemand"
-    assert len(random_payload["Clips"]) == 2
+    random_event_payload, random_audio_payload = _audio_payload(audio_data, "UI_Click_Random_Main")
+    assert random_audio_payload["Bus"] == "SFX"
+    assert random_audio_payload["PlayMode"] == "Random"
+    assert random_audio_payload["AvoidImmediateRepeat"] is True
+    assert random_audio_payload["VolumeDb"] == -2.5
+    assert random_audio_payload["VolumeRandDb"] == [-1.5, 1.0]
+    assert random_audio_payload["PitchCents"] == 100
+    assert random_audio_payload["PitchRandCents"] == [-120, 180]
+    assert random_event_payload["CooldownSeconds"] == 0.35
+    assert random_event_payload["MaxInstances"] == 3
+    assert random_event_payload["StealPolicy"] == "StopOldest"
+    assert random_audio_payload["LoadPolicy"] == "OnDemand"
+    assert len(random_audio_payload["Clips"]) == 2
 
-    random_clips = {clip["ClipId"]: clip for clip in random_payload["Clips"]}
+    random_clips = {clip["ClipId"]: clip for clip in random_audio_payload["Clips"]}
     assert random_clips["UI_Click_Random"]["AssetKey"] == "sfx/ui_click_random_main"
     assert random_clips["UI_Click_Random"]["Weight"] == 7
     assert random_clips["UI_Click_Random"]["TrimStartMs"] == 5
@@ -358,22 +367,22 @@ def test_full_authoring_flow_from_wav_import_to_export(monkeypatch, tmp_path: Pa
     assert random_clips["UI_Click_Random_Alt"]["TrimStartMs"] == 2
     assert random_clips["UI_Click_Random_Alt"]["TrimEndMs"] == 18
 
-    sequence_payload = audio_data["Events"]["UI_Click_Sequence"]
-    assert sequence_payload["PlayMode"] == "Sequence"
-    assert sequence_payload["Bus"] == "UI"
-    assert sequence_payload["MaxInstances"] == 1
-    assert sequence_payload["CooldownSeconds"] == 0.1
-    assert sequence_payload["Clips"][0]["AssetKey"] == "ui/ui_click_sequence"
-    assert sequence_payload["Clips"][0]["Weight"] == 2
+    sequence_event_payload, sequence_audio_payload = _audio_payload(audio_data, "UI_Click_Sequence")
+    assert sequence_audio_payload["PlayMode"] == "Sequence"
+    assert sequence_audio_payload["Bus"] == "UI"
+    assert sequence_event_payload["MaxInstances"] == 1
+    assert sequence_event_payload["CooldownSeconds"] == 0.1
+    assert sequence_audio_payload["Clips"][0]["AssetKey"] == "ui/ui_click_sequence"
+    assert sequence_audio_payload["Clips"][0]["Weight"] == 2
 
-    combo_payload = audio_data["Events"]["UI_Click_Combo"]
-    assert combo_payload["PlayMode"] == "Combo"
-    assert combo_payload["ComboPitchStepCents"] == 200
-    assert combo_payload["ComboResetSeconds"] == 1.2
-    assert combo_payload["ComboMaxStep"] == 4
-    assert combo_payload["PitchCents"] == 50
-    assert combo_payload["PitchRandCents"] == [-50, 50]
-    assert combo_payload["Clips"][0]["AssetKey"] == "ui/ui_click_combo"
+    combo_event_payload, combo_audio_payload = _audio_payload(audio_data, "UI_Click_Combo")
+    assert combo_audio_payload["PlayMode"] == "Combo"
+    assert combo_audio_payload["ComboPitchStepCents"] == 200
+    assert combo_audio_payload["ComboResetSeconds"] == 1.2
+    assert combo_audio_payload["ComboMaxStep"] == 4
+    assert combo_audio_payload["PitchCents"] == 50
+    assert combo_audio_payload["PitchRandCents"] == [-50, 50]
+    assert combo_audio_payload["Clips"][0]["AssetKey"] == "ui/ui_click_combo"
 
     manifest_assets = {asset["AssetKey"]: asset for asset in manifest["Assets"]}
     assert len(manifest_assets) == 4
@@ -515,24 +524,24 @@ def test_sequence_and_combo_multi_clip_boundary_flow_exports_cleanly(monkeypatch
     assert build_report["ErrorCount"] == 0
     assert build_report["WarningCount"] == 0
 
-    sequence_payload = audio_data["Events"]["UI_Step_Sequence"]
-    assert sequence_payload["PlayMode"] == "Sequence"
-    assert sequence_payload["AvoidImmediateRepeat"] is True
-    assert sequence_payload["MaxInstances"] == MAX_MAX_INSTANCES
-    assert [clip["ClipId"] for clip in sequence_payload["Clips"]] == ["UI_Step_Sequence", "UI_Step_Sequence_Alt"]
-    assert [clip["AssetKey"] for clip in sequence_payload["Clips"]] == [
+    sequence_event_payload, sequence_audio_payload = _audio_payload(audio_data, "UI_Step_Sequence")
+    assert sequence_audio_payload["PlayMode"] == "Sequence"
+    assert sequence_audio_payload["AvoidImmediateRepeat"] is True
+    assert sequence_event_payload["MaxInstances"] == MAX_MAX_INSTANCES
+    assert [clip["ClipId"] for clip in sequence_audio_payload["Clips"]] == ["UI_Step_Sequence", "UI_Step_Sequence_Alt"]
+    assert [clip["AssetKey"] for clip in sequence_audio_payload["Clips"]] == [
         "ui/boundary_sequence_main",
         "ui/boundary_sequence_alt",
     ]
 
-    combo_payload = audio_data["Events"]["UI_Hit_Combo"]
-    assert combo_payload["PlayMode"] == "Combo"
-    assert combo_payload["MaxInstances"] == MAX_MAX_INSTANCES
-    assert combo_payload["ComboPitchStepCents"] == 300
-    assert combo_payload["ComboResetSeconds"] == 0.1
-    assert combo_payload["ComboMaxStep"] == MAX_COMBO_MAX_STEP
-    assert [clip["ClipId"] for clip in combo_payload["Clips"]] == ["UI_Hit_Combo", "UI_Hit_Combo_Alt"]
-    assert [clip["AssetKey"] for clip in combo_payload["Clips"]] == [
+    combo_event_payload, combo_audio_payload = _audio_payload(audio_data, "UI_Hit_Combo")
+    assert combo_audio_payload["PlayMode"] == "Combo"
+    assert combo_event_payload["MaxInstances"] == MAX_MAX_INSTANCES
+    assert combo_audio_payload["ComboPitchStepCents"] == 300
+    assert combo_audio_payload["ComboResetSeconds"] == 0.1
+    assert combo_audio_payload["ComboMaxStep"] == MAX_COMBO_MAX_STEP
+    assert [clip["ClipId"] for clip in combo_audio_payload["Clips"]] == ["UI_Hit_Combo", "UI_Hit_Combo_Alt"]
+    assert [clip["AssetKey"] for clip in combo_audio_payload["Clips"]] == [
         "ui/boundary_combo_main",
         "ui/boundary_combo_alt",
     ]
@@ -728,8 +737,9 @@ def test_mixed_valid_invalid_import_flow_preserves_progress_and_logs_skips(monke
     assert build_report["ClipCount"] == 2
     assert build_report["ErrorCount"] == 0
     assert build_report["WarningCount"] == 0
-    assert audio_data["Events"]["UI_Mixed_Import"]["AvoidImmediateRepeat"] is True
-    assert [clip["AssetKey"] for clip in audio_data["Events"]["UI_Mixed_Import"]["Clips"]] == [
+    _mixed_event_payload, mixed_audio_payload = _audio_payload(audio_data, "UI_Mixed_Import")
+    assert mixed_audio_payload["AvoidImmediateRepeat"] is True
+    assert [clip["AssetKey"] for clip in mixed_audio_payload["Clips"]] == [
         "ui/mixed_import_main",
         "ui/mixed_import_alt",
     ]
@@ -910,9 +920,9 @@ def test_rebuild_updates_export_bundle_and_diff_preview_consistently(monkeypatch
     assert manifest_assets["ui/rebuild_primary"]["TrimEndMs"] == 15
     assert manifest_assets["ui/rebuild_added"]["ReferencedByEvents"] == ["UI_Rebuild_Primary"]
 
-    event_payload = audio_data["Events"]["UI_Rebuild_Primary"]
-    assert [clip["AssetKey"] for clip in event_payload["Clips"]] == ["ui/rebuild_primary", "ui/rebuild_added"]
-    assert event_payload["Clips"][0]["TrimEndMs"] == 15
+    _rebuild_event_payload, rebuild_audio_payload = _audio_payload(audio_data, "UI_Rebuild_Primary")
+    assert [clip["AssetKey"] for clip in rebuild_audio_payload["Clips"]] == ["ui/rebuild_primary", "ui/rebuild_added"]
+    assert rebuild_audio_payload["Clips"][0]["TrimEndMs"] == 15
 
     assert primary_asset_path.exists()
     assert not removed_asset_path.exists()

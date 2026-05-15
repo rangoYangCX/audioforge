@@ -641,6 +641,13 @@ class MainWindow(QMainWindow):
         self._pending_content_top_splitter_sizes: list[int] | None = None
         self._pending_named_splitter_sizes: dict[str, list[int]] = {}
         self._pending_layout_flush = False
+        self._responsive_two_column_splitters: list[QSplitter] = []
+        self._two_column_compact_breakpoint = 780
+        self._content_top_medium_breakpoint = 880
+        self._content_top_wide_breakpoint = 1100
+        self._clip_detail_medium_breakpoint = 480
+        self._clip_detail_wide_breakpoint = 620
+        self._clip_editor_layout_mode = ""
         self._build_status_summary_override: str | None = None
         self._build_status_detail_override: str | None = None
         self._project_settings_change_source = ""
@@ -1165,6 +1172,22 @@ class MainWindow(QMainWindow):
             self.clip_locate_source_button,
         ]:
             compact_button.setProperty("role", "clipCompactButton")
+        self._clip_waveform_action_buttons = [
+            self.clip_set_start_from_playhead_button,
+            self.clip_set_end_from_playhead_button,
+            self.clip_set_loop_from_selection_button,
+            self.clip_clear_loop_button,
+            self.clip_waveform_zoom_out_button,
+            self.clip_waveform_zoom_reset_button,
+            self.clip_waveform_frame_selection_button,
+            self.clip_waveform_zoom_in_button,
+        ]
+        self._clip_detail_action_buttons = [
+            self.clip_preview_button,
+            self.clip_preview_segment_button,
+            self.clip_copy_asset_key_button,
+            self.clip_locate_source_button,
+        ]
         for compact_spin in [
             self.clip_trim_start_spin,
             self.clip_trim_end_spin,
@@ -1946,6 +1969,7 @@ class MainWindow(QMainWindow):
         clip_list_layout.addWidget(self.clip_table)
 
         clip_detail_group = QGroupBox("片段编辑台")
+        self.clip_detail_group = clip_detail_group
         clip_detail_layout = QVBoxLayout(clip_detail_group)
         clip_detail_layout.setSpacing(10)
         clip_header_card = QFrame()
@@ -1962,20 +1986,12 @@ class MainWindow(QMainWindow):
         clip_timing_layout.setContentsMargins(10, 10, 10, 10)
         clip_timing_layout.setSpacing(6)
         clip_timing_layout.addWidget(self.clip_waveform_editor)
-        clip_waveform_action_row = QHBoxLayout()
-        clip_waveform_action_row.setContentsMargins(0, 0, 0, 0)
-        clip_waveform_action_row.setSpacing(6)
-        clip_waveform_action_row.addWidget(self.clip_playhead_label)
-        clip_waveform_action_row.addStretch(1)
-        clip_waveform_action_row.addWidget(self.clip_set_start_from_playhead_button)
-        clip_waveform_action_row.addWidget(self.clip_set_end_from_playhead_button)
-        clip_waveform_action_row.addWidget(self.clip_set_loop_from_selection_button)
-        clip_waveform_action_row.addWidget(self.clip_clear_loop_button)
-        clip_waveform_action_row.addWidget(self.clip_waveform_zoom_out_button)
-        clip_waveform_action_row.addWidget(self.clip_waveform_zoom_reset_button)
-        clip_waveform_action_row.addWidget(self.clip_waveform_frame_selection_button)
-        clip_waveform_action_row.addWidget(self.clip_waveform_zoom_in_button)
-        clip_timing_layout.addLayout(clip_waveform_action_row)
+        self.clip_waveform_action_panel = QWidget()
+        self.clip_waveform_action_layout = QGridLayout(self.clip_waveform_action_panel)
+        self.clip_waveform_action_layout.setContentsMargins(0, 0, 0, 0)
+        self.clip_waveform_action_layout.setHorizontalSpacing(6)
+        self.clip_waveform_action_layout.setVerticalSpacing(6)
+        clip_timing_layout.addWidget(self.clip_waveform_action_panel)
         clip_time_grid = QGridLayout()
         clip_time_grid.setContentsMargins(0, 0, 0, 0)
         clip_time_grid.setHorizontalSpacing(8)
@@ -1996,27 +2012,23 @@ class MainWindow(QMainWindow):
 
         clip_meta_card = QFrame()
         clip_meta_card.setObjectName("ModeIntroCard")
-        clip_meta_layout = QFormLayout(clip_meta_card)
-        clip_meta_layout.setContentsMargins(14, 12, 14, 12)
-        clip_meta_layout.setSpacing(8)
-        clip_meta_layout.addRow("源路径", self.clip_source_detail_edit)
-        clip_meta_layout.addRow("资源键", self.clip_asset_detail_edit)
-        clip_meta_layout.addRow("权重", self.clip_weight_row)
-        clip_meta_layout.addRow("标签", self.clip_tags_detail_edit)
+        self.clip_meta_layout = QFormLayout(clip_meta_card)
+        self.clip_meta_layout.setContentsMargins(14, 12, 14, 12)
+        self.clip_meta_layout.setSpacing(8)
+        self.clip_meta_layout.addRow("源路径", self.clip_source_detail_edit)
+        self.clip_meta_layout.addRow("资源键", self.clip_asset_detail_edit)
+        self.clip_meta_layout.addRow("权重", self.clip_weight_row)
+        self.clip_meta_layout.addRow("标签", self.clip_tags_detail_edit)
 
-        clip_action_row = QWidget()
-        clip_action_layout = QHBoxLayout(clip_action_row)
-        clip_action_layout.setContentsMargins(0, 0, 0, 0)
-        clip_action_layout.setSpacing(8)
-        clip_action_layout.addWidget(self.clip_preview_button)
-        clip_action_layout.addWidget(self.clip_preview_segment_button)
-        clip_action_layout.addWidget(self.clip_copy_asset_key_button)
-        clip_action_layout.addWidget(self.clip_locate_source_button)
-        clip_action_layout.addStretch(1)
+        self.clip_action_row = QWidget()
+        self.clip_action_layout = QGridLayout(self.clip_action_row)
+        self.clip_action_layout.setContentsMargins(0, 0, 0, 0)
+        self.clip_action_layout.setHorizontalSpacing(8)
+        self.clip_action_layout.setVerticalSpacing(8)
         clip_detail_layout.addWidget(clip_header_card)
         clip_detail_layout.addWidget(clip_timing_card)
         clip_detail_layout.addWidget(clip_meta_card)
-        clip_detail_layout.addWidget(clip_action_row)
+        clip_detail_layout.addWidget(self.clip_action_row)
         clip_detail_layout.addStretch(1)
 
         clip_tools_group = QGroupBox("批量编辑与排序")
@@ -2051,7 +2063,10 @@ class MainWindow(QMainWindow):
         self.content_top_splitter.setChildrenCollapsible(False)
         self.content_top_splitter.addWidget(clip_list_group)
         self.content_top_splitter.addWidget(clip_detail_group)
+        self.content_top_splitter.splitterMoved.connect(lambda *_args: self._schedule_layout_flush())
         self._set_content_top_splitter_sizes(self._default_content_top_splitter_sizes)
+        self._rebuild_clip_waveform_action_panel("wide")
+        self._rebuild_clip_detail_action_panel("wide")
 
         batch_page = self._build_two_column_page(
             [clip_tools_group],
@@ -4416,6 +4431,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda sizes=list(restored_main_sizes): self._restore_main_splitter_sizes_after_mode_switch(sizes))
         self._set_workspace_mode(mode)
         self._update_object_bus_status()
+        self._schedule_layout_flush()
 
     def _restore_main_splitter_sizes_after_mode_switch(self, sizes: list[int]) -> None:
         if self._explorer_detached or not self.isVisible():
@@ -4797,6 +4813,11 @@ class MainWindow(QMainWindow):
         if self._explorer_detached and not self.explorer_window.isVisible():
             QTimer.singleShot(0, self.show_detached_explorer)
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.isVisible():
+            self._schedule_layout_flush()
+
     def _schedule_layout_flush(self) -> None:
         if self._pending_layout_flush:
             return
@@ -4837,12 +4858,160 @@ class MainWindow(QMainWindow):
                 splitter = self.findChild(QSplitter, name)
                 if splitter is not None:
                     splitter.setSizes([int(value) for value in sizes])
+        self._apply_responsive_workspace_layouts()
         actual_workspace_sizes = self.workspace_splitter.sizes() if hasattr(self, "workspace_splitter") else []
         if len(actual_workspace_sizes) == 2:
             self._activity_panel_expanded = actual_workspace_sizes[1] > self._minimum_report_panel_height + 24
             if self._activity_panel_expanded:
                 self._last_expanded_report_panel_height = actual_workspace_sizes[1]
         self._apply_activity_panel_presentation()
+
+    def _apply_responsive_workspace_layouts(self) -> None:
+        self._apply_two_column_splitter_responsiveness()
+        self._apply_clip_editor_responsive_layout()
+
+    def _apply_two_column_splitter_responsiveness(self) -> None:
+        for splitter in self._responsive_two_column_splitters:
+            self._apply_responsive_two_column_splitter(splitter)
+
+    def _apply_responsive_two_column_splitter(self, splitter: QSplitter, *, available_width: int | None = None) -> None:
+        width = int(available_width or 0)
+        if width <= 0:
+            width = splitter.width()
+        if width <= 0 and splitter.parentWidget() is not None:
+            width = splitter.parentWidget().width()
+        if width <= 0:
+            sizes = splitter.sizes()
+            width = sum(sizes) if sizes else 0
+        if width <= 0:
+            return
+        breakpoint = int(splitter.property("responsiveBreakPoint") or self._two_column_compact_breakpoint)
+        desired_orientation = Qt.Orientation.Vertical if width < breakpoint else Qt.Orientation.Horizontal
+        splitter.setProperty("responsiveMode", "compact" if desired_orientation == Qt.Orientation.Vertical else "wide")
+        if splitter.orientation() == desired_orientation:
+            return
+        splitter.setOrientation(desired_orientation)
+        extent = splitter.height() if desired_orientation == Qt.Orientation.Vertical else width
+        if extent <= 0:
+            sizes = splitter.sizes()
+            extent = sum(sizes) if sizes else 0
+        if extent <= 0:
+            return
+        lead = int(extent * (0.56 if desired_orientation == Qt.Orientation.Vertical else 0.6))
+        lead = max(220, lead)
+        lead = min(lead, max(0, extent - 180))
+        splitter.setSizes([lead, max(0, extent - lead)])
+
+    def _apply_clip_editor_responsive_layout(self) -> None:
+        if not hasattr(self, "content_top_splitter") or not hasattr(self, "contents_tabs"):
+            return
+        resources_page = self._workspace_mode_pages.get("resources") if hasattr(self, "_workspace_mode_pages") else None
+        if resources_page is None or self.workspace_mode_stack.currentWidget() is not resources_page or self.contents_tabs.currentIndex() != 0:
+            return
+        sizes = self.content_top_splitter.sizes()
+        if len(sizes) != 2:
+            return
+        total_width = sum(sizes)
+        if total_width <= 0:
+            total_width = self.content_top_splitter.width()
+        if total_width <= 0:
+            return
+        target_sizes = self._responsive_content_top_splitter_sizes(total_width)
+        if target_sizes is not None and sizes[1] + 12 < target_sizes[1]:
+            self.content_top_splitter.setSizes(target_sizes)
+            sizes = self.content_top_splitter.sizes()
+        detail_width = sizes[1] if len(sizes) == 2 and sizes[1] > 0 else self.clip_detail_group.width()
+        self._apply_clip_editor_layout_mode(self._clip_detail_layout_mode_for_width(detail_width))
+
+    def _responsive_content_top_splitter_sizes(self, total_width: int) -> list[int] | None:
+        mode = self._content_top_layout_mode_for_width(total_width)
+        if mode == "wide":
+            return None
+        left_minimum = 320
+        desired_right = max(int(total_width * (0.44 if mode == "medium" else 0.5)), 430 if mode == "medium" else 460)
+        desired_right = min(desired_right, max(0, total_width - left_minimum))
+        if desired_right <= 0 or desired_right >= total_width:
+            return None
+        return [max(left_minimum, total_width - desired_right), desired_right]
+
+    def _content_top_layout_mode_for_width(self, total_width: int) -> str:
+        if total_width >= self._content_top_wide_breakpoint:
+            return "wide"
+        if total_width >= self._content_top_medium_breakpoint:
+            return "medium"
+        return "compact"
+
+    def _clip_detail_layout_mode_for_width(self, detail_width: int) -> str:
+        if detail_width >= self._clip_detail_wide_breakpoint:
+            return "wide"
+        if detail_width >= self._clip_detail_medium_breakpoint:
+            return "medium"
+        return "compact"
+
+    def _apply_clip_editor_layout_mode(self, mode: str) -> None:
+        if self._clip_editor_layout_mode == mode:
+            return
+        self._clip_editor_layout_mode = mode
+        self._rebuild_clip_waveform_action_panel(mode)
+        self._rebuild_clip_detail_action_panel(mode)
+        if mode == "wide":
+            self.clip_meta_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            self.clip_preview_hint_label.setMaximumHeight(40)
+        elif mode == "medium":
+            self.clip_meta_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+            self.clip_preview_hint_label.setMaximumHeight(52)
+        else:
+            self.clip_meta_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+            self.clip_preview_hint_label.setMaximumHeight(72)
+        self.clip_waveform_action_panel.setProperty("layoutMode", mode)
+        self.clip_action_row.setProperty("layoutMode", mode)
+        self.clip_waveform_action_panel.updateGeometry()
+        self.clip_action_row.updateGeometry()
+
+    def _detach_widgets_from_layout(self, layout, widgets: list[QWidget]) -> None:
+        for widget in widgets:
+            layout.removeWidget(widget)
+
+    def _rebuild_clip_waveform_action_panel(self, mode: str) -> None:
+        self._detach_widgets_from_layout(
+            self.clip_waveform_action_layout,
+            [self.clip_playhead_label, *self._clip_waveform_action_buttons],
+        )
+        if mode == "wide":
+            self.clip_waveform_action_layout.addWidget(self.clip_playhead_label, 0, 0)
+            for index, button in enumerate(self._clip_waveform_action_buttons, start=1):
+                self.clip_waveform_action_layout.addWidget(button, 0, index)
+            return
+        if mode == "medium":
+            self.clip_waveform_action_layout.addWidget(self.clip_playhead_label, 0, 0, 1, 4)
+            for index, button in enumerate(self._clip_waveform_action_buttons[:4]):
+                self.clip_waveform_action_layout.addWidget(button, 1, index)
+            for index, button in enumerate(self._clip_waveform_action_buttons[4:]):
+                self.clip_waveform_action_layout.addWidget(button, 2, index)
+            return
+        self.clip_waveform_action_layout.addWidget(self.clip_playhead_label, 0, 0, 1, 2)
+        compact_rows = [
+            self._clip_waveform_action_buttons[0:2],
+            self._clip_waveform_action_buttons[2:4],
+            self._clip_waveform_action_buttons[4:6],
+            self._clip_waveform_action_buttons[6:8],
+        ]
+        for row_index, row_buttons in enumerate(compact_rows, start=1):
+            for column_index, button in enumerate(row_buttons):
+                self.clip_waveform_action_layout.addWidget(button, row_index, column_index)
+
+    def _rebuild_clip_detail_action_panel(self, mode: str) -> None:
+        self._detach_widgets_from_layout(self.clip_action_layout, self._clip_detail_action_buttons)
+        if mode == "wide":
+            for index, button in enumerate(self._clip_detail_action_buttons):
+                self.clip_action_layout.addWidget(button, 0, index)
+            return
+        top_row = self._clip_detail_action_buttons[:2]
+        bottom_row = self._clip_detail_action_buttons[2:]
+        for index, button in enumerate(top_row):
+            self.clip_action_layout.addWidget(button, 0, index)
+        for index, button in enumerate(bottom_row):
+            self.clip_action_layout.addWidget(button, 1, index)
 
     def _normalize_workspace_splitter_sizes(self, sizes: list[int]) -> list[int]:
         normalized = [int(value) for value in sizes]
@@ -6644,6 +6813,7 @@ class MainWindow(QMainWindow):
         right_widgets: list[QWidget],
         *,
         splitter_name: str | None = None,
+        compact_breakpoint: int | None = None,
     ) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -6669,6 +6839,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_container)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
+        splitter.setProperty("responsiveBreakPoint", compact_breakpoint or self._two_column_compact_breakpoint)
+        splitter.splitterMoved.connect(lambda *_args: self._schedule_layout_flush())
+        self._responsive_two_column_splitters.append(splitter)
         layout.addWidget(splitter)
         return page
 
@@ -8689,6 +8862,11 @@ class MainWindow(QMainWindow):
         self.current_bus_detail_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.gamesync_workspace_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
         self.contents_tabs.currentChanged.connect(lambda _index: self._update_workspace_summary_labels())
+        self.events_workspace_tabs.currentChanged.connect(lambda _index: self._schedule_layout_flush())
+        self.buses_workspace_tabs.currentChanged.connect(lambda _index: self._schedule_layout_flush())
+        self.current_bus_detail_tabs.currentChanged.connect(lambda _index: self._schedule_layout_flush())
+        self.gamesync_workspace_tabs.currentChanged.connect(lambda _index: self._schedule_layout_flush())
+        self.contents_tabs.currentChanged.connect(lambda _index: self._schedule_layout_flush())
         self.clear_meter_button.clicked.connect(self.clear_peak_hold)
         self.loudness_scan_button.clicked.connect(self.loudnessScanRequested.emit)
         self.clip_preview_button.clicked.connect(self._request_selected_clip_preview)
