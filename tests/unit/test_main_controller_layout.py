@@ -849,6 +849,20 @@ def test_resources_batch_feedback_persists_after_bulk_weight(monkeypatch) -> Non
     controller.window.close()
 
 
+def test_resources_workspace_prioritizes_editor_space_over_top_feedback_card(monkeypatch) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    resources_workspace = controller.window.resources_workspace
+    workspace_layout = resources_workspace.layout()
+
+    assert workspace_layout.count() == 2
+    assert workspace_layout.itemAt(1).widget() is controller.window.contents_tabs
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_command_palette_and_global_search_aliases_cover_bus_workspace_and_batch_feedback(monkeypatch) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 

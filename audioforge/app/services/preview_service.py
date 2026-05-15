@@ -441,7 +441,8 @@ class PreviewService:
             return ""
         if group.use_game_parameter and group.mapped_game_parameter and group.switches:
             parameter = self._find_game_parameter(group.mapped_game_parameter, game_parameters)
-            parameter_value = self._resolve_game_parameter_value(group.mapped_game_parameter, "Emitter", game_parameters, preview_gamesync)
+            parameter_scope = "Emitter" if group.mapped_game_parameter in preview_gamesync.emitter_game_parameters else "Global"
+            parameter_value = self._resolve_game_parameter_value(group.mapped_game_parameter, parameter_scope, game_parameters, preview_gamesync)
             for minimum, maximum, switch_name in self._switch_thresholds(group, parameter):
                 if parameter_value >= minimum and parameter_value <= maximum:
                     return switch_name

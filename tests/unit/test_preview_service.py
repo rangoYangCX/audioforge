@@ -137,3 +137,42 @@ def test_preview_service_applies_gamesync_rtpc_state_and_mapped_switch(tmp_path)
     assert result.asset_key == "footstep/stone"
     assert result.volume_db == 7.0
     assert result.pitch_cents == 140
+
+
+def test_preview_service_mapped_switch_falls_back_to_global_parameter(tmp_path) -> None:
+    default_path = write_wav_fixture(tmp_path / "fixtures" / "surface_default_global.wav", frequency_hz=440.0)
+    stone_path = write_wav_fixture(tmp_path / "fixtures" / "surface_stone_global.wav", frequency_hz=660.0)
+    default_clip = ClipModel.from_path(default_path, "footstep/default_global")
+    stone_clip = ClipModel.from_path(stone_path, "footstep/stone_global")
+    stone_clip.active = False
+    event = EventModel(
+        id="FootstepGlobal",
+        display_name="Footstep Global",
+        bus="SFX",
+        play_mode="OneShot",
+        clips=[default_clip, stone_clip],
+        switch_variants=[
+            SwitchVariantModel(group_name="FootstepSurface", switch_name="Stone", clip_ids=[stone_clip.id])
+        ],
+    )
+
+    result = PreviewService(seed=7).preview_event(
+        event,
+        preview_gamesync=PreviewGameSyncContext(
+            global_game_parameters={"PlayerSpeed": 10.0},
+        ),
+        game_parameters=[GameParameterModel(name="PlayerSpeed", default_value=0.0, min_value=0.0, max_value=10.0)],
+        switch_groups=[
+            SwitchGroupModel(
+                name="FootstepSurface",
+                switches=["Grass", "Stone"],
+                default_switch="Grass",
+                use_game_parameter=True,
+                mapped_game_parameter="PlayerSpeed",
+            )
+        ],
+    )
+
+    assert result.accepted is True
+    assert result.clip_id == stone_clip.id
+    assert result.asset_key == "footstep/stone_global"
