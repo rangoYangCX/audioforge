@@ -3976,7 +3976,7 @@ class MainWindow(QMainWindow):
 
         body_layout.addLayout(header_row)
 
-        # Audition center host – only contains gamesync controls
+        # Audition center host – contains gamesync controls
         self.activity_preview_host = QWidget()
         self.activity_preview_host.setObjectName("ActivityPreviewHost")
         self.activity_preview_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -3985,6 +3985,38 @@ class MainWindow(QMainWindow):
         activity_preview_layout.setSpacing(8)
         activity_preview_layout.addWidget(self.preview_gamesync_group, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         body_layout.addWidget(self.activity_preview_host)
+
+        # Waveform strip visible across all workspaces
+        self.activity_waveform_strip = ClipWaveformEditor()
+        self.activity_waveform_strip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.activity_waveform_strip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.activity_waveform_strip.setMinimumHeight(32)
+        self.activity_waveform_strip.setMaximumHeight(32)
+        self.activity_waveform_strip.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.activity_waveform_strip.setToolTip("最近一次试听的波形概览。")
+        self.activity_waveform_strip.clear()
+        body_layout.addWidget(self.activity_waveform_strip)
+
+        # Collapsible bus controls
+        self.activity_bus_frame = QFrame()
+        self.activity_bus_frame.setObjectName("ActivityBusFrame")
+        self.activity_bus_frame.setVisible(False)
+        bus_frame_layout = QHBoxLayout(self.activity_bus_frame)
+        bus_frame_layout.setContentsMargins(0, 4, 0, 0)
+        bus_frame_layout.setSpacing(8)
+        self.activity_bus_toggle = QPushButton("Bus")
+        self.activity_bus_toggle.setCheckable(True)
+        self.activity_bus_toggle.setProperty("role", "activityCompactButton")
+        self.activity_bus_toggle.toggled.connect(self.activity_bus_frame.setVisible)
+        bus_frame_layout.addWidget(self.activity_bus_toggle)
+        bus_frame_layout.addWidget(QLabel(WWISE_TARGET_BUS_LABEL))
+        bus_frame_layout.addWidget(self.preview_bus_combo)
+        bus_frame_layout.addWidget(QLabel("音量"))
+        bus_frame_layout.addWidget(self.preview_bus_volume_spin)
+        bus_frame_layout.addWidget(self.preview_bus_mute_check)
+        bus_frame_layout.addWidget(self.preview_bus_effective_label)
+        bus_frame_layout.addStretch(1)
+        body_layout.addWidget(self.activity_bus_frame)
 
         layout.addWidget(body)
         self.log_panel = panel
@@ -4059,11 +4091,11 @@ class MainWindow(QMainWindow):
         intro_label.setWordWrap(True)
 
         preview_bus_group = QGroupBox(WWISE_TRANSPORT_TITLE)
-        preview_bus_layout = QFormLayout(preview_bus_group)
-        preview_bus_layout.addRow(WWISE_TARGET_BUS_LABEL, self.preview_bus_combo)
-        preview_bus_layout.addRow("预览音量", self.preview_bus_volume_spin)
-        preview_bus_layout.addRow("静音", self.preview_bus_mute_check)
-        preview_bus_layout.addRow(WWISE_EFFECTIVE_OUTPUT_LABEL, self.preview_bus_effective_label)
+        preview_bus_layout = QVBoxLayout(preview_bus_group)
+        preview_bus_hint = QLabel("试听 Bus 调节已移至底部试听中心。")
+        preview_bus_hint.setWordWrap(True)
+        preview_bus_hint.setProperty("role", "workspaceSectionSummary")
+        preview_bus_layout.addWidget(preview_bus_hint)
 
         import_template_group = QGroupBox("导入模板默认值")
         import_template_layout = QFormLayout(import_template_group)
@@ -6291,6 +6323,9 @@ class MainWindow(QMainWindow):
     def clear_recent_preview_insight(self) -> None:
         self.preview_waveform_strip.clear()
         self.preview_waveform_strip.setToolTip("最近一次试听的波形概览。")
+        if hasattr(self, "activity_waveform_strip"):
+            self.activity_waveform_strip.clear()
+            self.activity_waveform_strip.setToolTip("最近一次试听的波形概览。")
         self.preview_inline_momentary_max_value.setText("-Inf")
 
     def set_recent_preview_source(self, source_path: str, clip_id: str, asset_key: str) -> None:
@@ -6299,6 +6334,9 @@ class MainWindow(QMainWindow):
             return
         self.preview_waveform_strip.set_clip(source_path)
         self.preview_waveform_strip.setToolTip(f"片段 {clip_id} | 资源 {asset_key}")
+        if hasattr(self, "activity_waveform_strip"):
+            self.activity_waveform_strip.set_clip(source_path)
+            self.activity_waveform_strip.setToolTip(f"片段 {clip_id} | 资源 {asset_key}")
 
     def _preview_transport_auto_expanded(self) -> bool:
         return self._preview_transport_state in {"playing", "paused"}
