@@ -73,6 +73,7 @@ class PreviewResult:
     stolen_oldest: bool = False
     playback_duration_seconds: float = 0.0
     is_muted: bool = False
+    trace_id: str = ""
 
 
 @dataclass(slots=True)
@@ -95,14 +96,52 @@ class PreviewGameSyncResolutionSnapshot:
     summary: str = "当前没有额外的 GameSync 覆盖。"
 
 
+@dataclass(slots=True)
+class PlaybackTraceStep:
+    step_number: int = 0
+    step_name: str = ""
+    decision: str = ""
+    detail: str = ""
+    context: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PlaybackTrace:
+    trace_id: str = ""
+    event_id: str = ""
+    trigger_time: float = 0.0
+    steps: list[PlaybackTraceStep] = field(default_factory=list)
+    outcome: str = ""
+    outcome_reason: str = ""
+    resolved_volume_db: float = 0.0
+    resolved_pitch_cents: int = 0
+    selected_clip_id: str = ""
+    selected_asset_key: str = ""
+    elapsed_ms: float = 0.0
+
+    def add_step(self, step: PlaybackTraceStep) -> None:
+        self.steps.append(step)
+
+
 class PreviewService:
     def __init__(self, seed: int | None = None, preview_hold_seconds: float = 0.25) -> None:
         self._rng = random.Random(seed)
         self._preview_hold_seconds = preview_hold_seconds
         self._states: dict[str, PreviewEventState] = {}
+        self._trace_buffer: dict[str, PlaybackTrace] = {}
+        self._trace_counter: int = 0
 
     def clear(self) -> None:
         self._states.clear()
+
+    def clear_traces(self) -> None:
+        self._trace_buffer.clear()
+
+    def get_trace(self, trace_id: str) -> PlaybackTrace | None:
+        return self._trace_buffer.get(trace_id)
+
+    def recent_traces(self, count: int = 10) -> list[PlaybackTrace]:
+        return sorted(self._trace_buffer.values(), key=lambda t: t.trigger_time, reverse=True)[:count]
 
     def stop_event(self, event_id: str) -> None:
         state = self._states.get(event_id)
@@ -125,31 +164,57 @@ class PreviewService:
         switch_groups: list[SwitchGroupModel] | None = None,
     ) -> PreviewResult:
         trigger_time = time.monotonic() if now is None else now
+        start_time = time.monotonic()
+        self._trace_counter += 1
+        trace_id = f"tr_{self._trace_counter}"
+        trace = PlaybackTrace(trace_id=trace_id, event_id=event.id, trigger_time=trigger_time)
+
         state = self._states.setdefault(event.id, PreviewEventState())
         self._cleanup_expired(state, trigger_time)
         stolen_oldest = False
         preview_context = preview_gamesync or PreviewGameSyncContext()
         runtime_clips = self._resolve_event_candidate_clips(event, preview_context, game_parameters or [], switch_groups or [])
+        trace.add_step(PlaybackTraceStep(step_number=1, step_name="EVENT_TRIGGER", decision="PASS",
+            detail=f"Event {event.id} triggered.", context={"event_id": event.id, "play_mode": event.play_mode}))
 
         if not runtime_clips:
-            return PreviewResult(accepted=False, reason="No clips configured.")
+            trace.outcome = "rejected"
+            trace.outcome_reason = "No clips configured."
+            trace.add_step(PlaybackTraceStep(step_number=2, step_name="CLIPS_CHECK", decision="BLOCKED",
+                detail="No available clips.", context={}))
+            self._trace_buffer[trace_id] = trace
+            return PreviewResult(accepted=False, reason=trace.outcome_reason, trace_id=trace_id)
 
         if event.cooldown_seconds > 0 and state.last_trigger_time is not None:
-            if trigger_time - state.last_trigger_time < event.cooldown_seconds:
+            elapsed = trigger_time - state.last_trigger_time
+            trace.add_step(PlaybackTraceStep(step_number=2, step_name="COOLDOWN_CHECK", decision="BLOCKED" if elapsed < event.cooldown_seconds else "PASS",
+                detail=f"Elapsed={elapsed:.2f}s, cooldown={event.cooldown_seconds}s", context={"elapsed_s": round(elapsed, 2), "cooldown_s": event.cooldown_seconds}))
+            if elapsed < event.cooldown_seconds:
+                trace.outcome = "rejected"
+                trace.outcome_reason = "Blocked by cooldown."
+                self._trace_buffer[trace_id] = trace
                 return PreviewResult(
                     accepted=False,
-                    reason="Blocked by cooldown.",
+                    reason=trace.outcome_reason,
                     active_instances=len(state.active_until_times),
                     combo_step=state.combo_step,
+                    trace_id=trace_id,
                 )
 
         if event.max_instances > 0 and len(state.active_until_times) >= event.max_instances:
+            trace.add_step(PlaybackTraceStep(step_number=3, step_name="INSTANCE_CHECK", decision=event.steal_policy,
+                detail=f"Active={len(state.active_until_times)}, max={event.max_instances}, policy={event.steal_policy}",
+                context={"active_instances": len(state.active_until_times), "max_instances": event.max_instances}))
             if event.steal_policy == "RejectNew":
+                trace.outcome = "rejected"
+                trace.outcome_reason = "Blocked by max instances."
+                self._trace_buffer[trace_id] = trace
                 return PreviewResult(
                     accepted=False,
-                    reason="Blocked by max instances.",
+                    reason=trace.outcome_reason,
                     active_instances=len(state.active_until_times),
                     combo_step=state.combo_step,
+                    trace_id=trace_id,
                 )
             state.active_until_times.sort()
             state.active_until_times.pop(0)
@@ -168,28 +233,57 @@ class PreviewService:
             state_groups=state_groups or [],
             switch_groups=switch_groups or [],
         )
+        trace.add_step(PlaybackTraceStep(step_number=4, step_name="MIX_COMPUTE", decision="APPLIED",
+            detail=f"Volume={volume_db:.2f}dB, pitch={pitch_cents}c, muted={is_muted}",
+            context={"volume_db": round(volume_db, 2), "pitch_cents": pitch_cents, "is_muted": is_muted}))
         if is_muted:
+            trace.outcome = "muted"
+            trace.outcome_reason = "Muted by state override."
+            trace.add_step(PlaybackTraceStep(step_number=5, step_name="FINAL_OUTCOME", decision="BLOCKED",
+                detail="Muted by state override.", context={}))
+            self._trace_buffer[trace_id] = trace
             return PreviewResult(
                 accepted=False,
-                reason="Muted by state override.",
+                reason=trace.outcome_reason,
                 volume_db=volume_db,
                 pitch_cents=pitch_cents,
                 combo_step=state.combo_step,
                 active_instances=len(state.active_until_times),
                 is_muted=True,
+                trace_id=trace_id,
             )
 
         clip = self._select_clip(event, state, runtime_clips)
         if clip is None:
-            return PreviewResult(accepted=False, reason="No clip was selected.")
+            trace.outcome = "rejected"
+            trace.outcome_reason = "No clip was selected."
+            trace.add_step(PlaybackTraceStep(step_number=5, step_name="CLIP_SELECT", decision="BLOCKED",
+                detail="No clip was selected from active clips.", context={}))
+            self._trace_buffer[trace_id] = trace
+            return PreviewResult(accepted=False, reason=trace.outcome_reason, trace_id=trace_id)
         clip_source_path = str(clip.source_path or "").strip()
         if not clip_source_path:
-            return PreviewResult(accepted=False, reason=f"Clip source file is missing: {clip.id}")
+            trace.outcome = "rejected"
+            trace.outcome_reason = f"Clip source file is missing: {clip.id}"
+            trace.add_step(PlaybackTraceStep(step_number=6, step_name="SOURCE_CHECK", decision="BLOCKED",
+                detail=f"Source path is empty for clip {clip.id}", context={"clip_id": clip.id}))
+            self._trace_buffer[trace_id] = trace
+            return PreviewResult(accepted=False, reason=trace.outcome_reason, trace_id=trace_id)
         try:
             if not Path(clip_source_path).exists():
-                return PreviewResult(accepted=False, reason=f"Clip source file not found: {clip_source_path}")
+                trace.outcome = "rejected"
+                trace.outcome_reason = f"Clip source file not found: {clip_source_path}"
+                trace.add_step(PlaybackTraceStep(step_number=6, step_name="SOURCE_CHECK", decision="BLOCKED",
+                    detail=f"Source file not found: {clip_source_path}", context={"clip_id": clip.id, "source_path": clip_source_path}))
+                self._trace_buffer[trace_id] = trace
+                return PreviewResult(accepted=False, reason=trace.outcome_reason, trace_id=trace_id)
         except OSError:
-            return PreviewResult(accepted=False, reason=f"Clip source path is invalid: {clip_source_path}")
+            trace.outcome = "rejected"
+            trace.outcome_reason = f"Clip source path is invalid: {clip_source_path}"
+            trace.add_step(PlaybackTraceStep(step_number=6, step_name="SOURCE_CHECK", decision="BLOCKED",
+                detail=f"Source path is invalid: {clip_source_path}", context={"clip_id": clip.id, "source_path": clip_source_path}))
+            self._trace_buffer[trace_id] = trace
+            return PreviewResult(accepted=False, reason=trace.outcome_reason, trace_id=trace_id)
 
         combo_step = self._resolve_combo_step(event, state, trigger_time)
         combo_pitch_cents = 0
@@ -206,6 +300,22 @@ class PreviewService:
         state.last_trigger_time = trigger_time
         state.active_until_times.append(trigger_time + playback_duration_seconds)
 
+        trace.add_step(PlaybackTraceStep(step_number=5, step_name="CLIP_SELECT", decision="APPLIED",
+            detail=f"Selected clip={clip.id}, mode={audio.play_mode}, combo={combo_step}",
+            context={"clip_id": clip.id, "play_mode": audio.play_mode, "combo_step": combo_step}))
+        trace.outcome = "played"
+        trace.outcome_reason = "Preview simulated."
+        trace.resolved_volume_db = volume_db
+        trace.resolved_pitch_cents = pitch_cents
+        trace.selected_clip_id = clip.id
+        trace.selected_asset_key = clip.asset_key
+        trace.elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
+        trace.add_step(PlaybackTraceStep(step_number=6, step_name="FINAL_OUTCOME", decision="PLAYED",
+            detail=f"Playback via {audio.play_mode}, duration={playback_duration_seconds:.2f}s",
+            context={"play_mode": audio.play_mode, "duration_s": round(playback_duration_seconds, 2),
+                     "bus": audio.bus, "source_path": clip.source_path}))
+        self._trace_buffer[trace_id] = trace
+
         return PreviewResult(
             accepted=True,
             reason="Preview simulated.",
@@ -219,6 +329,7 @@ class PreviewService:
             stolen_oldest=stolen_oldest,
             playback_duration_seconds=playback_duration_seconds,
             is_muted=False,
+            trace_id=trace_id,
         )
 
     def resolve_mix_adjustment(

@@ -7040,8 +7040,12 @@ class MainWindow(QMainWindow):
         self.bulk_weight_button.setEnabled(bool(event.clips))
         self.batch_rename_button.setEnabled(bool(event.clips))
 
-    def append_log(self, message: str) -> None:
-        self.log_output.appendPlainText(message)
+    def append_log(self, message: str, *, level: str = "INFO", context: dict[str, object] | None = None) -> None:
+        """Append a structured log entry. level: FATAL/ERROR/WARNING/INFO/DEBUG."""
+        prefix_map = {"FATAL": "🔴 ", "ERROR": "🔴 ", "WARNING": "🟡 ", "DEBUG": ""}
+        prefix = prefix_map.get(level, "")
+        formatted = f"{prefix}{message}"
+        self.log_output.appendPlainText(formatted)
         self._latest_log_message = message.strip()
         self.report_detail_label.setText(f"最近日志：{message[:80]}")
         self.report_detail_label.setToolTip(message)

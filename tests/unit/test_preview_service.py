@@ -214,3 +214,28 @@ def test_preview_resolution_snapshot_reports_mapped_switch_parameter_source() ->
     assert snapshot.switch_mode == "Mapped"
     assert snapshot.switch_value == "Stone"
     assert snapshot.switch_parameter_source == "Global"
+
+
+def test_preview_service_generates_playback_trace(tmp_path) -> None:
+    wav_path = write_wav_fixture(tmp_path / "fixtures" / "trace_test.wav", frequency_hz=440.0)
+    event = EventModel(
+        id="TraceTest", display_name="Trace Test", bus="SFX", play_mode="OneShot",
+        clips=[ClipModel.from_path(wav_path, "trace/test")],
+    )
+    service = PreviewService(seed=7)
+    result = service.preview_event(event)
+
+    assert result.trace_id.startswith("tr_")
+    trace = service.get_trace(result.trace_id)
+    assert trace is not None
+    assert trace.outcome in ("played", "rejected")
+    assert len(trace.steps) >= 2
+    assert trace.steps[0].step_name == "EVENT_TRIGGER"
+
+    # Verify recent_traces returns it
+    recent = service.recent_traces(count=10)
+    assert any(t.trace_id == trace.trace_id for t in recent)
+
+    # Verify clear_traces works
+    service.clear_traces()
+    assert service.get_trace(result.trace_id) is None
