@@ -14,6 +14,20 @@ PROJECT_SOURCES_DIRNAME = "Sources"
 
 
 class ProjectSerializer:
+    @classmethod
+    def copy_project_bundle(cls, source_file_path: Path, target_file_path: Path) -> None:
+        source_file_path = source_file_path.resolve()
+        target_file_path = target_file_path.resolve()
+
+        if not source_file_path.exists():
+            raise FileNotFoundError(f"找不到工程文件：{source_file_path}")
+        if not source_file_path.is_file():
+            raise IsADirectoryError(f"选择的路径不是工程文件：{source_file_path}")
+
+        serializer = cls()
+        project = serializer.load(source_file_path)
+        serializer.save(project, target_file_path)
+
     def save(self, project: AudioProject, file_path: Path) -> None:
         file_path = file_path.resolve()
         staged_project = copy.deepcopy(project)
@@ -35,6 +49,8 @@ class ProjectSerializer:
 
     def load(self, file_path: Path) -> AudioProject:
         file_path = file_path.resolve()
+        if not file_path.is_file():
+            raise IsADirectoryError(f"选择的路径不是工程文件：{file_path}")
         payload = json.loads(file_path.read_text(encoding="utf-8"))
         project = project_from_dict(payload, file_path=str(file_path))
         self._resolve_loaded_project_sources(project, file_path)
@@ -146,9 +162,10 @@ class ProjectSerializer:
         return str(source_path)
 
     def _resolve_source_path(self, source_path: str, base_dir: Path) -> str:
-        candidate = Path(str(source_path).strip())
-        if not str(candidate):
+        normalized = str(source_path).strip()
+        if not normalized:
             return ""
+        candidate = Path(normalized)
         if candidate.is_absolute():
             return str(candidate)
         return str((base_dir / candidate).resolve(strict=False))
@@ -165,6 +182,10 @@ class ProjectSerializer:
         return sanitized.strip("._") or "root"
 
     def _project_root_dir(self, file_path: Path) -> Path:
+        return self._project_root_dir_static(file_path)
+
+    @staticmethod
+    def _project_root_dir_static(file_path: Path) -> Path:
         return file_path.with_suffix("")
 
     def _is_relative_to(self, path: Path, base_dir: Path) -> bool:

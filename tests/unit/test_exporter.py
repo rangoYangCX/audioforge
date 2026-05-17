@@ -350,5 +350,49 @@ def test_audio_processor_copies_same_format_without_reencoding(monkeypatch: pyte
     assert destination_path.read_bytes() == source_bytes
 
 
+def test_runtime_exporter_preserves_experiment_delta_directories_on_commit(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    export_root = tmp_path / "Export"
+    delta_dir = export_root / "task_44b42150_variant_747bcd1b"
+    delta_dir.mkdir(parents=True, exist_ok=True)
+    delta_file = delta_dir / "ExperimentDelta_task_44b42150_variant_747bcd1b.json"
+    delta_file.write_text('{"ExportType":"ExperimentDelta"}', encoding="utf-8")
+    issues = ProjectValidator().validate(project)
+
+    RuntimeExporter().export(project, export_root, issues)
+
+    assert delta_file.exists()
+    assert delta_file.read_text(encoding="utf-8") == '{"ExportType":"ExperimentDelta"}'
+
+
+def test_runtime_exporter_selection_report_includes_selected_event_ids(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+
+    result = RuntimeExporter().export(
+        project,
+        export_root,
+        issues,
+        request=ExportRequest(scope="selection", selected_event_ids=("UiClick",), selection_label="事件 UiClick"),
+    )
+
+    report = json.loads(result.report_file.read_text(encoding="utf-8"))
+
+    assert report["BuildPlan"]["SelectedEventIds"] == ["UiClick"]
+    assert report["BuildPlan"]["SelectionLabel"] == "事件 UiClick"
+
+
+def test_runtime_exporter_rejects_projects_with_validation_errors(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path, runtime_audio_format="wav")
+    project.events["UiClick"].clips[0].source_path = ""
+    project.touch()
+    export_root = tmp_path / "Export"
+    issues = ProjectValidator().validate(project)
+
+    with pytest.raises(ValueError, match="validation errors"):
+        RuntimeExporter().export(project, export_root, issues)
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()

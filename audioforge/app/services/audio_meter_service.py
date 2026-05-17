@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -15,32 +14,8 @@ except Exception:  # pragma: no cover - optional runtime dependency fallback
     resample_poly = None
     sf = None
 
+from audioforge.app.models.audio_meter_dto import AudioMeterSnapshot, LoudnessReading
 from audioforge.app.services.preview_audio_renderer import PreviewAudioRenderer
-
-
-@dataclass(slots=True)
-class LoudnessReading:
-    short_term_lufs: float = float("-inf")
-    short_term_max_lufs: float = float("-inf")
-    integrated_lufs: float = float("-inf")
-    momentary_lufs: float = float("-inf")
-    momentary_max_lufs: float = float("-inf")
-    loudness_range_lu: float = 0.0
-    true_peak_db: float = float("-inf")
-    left_peak_db: float = float("-inf")
-    right_peak_db: float = float("-inf")
-    left_rms_db: float = float("-inf")
-    right_rms_db: float = float("-inf")
-    short_term_history: list[float] | None = None
-    momentary_history: list[float] | None = None
-
-
-@dataclass(slots=True)
-class AudioMeterSnapshot:
-    available: bool
-    reason: str = ""
-    source: LoudnessReading | None = None
-    processed: LoudnessReading | None = None
 
 
 class AudioMeterService:

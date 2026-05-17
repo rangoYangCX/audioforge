@@ -280,6 +280,7 @@ class SourceTreeWidget(QTreeWidget):
         audio_ids = sorted({str(value) for value in entry.get("audio_ids", []) if str(value).strip()})
         event_ids = sorted({str(value) for value in entry.get("event_ids", []) if str(value).strip()})
         asset_keys = sorted({str(value) for value in entry.get("asset_keys", []) if str(value).strip()})
+        origin_label = str(entry.get("origin_label", "")).strip()
         return {
             "source_path": source_path,
             "audio_ids": audio_ids,
@@ -288,6 +289,7 @@ class SourceTreeWidget(QTreeWidget):
             "reference_count": int(entry.get("reference_count", len(audio_ids) or 0)),
             "missing": bool(entry.get("missing", False)),
             "unreferenced": bool(entry.get("unreferenced", False)),
+            "origin_label": origin_label,
         }
 
     def _resolve_common_root(self, paths: list[Path]) -> Path | None:
@@ -331,6 +333,9 @@ class SourceTreeWidget(QTreeWidget):
             fragments.append("缺失")
         elif bool(entry.get("unreferenced", False)):
             fragments.append("未引用")
+        origin_label = str(entry.get("origin_label", "")).strip()
+        if origin_label:
+            fragments.append(origin_label)
         return " | ".join(fragments)
 
     def _entry_tooltip(self, entry: dict[str, object]) -> str:
@@ -343,6 +348,9 @@ class SourceTreeWidget(QTreeWidget):
             state_fragments.append("文件缺失")
         if bool(entry.get("unreferenced", False)):
             state_fragments.append("当前未被 Audio 引用")
+        origin_label = str(entry.get("origin_label", "")).strip()
+        if origin_label:
+            state_fragments.append(f"归属 {origin_label}")
         state_text = "、".join(state_fragments) if state_fragments else "状态正常"
         audio_preview = ", ".join(audio_ids[:6]) if audio_ids else "-"
         event_preview = ", ".join(event_ids[:6]) if event_ids else "-"
@@ -362,6 +370,7 @@ class SourceTreeWidget(QTreeWidget):
             haystacks.extend(str(value).lower() for value in entry.get("audio_ids", []))
             haystacks.extend(str(value).lower() for value in entry.get("event_ids", []))
             haystacks.extend(str(value).lower() for value in entry.get("asset_keys", []))
+            haystacks.append(str(entry.get("origin_label", "")).lower())
         self_match = not query or any(query in haystack for haystack in haystacks)
         visible = self_match or child_visible
         item.setHidden(not visible)

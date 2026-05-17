@@ -21,6 +21,20 @@ dev = [
     "pytest>=8.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+addopts = "-ra --strict-markers"
+markers = [
+    "fast: quick unit tests without GUI or release-chain coverage",
+    "gui: PySide6 / MainController / widget interaction tests",
+    "integration: cross-module authoring or export flow tests",
+    "release: release-chain, harness, documentation baseline tests",
+    "slow: longer-running suites that should not be the default local loop",
+]
+
+[project.scripts]
+audioforge-harness = "audioforge.harness.cli:main"
+
 [tool.setuptools]
 package-dir = {"" = "."}
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem
 
 from audioforge.app.utils.icons import load_app_icon, load_event_icon
@@ -80,15 +80,23 @@ class AudioTreeWidget(QTreeWidget):
             play_mode = str(entry.get("play_mode", "")).strip() or "-"
             clip_count = int(entry.get("clip_count", 0))
             event_count = int(entry.get("event_count", 0))
-            item = QTreeWidgetItem([display_name, play_mode, f"片段 {clip_count} / Event {event_count}"])
+            origin_label = str(entry.get("origin_label", "")).strip()
+            content_text = f"片段 {clip_count} / Event {event_count}"
+            if origin_label:
+                content_text += f" / {origin_label}"
+            item = QTreeWidgetItem([display_name, play_mode, content_text])
             item.setData(0, Qt.ItemDataRole.UserRole, audio_id)
             item.setToolTip(0, audio_id)
-            item.setToolTip(2, "、".join(str(value) for value in entry.get("event_ids", []) if str(value).strip()) or "当前没有引用 Event")
+            tooltip_text = "、".join(str(value) for value in entry.get("event_ids", []) if str(value).strip()) or "当前没有引用 Event"
+            if origin_label:
+                tooltip_text = f"{tooltip_text}\n归属：{origin_label}"
+            item.setToolTip(2, tooltip_text)
             icon_name = "audio"
             if play_mode in {"OneShot", "Random", "Sequence", "Combo"}:
                 item.setIcon(0, load_event_icon(play_mode))
             else:
                 item.setIcon(0, load_app_icon(icon_name))
+            self._apply_origin_highlight(item, origin_label)
             self.addTopLevelItem(item)
         if current_audio_id:
             for index in range(self.topLevelItemCount()):
@@ -180,6 +188,18 @@ class AudioTreeWidget(QTreeWidget):
         audio_id = self.current_audio_id()
         if audio_id:
             self.audioSelected.emit(audio_id)
+
+    def _apply_origin_highlight(self, item: QTreeWidgetItem, origin_label: str) -> None:
+        colors = {
+            "实验新增": QColor(34, 139, 34),
+            "实验修改": QColor(214, 121, 32),
+            "底板继承": QColor(130, 130, 130),
+        }
+        color = colors.get(origin_label)
+        if color is None:
+            return
+        for column in range(self.columnCount()):
+            item.setForeground(column, color)
 
     def _emit_activated_audio(self, item: QTreeWidgetItem, _column: int) -> None:
         audio_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "").strip()

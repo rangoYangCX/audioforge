@@ -211,3 +211,17 @@ def test_validator_reports_events_with_no_enabled_clips(tmp_path: Path) -> None:
     codes = {issue.code for issue in issues}
 
     assert "EVENT_NO_ENABLED_CLIPS" in codes
+
+
+def test_validator_reports_enabled_clip_with_empty_source_path(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path)
+    event = project.events["UiClick"]
+    event.clips[0].source_path = ""
+    project.touch()
+
+    issues = ProjectValidator().validate(project)
+    matching = [issue for issue in issues if issue.code == "CLIP_SOURCE_EMPTY"]
+
+    assert len(matching) == 1
+    assert matching[0].severity == "Error"
+    assert matching[0].target == "UiClick"

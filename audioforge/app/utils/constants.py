@@ -5,6 +5,7 @@ from pathlib import Path
 APP_NAME = "AudioForge"
 APP_VERSION = "0.09.2"
 PROJECT_EXTENSION = ".afproj"
+WORKSPACE_EXTENSION = ".afws"
 SCHEMA_VERSION = 3
 PROJECT_VERSION = 2
 DEFAULT_BUSES = ["BGM", "SFX", "UI"]

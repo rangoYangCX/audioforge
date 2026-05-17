@@ -126,6 +126,41 @@ def test_selected_build_preview_updates_scope_and_plan_labels(monkeypatch, tmp_p
     controller.window.close()
 
 
+def test_incremental_build_request_carries_selected_event_ids(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
+
+    controller = MainController()
+    controller.window.show()
+    QApplication.processEvents()
+    controller.new_project()
+    QApplication.processEvents()
+
+    wav_path = write_wav_fixture(tmp_path / "wav" / "UI_Click_A.wav", frequency_hz=440.0, duration_seconds=0.2)
+    controller.import_audio_files_as_events(
+        [str(wav_path)],
+        template={
+            "bus_name": "UI",
+            "asset_prefix": "ui/incremental",
+            "tags": ["ui"],
+        },
+    )
+    QApplication.processEvents()
+
+    controller.select_node("event", "UI_Click_A")
+    QApplication.processEvents()
+    incremental_index = controller.window.build_scope_combo.findData("incremental")
+    controller.window.build_scope_combo.setCurrentIndex(incremental_index)
+
+    request = controller._current_build_request()
+
+    assert request is not None
+    assert request.scope == "incremental"
+    assert request.selected_event_ids == ("UI_Click_A",)
+
+    controller.is_dirty = False
+    controller.window.close()
+
+
 def test_build_project_returns_before_background_export_finishes(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(RecoveryService, "has_snapshot", lambda self: False)
 

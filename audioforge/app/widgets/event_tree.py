@@ -3,26 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem
 
 from audioforge.app.models.audio_project import AudioProject
 from audioforge.app.utils.icons import load_app_icon, load_event_icon
+from audioforge.app.utils.token_codec import (
+    SOURCE_BINDING_TOKEN_SEPARATOR,
+    decode_source_binding_token,
+    encode_source_binding_token,
+)
 from audioforge.app.widgets.source_tree import SOURCE_ASSET_MIME_TYPE
 
 
-SOURCE_BINDING_TOKEN_SEPARATOR = "\t"
-
-
-def encode_source_binding_token(event_id: str, clip_id: str) -> str:
-    return f"{event_id}{SOURCE_BINDING_TOKEN_SEPARATOR}{clip_id}"
-
-
-def decode_source_binding_token(token: str) -> tuple[str, str]:
-    normalized = str(token)
-    if SOURCE_BINDING_TOKEN_SEPARATOR not in normalized:
-        return "", normalized
-    return tuple(normalized.split(SOURCE_BINDING_TOKEN_SEPARATOR, 1))  # type: ignore[return-value]
+# SOURCE_BINDING_TOKEN_SEPARATOR 和 encode/decode 函数
+# 已移至 utils/token_codec.py，此处通过导入使用
 
 
 class EventTreeWidget(QTreeWidget):
@@ -37,6 +32,7 @@ class EventTreeWidget(QTreeWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._analysis_status: dict[str, dict[str, str]] = {}
+        self._experiment_origin_labels: dict[str, str] = {}
         self._suppress_audio_bindings_popup = False
         self.setColumnCount(3)
         self.setHeaderLabels(["名称", "类型", "内容"])
@@ -83,6 +79,11 @@ class EventTreeWidget(QTreeWidget):
 
     def set_analysis_status(self, status_map: dict[str, dict[str, str]]) -> None:
         self._analysis_status = dict(status_map)
+        for root_index in range(self.topLevelItemCount()):
+            self._apply_status_recursive(self.topLevelItem(root_index))
+
+    def set_experiment_origin_labels(self, origin_map: dict[str, str]) -> None:
+        self._experiment_origin_labels = dict(origin_map)
         for root_index in range(self.topLevelItemCount()):
             self._apply_status_recursive(self.topLevelItem(root_index))
 
@@ -255,17 +256,30 @@ class EventTreeWidget(QTreeWidget):
 
     def _apply_status_to_item(self, item: QTreeWidgetItem, event_id: str) -> None:
         status = self._analysis_status.get(event_id)
+        origin_label = self._experiment_origin_labels.get(str(event_id), "")
         if not status:
-            item.setText(2, event_id)
-            item.setForeground(0, Qt.GlobalColor.white)
-            item.setToolTip(0, "")
+            item.setText(2, origin_label or event_id)
+            self._apply_origin_highlight(item, origin_label)
+            item.setToolTip(0, origin_label)
             return
         level = status.get("level", "warning")
         summary = status.get("summary", "")
+        if origin_label:
+            summary = f"{summary} | {origin_label}" if summary else origin_label
         item.setText(2, summary)
         item.setToolTip(0, summary)
         color = Qt.GlobalColor.red if level == "error" else Qt.GlobalColor.yellow
         item.setForeground(0, color)
+
+    def _apply_origin_highlight(self, item: QTreeWidgetItem, origin_label: str) -> None:
+        colors = {
+            "实验新增": QColor(34, 139, 34),
+            "实验修改": QColor(214, 121, 32),
+            "底板继承": QColor(130, 130, 130),
+        }
+        color = colors.get(origin_label, Qt.GlobalColor.white)
+        for column in range(self.columnCount()):
+            item.setForeground(column, color)
 
     def _emit_selected_event(self) -> None:
         payloads = self.selected_payloads()

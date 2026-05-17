@@ -15,6 +15,9 @@ try:
 except ImportError:
     UTC = timezone.utc
 
+from audioforge.harness.scenarios import run_scenarios
+from tools import run_main_controller_stability_batches as main_controller_stability_batches
+
 
 REQUIRED_EXPORT_FILES = (
     "AudioData.json",
@@ -37,6 +40,14 @@ REQUIRED_UNITY_RUNTIME_FILES = (
     "Assets/AudioForgeRuntime/Editor/AudioForgeEventPlayerEditor.cs",
     "Assets/AudioForgeRuntime/Editor/AudioForgeRuntimeEditor.cs",
     "Assets/AudioForgeRuntime/Editor/AudioForgeMissingScriptCleaner.cs",
+)
+
+DEFAULT_PYTEST_SMOKE_TARGETS = (
+    "tests/unit/test_documentation_baseline.py",
+    "tests/unit/test_full_chain_check.py",
+    "tests/unit/test_harness_environment.py",
+    "tests/unit/test_validator.py",
+    "tests/unit/test_exporter.py",
 )
 
 
@@ -62,6 +73,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--unity-validation-dir", type=Path)
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--skip-pytest", action="store_true")
+    parser.add_argument("--pytest-all", action="store_true")
+    parser.add_argument("--pytest-target", action="append")
+    parser.add_argument("--skip-harness", action="store_true")
+    parser.add_argument("--harness-dir", type=Path)
+    parser.add_argument("--harness-scenario", action="append")
+    parser.add_argument("--main-controller-batches", action="store_true")
+    parser.add_argument("--main-controller-batches-dir", type=Path)
+    parser.add_argument("--main-controller-batch", action="append", choices=sorted(main_controller_stability_batches.DEFAULT_BATCHES.keys()))
     return parser.parse_args()
 
 
@@ -72,34 +91,60 @@ def main() -> int:
     unity_package_dir = (args.unity_package_dir or (workspace / "unity_package")).resolve()
     unity_validation_dir = (args.unity_validation_dir or (workspace / "unity_validation")).resolve()
     report_dir = (args.report_dir or (workspace / "reports")).resolve()
+    harness_dir = (args.harness_dir or (report_dir / "harness_smoke")).resolve()
+    main_controller_batches_dir = (args.main_controller_batches_dir or (report_dir / "main_controller_batches")).resolve()
 
     results: list[CheckResult] = []
     if not args.skip_pytest:
-        results.append(run_pytest_check(workspace))
+        pytest_targets = None if args.pytest_all else tuple(args.pytest_target or DEFAULT_PYTEST_SMOKE_TARGETS)
+        results.append(run_pytest_check(workspace, pytest_targets))
     else:
         results.append(CheckResult("pytest", True, ["Skipped by --skip-pytest."]))
+
+    if not args.skip_harness:
+        results.append(run_harness_check(harness_dir, args.harness_scenario or None))
+    else:
+        results.append(CheckResult("harness_smoke", True, ["Skipped by --skip-harness."]))
+
+    if args.main_controller_batches:
+        results.append(
+            run_main_controller_batches_check(
+                workspace,
+                main_controller_batches_dir,
+                args.main_controller_batch or None,
+            )
+        )
 
     results.append(check_export_bundle(export_dir))
     results.append(check_runtime_contract(export_dir))
     results.append(check_unity_integration_package(unity_package_dir, unity_validation_dir))
 
-    report = build_report(workspace, export_dir, unity_package_dir, unity_validation_dir, results)
+    report = build_report(
+        workspace,
+        export_dir,
+        unity_package_dir,
+        unity_validation_dir,
+        harness_dir,
+        results,
+        main_controller_batches_dir if args.main_controller_batches else None,
+    )
     write_reports(report_dir, report)
 
     print(render_console_summary(report, report_dir))
     return 0 if report["passed"] else 1
 
 
-def run_pytest_check(workspace: Path) -> CheckResult:
+def run_pytest_check(workspace: Path, targets: tuple[str, ...] | None = None) -> CheckResult:
+    command = [sys.executable, "-m", "pytest", *(targets or ())]
     completed = subprocess.run(
-        [sys.executable, "-m", "pytest"],
+        command,
         cwd=workspace,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
-    details = [f"exit_code={completed.returncode}"]
+    details = [f"exit_code={completed.returncode}", f"command={' '.join(command)}"]
     stdout_tail = tail_lines(completed.stdout, 20)
     stderr_tail = tail_lines(completed.stderr, 20)
     if stdout_tail:
@@ -109,6 +154,73 @@ def run_pytest_check(workspace: Path) -> CheckResult:
         details.append("stderr_tail:")
         details.extend(stderr_tail)
     return CheckResult("pytest", completed.returncode == 0, details)
+
+
+def run_harness_check(harness_dir: Path, scenario_names: list[str] | None = None) -> CheckResult:
+    report = run_scenarios(harness_dir, scenario_names=scenario_names)
+    harness_dir.mkdir(parents=True, exist_ok=True)
+    json_report_path = harness_dir / "harness_report.json"
+    md_report_path = harness_dir / "harness_report.md"
+    json_report_path.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    lines = [
+        "# AudioForge Harness Report",
+        "",
+        f"- Status: {'PASS' if report.passed else 'FAIL'}",
+        f"- Root: {report.root_dir}",
+        f"- Started: {report.started_at}",
+        f"- Finished: {report.finished_at}",
+        "",
+        "## Scenario Results",
+        "",
+    ]
+    for result in report.results:
+        lines.append(f"### {result.name}")
+        lines.append("")
+        lines.append(f"- Status: {'PASS' if result.passed else 'FAIL'}")
+        for detail in result.details:
+            lines.append(f"- {detail}")
+        lines.append("")
+    md_report_path.write_text("\n".join(lines), encoding="utf-8")
+
+    scenario_names_rendered = ",".join(result.name for result in report.results) or "none"
+    details = [
+        f"root={report.root_dir}",
+        f"started_at={report.started_at}",
+        f"finished_at={report.finished_at}",
+        f"scenarios={scenario_names_rendered}",
+        f"json_report={json_report_path}",
+        f"markdown_report={md_report_path}",
+    ]
+    details.extend(
+        f"scenario={result.name}:{'PASS' if result.passed else 'FAIL'}"
+        for result in report.results
+    )
+    return CheckResult("harness_smoke", report.passed, details)
+
+
+def run_main_controller_batches_check(
+    workspace: Path,
+    report_dir: Path,
+    batch_names: list[str] | None = None,
+) -> CheckResult:
+    selected_names = batch_names or list(main_controller_stability_batches.DEFAULT_BATCHES.keys())
+    results = main_controller_stability_batches.run_batches(workspace, selected_names)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    json_report_path = report_dir / "main_controller_stability_batches.json"
+    md_report_path = report_dir / "main_controller_stability_batches.md"
+    payload = main_controller_stability_batches.write_batch_reports(workspace, results, json_report_path, md_report_path)
+    details = [
+        f"root={report_dir}",
+        f"batches={','.join(selected_names)}",
+        f"json_report={json_report_path}",
+        f"markdown_report={md_report_path}",
+    ]
+    details.extend(
+        f"batch={result.name}:{'PASS' if result.passed else 'FAIL'}:{result.duration_seconds:.2f}s"
+        for result in results
+    )
+    return CheckResult("main_controller_batches", bool(payload["passed"]), details)
 
 
 def check_export_bundle(export_dir: Path) -> CheckResult:
@@ -377,7 +489,9 @@ def build_report(
     export_dir: Path,
     unity_package_dir: Path,
     unity_validation_dir: Path,
+    harness_dir: Path,
     results: list[CheckResult],
+    main_controller_batches_dir: Path | None = None,
 ) -> dict[str, Any]:
     passed = all(result.passed for result in results)
     timestamp = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -387,6 +501,8 @@ def build_report(
         "export_dir": str(export_dir),
         "unity_package_dir": str(unity_package_dir),
         "unity_validation_dir": str(unity_validation_dir),
+        "harness_dir": str(harness_dir),
+        "main_controller_batches_dir": str(main_controller_batches_dir) if main_controller_batches_dir is not None else "",
         "passed": passed,
         "summary": {
             "total": len(results),
@@ -427,6 +543,8 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         f"- Export Dir: {report['export_dir']}",
         f"- Unity Package Dir: {report['unity_package_dir']}",
         f"- Unity Validation Dir: {report['unity_validation_dir']}",
+        f"- Harness Dir: {report['harness_dir']}",
+        *([f"- Main Controller Batches Dir: {report['main_controller_batches_dir']}"] if report.get('main_controller_batches_dir') else []),
         "",
         "## Summary",
         "",

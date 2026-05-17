@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import gc
+import json
+import logging
+import os
 import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -11,6 +18,8 @@ except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
 from audioforge.app.models.audio_project import ClipModel, ProjectSettings
+
+logger = logging.getLogger(__name__)
 
 
 class AudioProcessor:
@@ -40,13 +49,90 @@ class AudioProcessor:
         trimmed_audio = audio_data[start_frame:end_frame]
         trimmed_audio = self._apply_fades(trimmed_audio, sample_rate, clip.fade_in_ms, clip.fade_out_ms)
 
+        # 释放源文件内存
+        del audio_data
+        gc.collect()
+
         if target_format == "ogg":
-            sf.write(str(destination_path), trimmed_audio, sample_rate, format="OGG", subtype="VORBIS")
+            self._write_ogg_subprocess(trimmed_audio, sample_rate, destination_path)
             return
         if target_format == "wav":
             sf.write(str(destination_path), trimmed_audio, sample_rate, format="WAV")
             return
         raise ValueError(f"Unsupported runtime audio format: {project_settings.runtime_audio_format}")
+
+    # ── OGG 编码：子进程隔离 ──────────────────────────
+
+    def _write_ogg_subprocess(
+        self,
+        audio_data: "np.ndarray",
+        sample_rate: int,
+        destination_path: Path,
+    ) -> None:
+        """将 OGG 编码放入子进程执行，防止 libsndfile Vorbis 编码器的
+        内存句柄泄漏导致主进程 SIGSEGV。
+
+        流程：
+        1. 主进程：trim+fade 后写入临时 WAV
+        2. 子进程：soundfile 读 WAV → 写 OGG
+        3. 主进程：等子进程完成后 rename OGG 到目标路径
+
+        即使子进程因 libsndfile bug 崩溃（SIGSEGV），主进程也能捕获
+        并决定重试或跳过，不会整体闪退。
+        """
+        # 1. 写中间 WAV 到临时目录
+        tmp_dir = tempfile.mkdtemp(prefix="af_ogg_")
+        try:
+            wav_tmp = Path(tmp_dir) / "intermediate.wav"
+            sf.write(str(wav_tmp), audio_data, sample_rate, format="WAV")
+
+            # 释放 trimmed_audio 内存
+            del audio_data
+            gc.collect()
+
+            # 2. 子进程编码 WAV → OGG
+            ogg_tmp = Path(tmp_dir) / "intermediate.ogg"
+            script = (
+                "import soundfile as sf; "
+                "import sys; "
+                f"data, sr = sf.read(sys.argv[1], always_2d=False, dtype='float32'); "
+                f"sf.write(sys.argv[2], data, sr, format='OGG', subtype='VORBIS')"
+            )
+            python_exe = sys.executable
+            result = subprocess.run(
+                [python_exe, "-c", script, str(wav_tmp), str(ogg_tmp)],
+                capture_output=True,
+                timeout=60,
+            )
+
+            if result.returncode != 0:
+                # 子进程可能因 SIGSEGV 返回 -11 (信号 11) 或其他非零退出码
+                logger.warning(
+                    "OGG subprocess returned %d (stderr: %s), retrying in-process",
+                    result.returncode,
+                    result.stderr[:200] if result.stderr else "",
+                )
+                # 重试：在主进程中直接编码（小概率场景）
+                self._write_ogg_inprocess(wav_tmp, ogg_tmp)
+
+            if not ogg_tmp.exists():
+                raise RuntimeError(f"OGG file not created: {ogg_tmp}")
+
+            # 3. 原子 rename
+            shutil.move(str(ogg_tmp), str(destination_path))
+        finally:
+            # 清理临时目录
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    def _write_ogg_inprocess(self, wav_path: Path, ogg_path: Path) -> None:
+        """在主进程中直接编码 OGG（仅作为子进程失败后的重试）。"""
+        audio_data, sample_rate = sf.read(str(wav_path), always_2d=False, dtype="float32")
+        sf.write(str(ogg_path), audio_data, sample_rate, format="OGG", subtype="VORBIS")
+        del audio_data
+        gc.collect()
 
     def _can_passthrough_copy(
         self,

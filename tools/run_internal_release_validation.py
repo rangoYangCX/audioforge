@@ -13,45 +13,60 @@ from audioforge.app.services.project_serializer import ProjectSerializer
 from audioforge.app.services.validator import ProjectValidator
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a smoke-test AudioForge project from a real WAV directory and run release validation.")
-    parser.add_argument("--source-dir", type=Path, required=True)
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--source-dir", type=Path)
+    source_group.add_argument("--existing-export-dir", type=Path)
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--report-root", type=Path)
     parser.add_argument("--limit", type=int, default=12)
-    return parser.parse_args()
+    parser.add_argument("--skip-pytest", action="store_true")
+    parser.add_argument("--skip-harness", action="store_true")
+    return parser.parse_args(argv)
 
 
 def main() -> int:
     args = parse_args()
     workspace = args.workspace.resolve()
-    source_dir = args.source_dir.resolve()
-    report_root = (args.report_root or (workspace / "reports" / "internal_release_smoke")).resolve()
-    export_root = report_root / "export"
+    source_dir = args.source_dir.resolve() if args.source_dir is not None else None
+    existing_export_dir = args.existing_export_dir.resolve() if args.existing_export_dir is not None else None
+    default_report_dirname = "internal_release_existing_export" if existing_export_dir is not None else "internal_release_smoke"
+    report_root = (args.report_root or (workspace / "reports" / default_report_dirname)).resolve()
+    export_root = existing_export_dir if existing_export_dir is not None else (report_root / "export")
     checks_root = report_root / "checks"
     project_path = report_root / "internal_release_smoke.afproj"
 
-    wav_files = sorted(source_dir.rglob("*.wav"))
-    if not wav_files:
-        print(f"No WAV files found under {source_dir}")
-        return 1
+    selected_files: list[Path] = []
+    warning_count = 0
+    smoke_project_path: Path | None = None
+    validation_mode = "existing_export" if existing_export_dir is not None else "wav_smoke"
 
-    selected_files = wav_files[: max(1, args.limit)]
-    project = build_smoke_project(selected_files, export_root)
+    if source_dir is not None:
+        wav_files = sorted(source_dir.rglob("*.wav"))
+        if not wav_files:
+            print(f"No WAV files found under {source_dir}")
+            return 1
 
-    validator = ProjectValidator()
-    issues = validator.validate(project)
-    error_count = sum(1 for issue in issues if issue.severity == "Error")
-    warning_count = sum(1 for issue in issues if issue.severity == "Warning")
-    if error_count:
-        print(f"Validation failed before export: errors={error_count} warnings={warning_count}")
-        for issue in issues:
-            print(f"- {issue.severity} {issue.code} {issue.target}: {issue.message}")
-        return 1
+        selected_files = wav_files[: max(1, args.limit)]
+        project = build_smoke_project(selected_files, export_root)
 
-    report_root.mkdir(parents=True, exist_ok=True)
-    ProjectSerializer().save(project, project_path)
-    RuntimeExporter().export(project, export_root, issues)
+        validator = ProjectValidator()
+        issues = validator.validate(project)
+        error_count = sum(1 for issue in issues if issue.severity == "Error")
+        warning_count = sum(1 for issue in issues if issue.severity == "Warning")
+        if error_count:
+            print(f"Validation failed before export: errors={error_count} warnings={warning_count}")
+            for issue in issues:
+                print(f"- {issue.severity} {issue.code} {issue.target}: {issue.message}")
+            return 1
+
+        report_root.mkdir(parents=True, exist_ok=True)
+        ProjectSerializer().save(project, project_path)
+        RuntimeExporter().export(project, export_root, issues)
+        smoke_project_path = project_path
+    else:
+        report_root.mkdir(parents=True, exist_ok=True)
 
     command = [
         sys.executable,
@@ -63,17 +78,25 @@ def main() -> int:
         "--report-dir",
         str(checks_root),
     ]
+    if args.skip_pytest:
+        command.append("--skip-pytest")
+    if args.skip_harness:
+        command.append("--skip-harness")
     completed = subprocess.run(command, cwd=workspace)
     write_release_signoff(
         report_root=report_root,
-        project_path=project_path,
+        project_path=smoke_project_path,
         export_root=export_root,
         checks_root=checks_root,
         selected_files=selected_files,
         warning_count=warning_count,
         passed=completed.returncode == 0,
+        validation_mode=validation_mode,
     )
-    print(f"Smoke project saved to {project_path}")
+    if smoke_project_path is not None:
+        print(f"Smoke project saved to {smoke_project_path}")
+    else:
+        print(f"Validated existing export directory: {export_root}")
     print(f"Export directory: {export_root}")
     print(f"Selected WAV files: {len(selected_files)}")
     print(f"Warnings: {warning_count}")
@@ -145,25 +168,31 @@ def slugify(stem: str) -> str:
 def write_release_signoff(
     *,
     report_root: Path,
-    project_path: Path,
+    project_path: Path | None,
     export_root: Path,
     checks_root: Path,
     selected_files: list[Path],
     warning_count: int,
     passed: bool,
+    validation_mode: str,
 ) -> None:
     full_chain_report_path = checks_root / "full_chain_report.json"
     full_chain_report = json.loads(full_chain_report_path.read_text(encoding="utf-8")) if full_chain_report_path.exists() else {}
     risks = [
         "Unity 侧仍是参考运行时，生产项目接入前仍需做一次目标工程联调。",
         "自动恢复当前覆盖单份最近快照，适合内部上线前保护，不等于完整版本化备份。",
-        "本轮真实素材验证使用 12 个样本做烟雾覆盖，不代表已穷尽全部素材边界。",
+        "本轮签收仍不代表已穷尽全部素材边界。",
     ]
+    harness_report_path = checks_root / "harness_smoke" / "harness_report.json"
+    project_label = str(project_path) if project_path is not None else "(existing export mode; no smoke project generated)"
     summary = {
         "overall": "PASS" if passed else "FAIL",
-        "project_path": str(project_path),
+        "validation_mode": validation_mode,
+        "project_path": project_label,
         "export_root": str(export_root),
         "checks_root": str(checks_root),
+        "harness_report_path": str(harness_report_path),
+        "harness_report_exists": harness_report_path.exists(),
         "selected_wav_files": [str(path) for path in selected_files],
         "warning_count": warning_count,
         "full_chain_report": full_chain_report,
@@ -174,9 +203,11 @@ def write_release_signoff(
         "# AudioForge Internal Release Sign-off",
         "",
         f"- Result: {'PASS' if passed else 'FAIL'}",
-        f"- Smoke Project: {project_path}",
+        f"- Validation Mode: {validation_mode}",
+        f"- Smoke Project: {project_label}",
         f"- Export Root: {export_root}",
         f"- Check Reports: {checks_root}",
+        f"- Harness Report: {harness_report_path}",
         f"- Selected WAV Files: {len(selected_files)}",
         f"- Validation Warnings: {warning_count}",
         "",

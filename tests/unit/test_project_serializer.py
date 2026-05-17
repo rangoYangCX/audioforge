@@ -174,3 +174,26 @@ def test_project_serializer_migrates_sources_into_project_folder_and_loads_after
     assert loaded_clip_path == moved_project_path.with_suffix("") / "Sources" / loaded_clip_path.relative_to(moved_project_path.with_suffix("") / "Sources")
     assert any(Path(path).exists() and Path(path).name == "ambient.wav" for path in loaded.asset_registry)
     assert loaded.events["UiClick"].clips[0].source_path != str(wav_path)
+
+
+def test_project_serializer_keeps_empty_source_path_empty_on_load_and_copy(tmp_path: Path) -> None:
+    project, _ = build_sample_project(tmp_path / "source")
+    audio_id = project.events["UiClick"].audio_id
+    project.events["UiClick"].clips[0].source_path = ""
+    project.audio_objects[audio_id].clips[0].source_path = ""
+    project.asset_registry.clear()
+
+    serializer = ProjectSerializer()
+    project_path = tmp_path / "empty_source.afproj"
+    serializer.save(project, project_path)
+
+    loaded = serializer.load(project_path)
+    assert loaded.events["UiClick"].clips[0].source_path == ""
+    assert loaded.audio_objects[audio_id].clips[0].source_path == ""
+    assert loaded.asset_registry == {}
+
+    copy_path = tmp_path / "copied.afproj"
+    ProjectSerializer.copy_project_bundle(project_path, copy_path)
+    copied = serializer.load(copy_path)
+    assert copied.events["UiClick"].clips[0].source_path == ""
+    assert copied.audio_objects[audio_id].clips[0].source_path == ""

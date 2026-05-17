@@ -105,7 +105,7 @@ class RuntimeExporter:
             for point in binding.curve_points
         ]
 
-    def _serialize_rtpc_bindings(self, bindings: list[RtpcBindingModel]) -> list[dict[str, object]]:
+    def serialize_rtpc_bindings(self, bindings: list[RtpcBindingModel]) -> list[dict[str, object]]:
         return [
             {
                 "ParameterName": binding.parameter_name,
@@ -118,7 +118,7 @@ class RuntimeExporter:
             if binding.parameter_name.strip()
         ]
 
-    def _serialize_state_overrides(self, overrides: list[StateOverrideModel]) -> list[dict[str, object]]:
+    def serialize_state_overrides(self, overrides: list[StateOverrideModel]) -> list[dict[str, object]]:
         return [
             {
                 "GroupName": override.group_name,
@@ -132,7 +132,7 @@ class RuntimeExporter:
             if override.group_name.strip() and override.state_name.strip()
         ]
 
-    def _serialize_switch_variants(self, variants: list[SwitchVariantModel]) -> list[dict[str, object]]:
+    def serialize_switch_variants(self, variants: list[SwitchVariantModel]) -> list[dict[str, object]]:
         return [
             {
                 "GroupName": variant.group_name,
@@ -277,9 +277,9 @@ class RuntimeExporter:
                 }
                 for clip in runtime_clips
             ],
-            "RtpcBindings": self._serialize_rtpc_bindings(audio.rtpc_bindings),
-            "StateOverrides": self._serialize_state_overrides(audio.state_overrides),
-            "SwitchVariants": self._serialize_switch_variants(audio.switch_variants),
+            "RtpcBindings": self.serialize_rtpc_bindings(audio.rtpc_bindings),
+            "StateOverrides": self.serialize_state_overrides(audio.state_overrides),
+            "SwitchVariants": self.serialize_switch_variants(audio.switch_variants),
         }
         if audio.play_mode == "Combo":
             payload["ComboPitchStepCents"] = audio.combo_pitch_step_cents
@@ -304,6 +304,10 @@ class RuntimeExporter:
         request: ExportRequest | None = None,
         plan: ExportPlan | None = None,
     ) -> ExportResult:
+        error_issues = [issue for issue in issues if issue.severity == "Error"]
+        if error_issues:
+            raise ValueError(f"Cannot export project with validation errors: {len(error_issues)}")
+
         parent = export_root.parent
         parent.mkdir(parents=True, exist_ok=True)
         temp_root = Path(tempfile.mkdtemp(prefix=f"{export_root.name}_", dir=str(parent)))
@@ -531,6 +535,7 @@ class RuntimeExporter:
 
         try:
             temp_root.replace(export_root)
+            self._restore_preserved_export_dirs(backup_root, export_root)
         except Exception:
             if backup_root.exists() and not export_root.exists():
                 backup_root.replace(export_root)
@@ -538,6 +543,22 @@ class RuntimeExporter:
         else:
             if backup_root.exists():
                 shutil.rmtree(backup_root)
+
+    def _restore_preserved_export_dirs(self, backup_root: Path, export_root: Path) -> None:
+        if not backup_root.exists() or not backup_root.is_dir():
+            return
+        for child in backup_root.iterdir():
+            if not child.is_dir() or not self._should_preserve_export_dir(child):
+                continue
+            target = export_root / child.name
+            if target.exists():
+                shutil.rmtree(target)
+            child.replace(target)
+
+    def _should_preserve_export_dir(self, path: Path) -> bool:
+        if not path.name.startswith("task_") or "_variant_" not in path.name:
+            return False
+        return any(path.glob("ExperimentDelta_*.json"))
 
     def _build_runtime_payload(self, project: AudioProject) -> dict[str, object]:
         events: dict[str, object] = {}
@@ -560,8 +581,8 @@ class RuntimeExporter:
             "BusConfigs": [
                 {
                     **config.to_dict(),
-                    "RtpcBindings": self._serialize_rtpc_bindings(config.rtpc_bindings),
-                    "StateOverrides": self._serialize_state_overrides(config.state_overrides),
+                    "RtpcBindings": self.serialize_rtpc_bindings(config.rtpc_bindings),
+                    "StateOverrides": self.serialize_state_overrides(config.state_overrides),
                 }
                 for config in project.settings.bus_configs
             ],

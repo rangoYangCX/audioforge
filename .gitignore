@@ -14,3 +14,12 @@ reports/checks/
 reports/full_chain_report.json
 reports/full_chain_report.md
 reports/unity_package_release/
+.audioforge/
+audioforge.egg-info/
+reports/harness/
+reports/full_chain_*/
+reports/internal_release_*/
+reports/unity_package_release_*/
+reports/user_export_audit/
+reports/main_controller_stability_batches.json
+reports/main_controller_stability_batches.md

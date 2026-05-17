@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from audioforge.app.services.exporter import RuntimeExporter
 from audioforge.app.services.validator import ProjectValidator
-from tools.run_full_chain_check import check_export_bundle, check_runtime_contract
+from tools.run_full_chain_check import check_export_bundle, check_runtime_contract, run_harness_check, run_main_controller_batches_check
+from tools.run_main_controller_stability_batches import BatchResult
 
 from tests.helpers import build_sample_project
 
@@ -74,3 +77,41 @@ def test_full_chain_runtime_contract_requires_event_audio_id(tmp_path: Path) -> 
 
     assert contract_result.passed is False
     assert "missing_schema_field=event:UiClick:AudioId" in contract_result.details
+
+
+def test_full_chain_harness_check_writes_reports(tmp_path: Path) -> None:
+    report_root = tmp_path / "harness"
+
+    result = run_harness_check(report_root, ["project_roundtrip", "build_export_cycle", "experiment_delta_export"])
+
+    assert result.passed is True
+    assert (report_root / "harness_report.json").exists()
+    assert (report_root / "harness_report.md").exists()
+    assert any(detail == "scenario=project_roundtrip:PASS" for detail in result.details)
+    assert any(detail == "scenario=build_export_cycle:PASS" for detail in result.details)
+    assert any(detail == "scenario=experiment_delta_export:PASS" for detail in result.details)
+
+
+def test_full_chain_main_controller_batches_check_writes_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    report_root = tmp_path / "main_controller_batches"
+
+    monkeypatch.setattr(
+        "tools.run_full_chain_check.main_controller_stability_batches.run_batches",
+        lambda workspace, batch_names, fail_fast=False: [
+            BatchResult(
+                name="layout_preview_gamesync",
+                passed=True,
+                duration_seconds=12.5,
+                command=["python", "-m", "pytest"],
+                stdout_tail=["4 passed in 12.5s"],
+                stderr_tail=[],
+            )
+        ],
+    )
+
+    result = run_main_controller_batches_check(tmp_path, report_root, ["layout_preview_gamesync"])
+
+    assert result.passed is True
+    assert (report_root / "main_controller_stability_batches.json").exists()
+    assert (report_root / "main_controller_stability_batches.md").exists()
+    assert any(detail == "batch=layout_preview_gamesync:PASS:12.50s" for detail in result.details)

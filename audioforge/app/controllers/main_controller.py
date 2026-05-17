@@ -5,13 +5,23 @@ import json
 import logging
 import re
 import sys
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from audioforge.app.adapters import (
+    PlaybackServiceGateway,
+    QtSettingsStore,
+    RecoveryServiceSnapshotRepository,
+    SerializerExperimentWorkspaceRepository,
+    SerializerProjectRepository,
+)
+from audioforge.app.application.contracts import ProjectSessionState, UserNotification, WorkflowResult
+from audioforge.app.application.project_lifecycle_controller import ProjectLifecycleController
+from audioforge.app.application.recovery_autosave_controller import RecoveryAutosaveController
 from audioforge.app.models.audio_project import (
     AudioObjectModel,
     AudioProject,
@@ -32,6 +42,7 @@ from audioforge.app.models.audio_project import (
 )
 from audioforge.app.services.audio_meter_service import AudioMeterService
 from audioforge.app.services.command_history import CommandHistory, EditorSnapshot
+from audioforge.app.services.audio_processor import AudioProcessor
 from audioforge.app.services.exporter import ExportPlan, ExportRequest, RuntimeExporter
 from audioforge.app.services.playback_service import PlaybackService
 from audioforge.app.services.preview_audio_renderer import PreviewAudioRenderer
@@ -54,7 +65,19 @@ from audioforge.app.utils.constants import (
 )
 from audioforge.app.utils.runtime_logging import get_runtime_log_config
 from audioforge.app.views.main_window import MainWindow
-from audioforge.app.widgets.event_tree import decode_source_binding_token, encode_source_binding_token
+from audioforge.app.utils.token_codec import decode_source_binding_token, encode_source_binding_token
+from audioforge.app.controllers.build_export_controller import BuildExportController
+from audioforge.app.controllers.experiment_controller import ExperimentController
+from audioforge.app.controllers.experiment_integration_controller import ExperimentIntegrationController
+from audioforge.app.controllers.preview_playback_controller import PreviewPlaybackController
+from audioforge.app.models.diagnostic_dto import (
+    DIAGNOSTIC_FALLBACK_SUMMARY,
+    DIAGNOSTIC_PRIORITY_ORDER,
+    DIAGNOSTIC_SECTION_DEFAULTS,
+    DIAGNOSTIC_SECTION_TITLES,
+    DiagnosticSection,
+    DiagnosticSnapshot,
+)
 
 
 LOUDNESS_SCAN_THRESHOLDS = {
@@ -64,94 +87,6 @@ LOUDNESS_SCAN_THRESHOLDS = {
 }
 
 logger = logging.getLogger(__name__)
-
-DIAGNOSTIC_FALLBACK_SUMMARY = "诊断概览已接入结果中心；等待新的日志、校验、构建或响度结果。"
-DIAGNOSTIC_SECTION_DEFAULTS = {
-    "log": "最近日志：等待运行输出。",
-    "validation": "等待校验。",
-    "build": "等待构建或差异预览。",
-    "loudness": "等待响度扫描。",
-    "bus": "等待 Bus 上下文。",
-}
-DIAGNOSTIC_PRIORITY_ORDER = ("validation", "build", "loudness", "bus", "log")
-DIAGNOSTIC_SECTION_TITLES = {
-    "validation": "校验",
-    "build": "构建",
-    "loudness": "响度",
-    "bus": "Bus 状态",
-    "log": "日志",
-}
-
-
-@dataclass(slots=True)
-class DiagnosticSection:
-    name: str
-    default_summary: str
-    summary: str = ""
-    detail: str = ""
-    status: str = "idle"
-    target_type: str = ""
-    target_id: str = ""
-    metadata: dict[str, object] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not self.summary:
-            self.summary = self.default_summary
-        if not self.detail:
-            self.detail = self.summary
-
-    def reset(self) -> None:
-        self.summary = self.default_summary
-        self.detail = self.default_summary
-        self.status = "idle"
-        self.target_type = ""
-        self.target_id = ""
-        self.metadata = {}
-
-    def update(
-        self,
-        *,
-        summary: str,
-        detail: str | None = None,
-        status: str = "info",
-        target_type: str = "",
-        target_id: str = "",
-        metadata: dict[str, object] | None = None,
-    ) -> None:
-        normalized_summary = summary.strip() or self.default_summary
-        normalized_detail = (detail if detail is not None else normalized_summary).strip() or normalized_summary
-        self.summary = normalized_summary
-        self.detail = normalized_detail
-        self.status = status
-        self.target_type = target_type.strip()
-        self.target_id = target_id.strip()
-        self.metadata = dict(metadata or {})
-
-
-def _create_default_diagnostic_sections() -> dict[str, DiagnosticSection]:
-    return {
-        name: DiagnosticSection(name=name, default_summary=default_summary)
-        for name, default_summary in DIAGNOSTIC_SECTION_DEFAULTS.items()
-    }
-
-
-@dataclass(slots=True)
-class DiagnosticSnapshot:
-    summary: str = DIAGNOSTIC_FALLBACK_SUMMARY
-    sections: dict[str, DiagnosticSection] = field(default_factory=_create_default_diagnostic_sections)
-
-    def section(self, name: str) -> DiagnosticSection:
-        return self.sections[name]
-
-    def as_payload(self) -> dict[str, object]:
-        return {
-            "summary": self.summary,
-            "log_summary": self.section("log").summary,
-            "validation_summary": self.section("validation").summary,
-            "build_summary": self.section("build").summary,
-            "loudness_summary": self.section("loudness").summary,
-            "bus_summary": self.section("bus").summary,
-        }
 
 
 @dataclass(slots=True)
@@ -279,9 +214,16 @@ class MainController(QObject):
         self.preview_audio_renderer = PreviewAudioRenderer()
         self.preview_bus_mixer = PreviewBusMixer()
         self.playback_service = PlaybackService()
+        self.playback_gateway = PlaybackServiceGateway(self.playback_service)
         self.audio_meter_service = AudioMeterService()
         self.history = CommandHistory()
         self.settings = QSettings("AudioForge", "Workbench")
+        self.project_repository = SerializerProjectRepository(self.serializer)
+        self.snapshot_repository = RecoveryServiceSnapshotRepository(self.recovery_service)
+        self.settings_store = QtSettingsStore(self.settings)
+        self.experiment_workspace_repository = SerializerExperimentWorkspaceRepository()
+        self.project_lifecycle_controller = ProjectLifecycleController(self.project_repository, self.settings_store)
+        self.recovery_autosave_controller = RecoveryAutosaveController(self.snapshot_repository, self.settings_store)
         self.project = self._create_default_project()
         self.selected_event_id: str | None = None
         self.selected_event_ids: list[str] = []
@@ -289,6 +231,9 @@ class MainController(QObject):
         self.selected_folder_id: str | None = None
         self.selected_source_binding_tokens: list[str] = []
         self.is_dirty = False
+        self._current_loaded_variant_id: str | None = None
+        self._current_loaded_task_id: str | None = None
+        self._current_loaded_variant_path: str | None = None
         self._analysis_status: dict[str, dict[str, str]] = {}
         self._diagnostic_snapshot = DiagnosticSnapshot()
         self._build_thread: QThread | None = None
@@ -299,8 +244,16 @@ class MainController(QObject):
         self._preview_transport_timer = QTimer(self)
         self._preview_transport_timer.setInterval(200)
         self._preview_transport_timer.timeout.connect(self._poll_preview_transport_state)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.timeout.connect(self._perform_autosave)
+        self._autosave_enabled = True
+        self._autosave_interval_minutes = 5
+        self.experiment_controller = ExperimentController(self)
+        self._experiment_integration_controller: ExperimentIntegrationController | None = None
+        self._bind_experiment_signals()
         self._bind_events()
         self._restore_window_preferences()
+        self._restore_autosave_preferences()
         self.application.aboutToQuit.connect(self._save_window_preferences)
         self._sync_recent_projects_ui()
         self._refresh_ui()
@@ -371,6 +324,97 @@ class MainController(QObject):
             return bus_lookup["bgm"]
         return bus_lookup.get(default_bus.casefold(), available_buses[0])
 
+    def _bind_experiment_signals(self) -> None:
+        self._experiment_integration().bind_signals()
+
+    def _experiment_integration(self) -> ExperimentIntegrationController:
+        controller = getattr(self, "_experiment_integration_controller", None)
+        if controller is None:
+            controller = ExperimentIntegrationController(self)
+            self._experiment_integration_controller = controller
+        return controller
+
+    def _preview_playback(self) -> PreviewPlaybackController:
+        controller = getattr(self, "_preview_playback_controller", None)
+        if controller is None:
+            controller = PreviewPlaybackController(self)
+            self._preview_playback_controller = controller
+        return controller
+
+    def _build_export(self) -> BuildExportController:
+        controller = getattr(self, "_build_export_controller", None)
+        if controller is None:
+            controller = BuildExportController(self)
+            self._build_export_controller = controller
+        return controller
+
+    def _on_experiment_workspace_open_requested(self) -> None:
+        self._experiment_integration().on_workspace_open_requested()
+
+    def _save_current_variant_project(self, *, action_name: str = "继续操作") -> bool:
+        return self._experiment_integration().save_current_variant_project(action_name=action_name)
+
+    def _run_experiment_action_with_saved_variant(
+        self,
+        action_name: str,
+        action: Callable[[], object],
+    ) -> object | None:
+        return self._experiment_integration().run_action_with_saved_variant(action_name, action)
+
+    def _activate_experiment_variant(self, task_index: int, variant_index: int) -> bool:
+        return self._experiment_integration().activate_variant(task_index, variant_index)
+
+    def _reset_experiment_loaded_variant_context(self) -> None:
+        self._experiment_integration().reset_loaded_variant_context()
+
+    def _current_experiment_dirty_indices(self) -> tuple[int, int] | None:
+        return self._experiment_integration().current_dirty_indices()
+
+    def _experiment_variant_label(self, task_index: int, variant_index: int) -> str:
+        return self._experiment_integration().variant_label(task_index, variant_index)
+
+    def _notify_experiment_warning(self, title: str, message: str) -> None:
+        self._experiment_integration().notify_warning(title, message)
+
+    def _notify_experiment_info(self, title: str, message: str, *, log_message: str | None = None) -> None:
+        self._experiment_integration().notify_info(title, message, log_message=log_message)
+
+    def _refresh_experiment_ui(self, workspace) -> None:
+        self._experiment_integration().refresh_ui(workspace)
+
+    def _on_experiment_variant_switch_requested(self, task_index: int, variant_index: int) -> None:
+        self._experiment_integration().on_variant_switch_requested(task_index, variant_index)
+
+    def _on_experiment_lifecycle_change_requested(self, task_index: int, variant_index: int, lifecycle_str: str) -> None:
+        self._experiment_integration().on_lifecycle_change_requested(task_index, variant_index, lifecycle_str)
+
+    def _on_experiment_variant_activate_requested(self, task_index: int, variant_index: int) -> None:
+        self._experiment_integration().on_variant_activate_requested(task_index, variant_index)
+
+    def _on_experiment_duplicate_variant_requested(self, task_index: int, variant_index: int, new_name: str) -> None:
+        self._experiment_integration().on_duplicate_variant_requested(task_index, variant_index, new_name)
+
+    def _on_experiment_sync_from_base_requested(self, task_index: int, variant_index: int) -> None:
+        self._experiment_integration().on_sync_from_base_requested(task_index, variant_index)
+
+    def _on_experiment_workspace_close_requested(self) -> None:
+        self._experiment_integration().on_workspace_close_requested()
+
+    def _on_experiment_variant_project_loaded(self, project_path: str) -> None:
+        self._experiment_integration().on_variant_project_loaded(project_path)
+
+    def _on_experiment_workspace_changed(self, workspace) -> None:
+        self._experiment_integration().on_workspace_changed(workspace)
+
+    def _on_experiment_delete_variant_requested(self, task_index: int, variant_index: int) -> None:
+        self._experiment_integration().on_delete_variant_requested(task_index, variant_index)
+
+    def _compare_experiment_delta(self, task_index: int, variant_index: int) -> None:
+        self._experiment_integration().compare_delta(task_index, variant_index)
+
+    def _export_experiment_delta(self, task_index: int, variant_index: int) -> None:
+        self._experiment_integration().export_delta(task_index, variant_index)
+
     def _bind_events(self) -> None:
         self.window.new_project_button.clicked.connect(self.new_project)
         self.window.open_project_button.clicked.connect(self.open_project)
@@ -383,9 +427,13 @@ class MainController(QObject):
         self.window.tree.nodeMoved.connect(self.handle_tree_move)
         self.window.audio_tree.audioSelected.connect(self.select_audio)
         self.window.tree.audioFilesDropped.connect(self.import_audio_files_as_events)
-        self.window.tree.sourceAssetsDroppedToAudio.connect(lambda source_paths, event_id: self.assign_source_assets_to_audio(event_id, source_paths, replace_existing=False))
+        self.window.tree.sourceAssetsDroppedToAudio.connect(
+            lambda source_paths, event_id: self.assign_source_assets_to_audio(event_id, source_paths, replace_existing=False)
+        )
         self.window.audio_tree.audioFilesDropped.connect(self.import_audio_files_to_audio)
-        self.window.audio_tree.sourceAssetsDroppedToAudio.connect(lambda source_paths, audio_id: self.assign_source_assets_to_audio_object(audio_id, source_paths, replace_existing=False))
+        self.window.audio_tree.sourceAssetsDroppedToAudio.connect(
+            lambda source_paths, audio_id: self.assign_source_assets_to_audio_object(audio_id, source_paths, replace_existing=False)
+        )
         self.window.source_tree.importFilesDropped.connect(self.import_audio_files_to_source_registry)
         self.window.removeSourceAssetsFromCurrentAudioRequested.connect(self.remove_source_assets_from_current_audio)
         self.window.removeSourceAssetsFromRegistryRequested.connect(self.remove_source_assets_from_registry)
@@ -473,6 +521,8 @@ class MainController(QObject):
             self.selected_folder_id = next(iter(self.project.root_folder_ids), None)
         self.window.tree.rebuild(self.project)
         self.window.tree.set_analysis_status(self._analysis_status)
+        event_origin_by_id, _audio_origin_by_id, _base_source_paths = self._current_experiment_origin_maps()
+        self.window.tree.set_experiment_origin_labels(event_origin_by_id)
         if binding_event_ids:
             self.window.tree.select_nodes(
                 [("event", event_id) for event_id in binding_event_ids],
@@ -511,6 +561,7 @@ class MainController(QObject):
         self._publish_diagnostic_snapshot()
 
     def _build_source_browser_entries(self) -> list[dict[str, object]]:
+        event_origin_by_id, _audio_origin_by_id, base_source_paths = self._current_experiment_origin_maps()
         event_ids_by_audio: dict[str, set[str]] = {}
         for event in self.project.events.values():
             event_ids_by_audio.setdefault(event.audio_id, set()).add(event.id)
@@ -549,6 +600,9 @@ class MainController(QObject):
             audio_ids = sorted(reference_bucket.get("audio_ids", set()))
             event_ids = sorted(reference_bucket["event_ids"])
             asset_keys = sorted(reference_bucket["asset_keys"])
+            origin_label = self._merge_origin_labels([event_origin_by_id.get(event_id, "") for event_id in event_ids])
+            if not origin_label and base_source_paths:
+                origin_label = "底板继承" if source_text in base_source_paths else "实验新增"
             entries.append(
                 {
                     "source_path": source_text,
@@ -558,11 +612,13 @@ class MainController(QObject):
                     "reference_count": len(audio_ids),
                     "missing": is_missing,
                     "unreferenced": len(audio_ids) == 0,
+                    "origin_label": origin_label,
                 }
             )
         return entries
 
     def _build_audio_browser_entries(self) -> list[dict[str, object]]:
+        event_origin_by_id, audio_origin_by_id, _base_source_paths = self._current_experiment_origin_maps()
         event_ids_by_audio: dict[str, list[str]] = {}
         for event in self.project.events.values():
             event_ids_by_audio.setdefault(event.audio_id, []).append(event.id)
@@ -570,6 +626,7 @@ class MainController(QObject):
         entries: list[dict[str, object]] = []
         for audio_id, audio in sorted(self.project.audio_objects.items(), key=lambda item: (item[1].display_name.casefold(), item[0].casefold())):
             event_ids = sorted(event_ids_by_audio.get(audio_id, []))
+            origin_label = audio_origin_by_id.get(audio_id, self._merge_origin_labels([event_origin_by_id.get(event_id, "") for event_id in event_ids]))
             entries.append(
                 {
                     "audio_id": audio_id,
@@ -579,9 +636,281 @@ class MainController(QObject):
                     "clip_count": len(audio.clips),
                     "event_ids": event_ids,
                     "event_count": len(event_ids),
+                    "origin_label": origin_label,
                 }
             )
         return entries
+
+    def _merge_origin_labels(self, labels: list[str]) -> str:
+        normalized = [label for label in labels if label]
+        if not normalized:
+            return ""
+        if any(label == "实验新增" for label in normalized):
+            return "实验新增"
+        if any(label == "实验修改" for label in normalized):
+            return "实验修改"
+        if any(label == "底板继承" for label in normalized):
+            return "底板继承"
+        return normalized[0]
+
+    def _current_experiment_origin_maps(self) -> tuple[dict[str, str], dict[str, str], set[str]]:
+        workspace = self.experiment_controller.workspace
+        if workspace is None or not self.project.file_path or not self._current_loaded_variant_path:
+            return {}, {}, set()
+        current_path = Path(self.project.file_path).resolve(strict=False)
+        loaded_path = Path(self._current_loaded_variant_path).resolve(strict=False)
+        if current_path != loaded_path:
+            return {}, {}, set()
+        base_path = self._current_experiment_baseline_path()
+        if base_path is None:
+            return {}, {}, set()
+        if not base_path.exists():
+            return {}, {}, set()
+        try:
+            base_project = self.serializer.load(base_path)
+        except Exception:
+            logger.exception("Failed to load experiment base project: %s", base_path)
+            return {}, {}, set()
+        from audioforge.app.services.experiment_exporter import ExperimentExporter
+
+        exporter = ExperimentExporter.create_default(runtime_exporter=self.exporter)
+        base_events_by_name = {
+            event.display_name: event
+            for event in base_project.events.values()
+            if event.display_name.strip()
+        }
+        event_origin_by_id: dict[str, str] = {}
+        for event in self.project.events.values():
+            base_event = base_events_by_name.get(event.display_name)
+            if base_event is None:
+                event_origin_by_id[event.id] = "实验新增"
+                continue
+            event_origin_by_id[event.id] = "实验修改" if exporter._diff_event(base_event, event) else "底板继承"
+
+        audio_origin_by_id: dict[str, str] = {}
+        event_ids_by_audio: dict[str, list[str]] = {}
+        for event in self.project.events.values():
+            event_ids_by_audio.setdefault(event.audio_id, []).append(event.id)
+        for audio_id, event_ids in event_ids_by_audio.items():
+            audio_origin_by_id[audio_id] = self._merge_origin_labels([event_origin_by_id.get(event_id, "") for event_id in event_ids])
+
+        base_source_paths = {
+            str(clip.source_path).strip()
+            for audio in base_project.audio_objects.values()
+            for clip in audio.clips
+            if str(clip.source_path).strip()
+        }
+        return event_origin_by_id, audio_origin_by_id, base_source_paths
+
+    def _update_project_origin_indicators(self) -> None:
+        workspace = self.experiment_controller.workspace
+        if workspace is None:
+            self.window.set_project_badge_text("AudioForge 工程台")
+            self.window.set_workspace_origin_hint("")
+            return
+        base_name = workspace.base_project_abs_path.name
+        current_path = Path(self.project.file_path).resolve(strict=False) if self.project.file_path else None
+        base_path = workspace.base_project_abs_path.resolve(strict=False)
+        if current_path is not None and current_path == base_path:
+            self.window.set_project_badge_text(f"底板工程 · {base_name}")
+            self.window.set_workspace_origin_hint(f"当前正在查看底板工程 {base_name}")
+            return
+        if current_path is not None and self._current_loaded_variant_path:
+            loaded_path = Path(self._current_loaded_variant_path).resolve(strict=False)
+            if current_path == loaded_path:
+                active_task = workspace.active_task
+                active_variant_index = active_task.active_variant_index if active_task else -1
+                variant_label = self._experiment_variant_label(workspace.active_task_index, active_variant_index)
+                event_origin_by_id, _audio_origin_by_id, _base_source_paths = self._current_experiment_origin_maps()
+                current_event_origin = event_origin_by_id.get(self.current_event.id, "") if self.current_event is not None else ""
+                self.window.set_project_badge_text(f"实验方案 · {variant_label}")
+                hint = f"底板 {base_name} | 当前方案 {variant_label}"
+                if current_event_origin:
+                    hint += f" | 当前事件 {current_event_origin}"
+                self.window.set_workspace_origin_hint(hint)
+                return
+        self.window.set_project_badge_text("AudioForge 工程台")
+        self.window.set_workspace_origin_hint("")
+
+    def _current_loaded_experiment_indices(self) -> tuple[int, int] | None:
+        workspace = self.experiment_controller.workspace
+        if workspace is None or not self._current_loaded_task_id or not self._current_loaded_variant_id:
+            return None
+        for task_index, task in enumerate(workspace.tasks):
+            if task.id != self._current_loaded_task_id:
+                continue
+            for variant_index, variant in enumerate(task.variants):
+                if variant.id == self._current_loaded_variant_id:
+                    return task_index, variant_index
+        return None
+
+    def _current_experiment_baseline_path(self) -> Path | None:
+        indices = self._current_loaded_experiment_indices()
+        if indices is None:
+            return None
+        baseline_path_text = self.experiment_controller.get_task_baseline_project_path(indices[0])
+        if not baseline_path_text:
+            return None
+        return Path(baseline_path_text)
+
+    def _current_experiment_is_read_only_baseline(self) -> bool:
+        indices = self._current_loaded_experiment_indices()
+        if indices is None:
+            return False
+        return self.experiment_controller.is_baseline_variant(indices[0], indices[1])
+
+    def _load_current_experiment_base_project(self) -> AudioProject | None:
+        base_path = self._current_experiment_baseline_path()
+        if base_path is None:
+            return None
+        if not base_path.exists():
+            return None
+        try:
+            return self.serializer.load(base_path)
+        except Exception:
+            logger.exception("Failed to load current experiment base project: %s", base_path)
+            return None
+
+    def _find_base_event_for_current_event(self, base_project: AudioProject, event: EventModel | None) -> EventModel | None:
+        if event is None:
+            return None
+        display_name = event.display_name.strip()
+        if display_name:
+            for base_event in base_project.events.values():
+                if base_event.display_name.strip() == display_name:
+                    return base_event
+        return base_project.events.get(event.id)
+
+    def _current_event_experiment_diff_state(self) -> tuple[str, list[str], bool]:
+        workspace = self.experiment_controller.workspace
+        if workspace is None or self.current_event is None:
+            return "", [], False
+        current_path = Path(self.project.file_path).resolve(strict=False) if self.project.file_path else None
+        loaded_path = Path(self._current_loaded_variant_path).resolve(strict=False) if self._current_loaded_variant_path else None
+        if current_path is None or loaded_path is None or current_path != loaded_path:
+            return "", [], False
+        base_project = self._load_current_experiment_base_project()
+        if base_project is None:
+            return "", [], False
+        base_event = self._find_base_event_for_current_event(base_project, self.current_event)
+        if base_event is None:
+            return "实验新增", ["新增 Event"], False
+
+        from audioforge.app.services.experiment_exporter import ExperimentExporter
+
+        exporter = ExperimentExporter.create_default(runtime_exporter=self.exporter)
+        diff = exporter._diff_event(base_event, self.current_event)
+        if not diff:
+            return "底板继承", [], True
+
+        event_field_labels = {
+            "MaxInstances": "实例上限",
+            "CooldownSeconds": "冷却时间",
+            "StealPolicy": "抢占策略",
+        }
+        audio_field_labels = {
+            "Bus": "Bus",
+            "PlayMode": "播放模式",
+            "VolumeDb": "音量",
+            "PitchCents": "音高",
+            "LoadPolicy": "加载方式",
+            "AvoidImmediateRepeat": "避免重复",
+            "Clips": "片段结构",
+        }
+        diff_fields: list[str] = []
+        for key, value in diff.items():
+            if key == "Audio" and isinstance(value, dict):
+                for audio_key in value:
+                    if audio_key in {"AudioId", "DisplayName"}:
+                        continue
+                    diff_fields.append(audio_field_labels.get(audio_key, audio_key))
+                continue
+            diff_fields.append(event_field_labels.get(key, key))
+        return "实验修改", diff_fields, True
+
+    def _refresh_experiment_ux_context(self) -> None:
+        workspace = self.experiment_controller.workspace
+        if workspace is None:
+            self.window.set_experiment_autosave_history([])
+            self.window.set_experiment_status_strip(
+                summary="",
+                detail="",
+                preview_base_enabled=False,
+                compare_enabled=False,
+                restore_enabled=False,
+            )
+            return
+        history_entries = self._current_project_autosave_entries()
+        self.window.set_experiment_autosave_history(history_entries)
+
+        base_name = workspace.base_project_abs_path.name
+        loaded_indices = self._current_loaded_experiment_indices()
+        current_path = Path(self.project.file_path).resolve(strict=False) if self.project.file_path else None
+        base_path = workspace.base_project_abs_path.resolve(strict=False)
+
+        if current_path is not None and current_path == base_path:
+            self.window.set_experiment_status_strip(
+                summary=f"实验上下文：底板 {base_name}",
+                detail="当前正在查看底板工程；切回方案后可直接查看差异、试听底板与恢复最近快照。",
+                preview_base_enabled=False,
+                compare_enabled=False,
+                restore_enabled=bool(history_entries),
+            )
+            return
+
+        if loaded_indices is None:
+            self.window.set_experiment_status_strip(
+                summary=f"实验工作区已打开：底板 {base_name}",
+                detail="当前尚未定位到具体方案副本。",
+                preview_base_enabled=False,
+                compare_enabled=False,
+                restore_enabled=bool(history_entries),
+            )
+            return
+
+        task_index, variant_index = loaded_indices
+        task = workspace.tasks[task_index]
+        variant = task.variants[variant_index]
+        baseline_label = task.baseline_variant.name if task.baseline_variant is not None else workspace.base_project_abs_path.name
+        origin_label, diff_fields, has_base_counterpart = self._current_event_experiment_diff_state()
+        object_name = "未选择对象"
+        if self.current_event is not None:
+            object_name = self.current_event.display_name or self.current_event.id
+        summary = f"实验上下文：基线 {baseline_label} | 任务 {task.name} | 方案 {variant.name}"
+        if origin_label:
+            summary += f" | 当前对象 {origin_label}"
+        if self.current_event is None:
+            detail = "选择一个事件后，可查看相对任务基线的差异摘要，并直接试听基线版本。"
+        elif origin_label == "实验新增":
+            detail = f"当前对象 {object_name} 为实验新增，任务基线中没有同名事件。"
+        elif diff_fields:
+            detail = f"当前对象 {object_name} 相对任务基线的差异：{'、'.join(diff_fields[:6])}"
+        else:
+            detail = f"当前对象 {object_name} 与任务基线一致，可直接试听基线确认。"
+        self.window.set_experiment_status_strip(
+            summary=summary,
+            detail=detail,
+            preview_base_enabled=bool(self.current_event is not None and has_base_counterpart),
+            compare_enabled=not self._current_experiment_is_read_only_baseline(),
+            restore_enabled=bool(history_entries),
+        )
+
+    def _compare_current_experiment_variant(self) -> None:
+        indices = self._current_loaded_experiment_indices()
+        if indices is None:
+            self.window.present_notification(UserNotification(level="info", title="查看差异", message="当前没有可对比的实验方案。"))
+            return
+        self._compare_experiment_delta(indices[0], indices[1])
+
+    def _restore_latest_experiment_snapshot(self) -> None:
+        entries = self._current_project_autosave_entries()
+        if not entries:
+            self.window.present_notification(UserNotification(level="info", title="恢复最近快照", message="当前方案还没有可恢复的自动保存快照。"))
+            return
+        self._restore_autosave_snapshot(str(entries[0].get("path", "")))
+
+    def preview_base_event(self, silent_log: bool = False) -> None:
+        self._preview_playback().preview_base_event(silent_log=silent_log)
 
     def _make_unique_audio_id(self, base_id: str, reserved_audio_ids: set[str] | None = None) -> str:
         blocked_ids = set(self.project.audio_objects.keys())
@@ -969,26 +1298,31 @@ class MainController(QObject):
     def new_project(self) -> None:
         if not self._confirm_abandon_unsaved_changes():
             return
-        self.project = AudioProject.create_empty()
+        self._reset_experiment_loaded_variant_context()
+        self._apply_project_session_state(self.project_lifecycle_controller.create_new_project())
         self.preview_service.clear()
         self.history.clear()
-        self.selected_event_id = None
-        self.selected_event_ids = []
-        self.selected_folder_id = self.project.root_folder_ids[0]
         self.is_dirty = False
         self._reset_diagnostic_snapshot()
         self._clear_recovery_snapshot()
         self.window.append_log("已新建工程。")
         self._refresh_ui()
 
-    def open_project(self) -> None:
-        if not self._confirm_abandon_unsaved_changes():
-            return
-        file_path = self.window.ask_open_project_path()
-        if not file_path:
-            return
+    def open_project(self, path: str = "") -> None:
+        """打开工程文件。
 
-        self._open_project_path(Path(file_path))
+        Args:
+            path: 若非空则直接打开指定路径；否则弹出文件选择对话框。
+        """
+        if path:
+            self._open_project_path(Path(path))
+        else:
+            if not self._confirm_abandon_unsaved_changes():
+                return
+            file_path = self.window.ask_open_project_path()
+            if not file_path:
+                return
+            self._open_project_path(Path(file_path))
 
     def open_recent_project(self, file_path: str) -> None:
         if not file_path:
@@ -998,74 +1332,51 @@ class MainController(QObject):
         self._open_project_path(Path(file_path))
 
     def _open_project_path(self, file_path: Path) -> None:
-        if not file_path.exists():
-            QMessageBox.warning(self.window, "打开工程失败", f"找不到工程文件：{file_path}")
-            self._remove_recent_project(str(file_path))
+        result = self.project_lifecycle_controller.open_project(str(file_path))
+        self._apply_result_notifications(result)
+        self._sync_recent_projects_ui_from_result(result)
+        if not result.success or result.value is None or result.value.session_state is None:
             return
 
-        try:
-            self.project = self.serializer.load(file_path)
-        except Exception as exc:
-            QMessageBox.critical(self.window, "打开工程失败", str(exc))
-            return
-
+        self._reset_experiment_loaded_variant_context()
+        self._apply_project_session_state(result.value.session_state)
         self.preview_service.clear()
         self.history.clear()
         self.is_dirty = False
         self._reset_diagnostic_snapshot()
         self._clear_recovery_snapshot()
-        self.selected_event_id = next(iter(self.project.events), None)
-        self.selected_event_ids = [self.selected_event_id] if self.selected_event_id else []
-        self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id) if self.selected_event_id else next(iter(self.project.root_folder_ids), None)
         self.window.append_log(f"已打开工程：{file_path}")
-        self._remember_recent_project(str(file_path))
         self._refresh_ui()
 
     def save_project(self) -> bool:
+        suggested_name = f"{self.project.name}{PROJECT_EXTENSION}"
         file_path = self.project.file_path
         if not file_path:
-            suggested_name = f"{self.project.name}{PROJECT_EXTENSION}"
             file_path = self.window.ask_save_project_path(suggested_name)
-        if not file_path:
-            return False
-
-        save_path = Path(file_path)
-        if save_path.suffix != PROJECT_EXTENSION:
-            save_path = save_path.with_suffix(PROJECT_EXTENSION)
-
-        try:
-            self.serializer.save(self.project, save_path)
-        except Exception as exc:
-            QMessageBox.critical(self.window, "保存工程失败", str(exc))
+        result = self.project_lifecycle_controller.save_project(self.project, file_path, suggested_name)
+        self._apply_result_notifications(result)
+        self._sync_recent_projects_ui_from_result(result)
+        if result.cancelled or not result.success or result.value is None or result.value.save_path is None:
             return False
 
         self.is_dirty = False
         self._clear_recovery_snapshot()
-        self._remember_recent_project(str(save_path))
-        self.window.append_log(f"已保存工程：{save_path}")
+        self.window.append_log(f"已保存工程：{result.value.save_path}")
         self._refresh_ui()
         return True
 
     def save_project_as(self) -> bool:
         suggested_name = f"{self.project.name}{PROJECT_EXTENSION}"
         file_path = self.window.ask_save_project_path(suggested_name)
-        if not file_path:
-            return False
-
-        save_path = Path(file_path)
-        if save_path.suffix != PROJECT_EXTENSION:
-            save_path = save_path.with_suffix(PROJECT_EXTENSION)
-
-        try:
-            self.serializer.save(self.project, save_path)
-        except Exception as exc:
-            QMessageBox.critical(self.window, "另存工程失败", str(exc))
+        result = self.project_lifecycle_controller.save_project(self.project, file_path, suggested_name)
+        self._apply_result_notifications(result)
+        self._sync_recent_projects_ui_from_result(result)
+        if result.cancelled or not result.success or result.value is None or result.value.save_path is None:
             return False
 
         self.is_dirty = False
         self._clear_recovery_snapshot()
-        self._remember_recent_project(str(save_path))
-        self.window.append_log(f"已另存工程：{save_path}")
+        self.window.append_log(f"已另存工程：{result.value.save_path}")
         self._refresh_ui()
         return True
 
@@ -1120,6 +1431,7 @@ class MainController(QObject):
         for event_id in binding_event_ids:
             if event_id not in event_ids:
                 event_ids.append(event_id)
+
         if event_ids:
             self.selected_event_ids = event_ids
             current_event = self.current_event
@@ -1135,9 +1447,16 @@ class MainController(QObject):
             self.selected_event_id = None
             self.selected_audio_id = None
             self.selected_source_binding_tokens = []
+            self.selected_folder_id = folder_ids[0] if folder_ids else None
             if folder_ids:
-                self.selected_folder_id = folder_ids[0]
                 self.window.explorer_tabs.setCurrentIndex(3)
+        else:
+            self.selected_event_ids = []
+            self.selected_event_id = None
+            self.selected_audio_id = None
+            self.selected_source_binding_tokens = []
+
+        self.window.audio_tree.select_audio_id(self.selected_audio_id, emit_signal=False)
         self.window.set_event_details(self.current_event if len(self.selected_event_ids) <= 1 else None)
         self._sync_source_binding_selection_to_clip_table()
         self._sync_multi_selection_affordances()
@@ -1640,7 +1959,7 @@ class MainController(QObject):
         event = self.current_event
         if event is None:
             return
-        session = self._current_audition_session()
+        session = self._audition_session
         if session is not None and session.event_id == event.id:
             self.preview_current_event(silent_log=True)
 
@@ -3026,6 +3345,9 @@ class MainController(QObject):
         elif target_kind == "clip":
             title = f"片段 {clip.id}"
             detail = f"事件 {event_name} | 资源 {asset_key} | Bus {event.bus}"
+        elif target_kind == "base-event":
+            title = f"底板事件 {event_name}"
+            detail = f"片段 {clip.id} | 资源 {asset_key} | Bus {event.bus}"
         else:
             title = f"事件 {event_name}"
             detail = f"片段 {clip.id} | 资源 {asset_key} | Bus {event.bus}"
@@ -3147,226 +3469,31 @@ class MainController(QObject):
         self._sync_preview_transport_state()
 
     def preview_current_event(self, silent_log: bool = False) -> None:
-        event = self.current_event
-        if event is None:
-            QMessageBox.information(self.window, "试听事件", "请先选择一个事件，再执行试听。")
-            return
-        preview_gamesync = self._current_preview_gamesync_context()
-        result = self.preview_service.preview_event(
-            event,
-            preview_duration_resolver=self._resolve_preview_duration_seconds,
-            preview_gamesync=preview_gamesync,
-            game_parameters=self.project.game_parameters,
-            state_groups=self.project.state_groups,
-            switch_groups=self.project.switch_groups,
-        )
-        if not result.accepted:
-            self.window.clear_preview_audio_metrics(result.reason)
-            self._clear_audition_session(event.id)
-            if not silent_log:
-                self.window.append_log(f"试听被拒绝：{event.id}，原因：{result.reason}")
-            self._sync_preview_transport_state()
-            return
-        clip = next((item for item in event.clips if item.id == result.clip_id), None)
-        playback_message = "Simulated only"
-        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, result.volume_db, preview_gamesync=preview_gamesync)
-        if clip is not None and clip.source_path:
-            preview_preserve_timing_pitch_cents = result.pitch_cents + result.combo_pitch_cents
-            session = self._create_audition_session(
-                event=event,
-                clip=clip,
-                target_kind="event",
-                effective_volume_db=effective_volume_db,
-                tracked_base_volume_db=result.volume_db,
-                pitch_cents=0,
-                preserve_timing_pitch_cents=preview_preserve_timing_pitch_cents,
-                trim_start_ms=clip.trim_start_ms,
-                trim_end_ms=clip.trim_end_ms,
-                fade_in_ms=clip.fade_in_ms,
-                fade_out_ms=clip.fade_out_ms,
-            )
-            if result.stolen_oldest:
-                self.playback_service.stop_oldest(session.playback_owner_id)
-            playback_message = self._start_audition_session(session)
-        else:
-            self.window.clear_preview_audio_metrics("当前试听片段没有可分析的源文件。")
-            self._clear_audition_session(event.id)
-        if not silent_log:
-            self.window.append_log(
-                f"试听 {event.id}：片段={result.clip_id} 资源={result.asset_key} 事件音量={result.volume_db:.2f}dB 总线后={effective_volume_db:.2f}dB 基础音高={result.pitch_cents} 连击加成={result.combo_pitch_cents} 连击={result.combo_step} 活动实例={result.active_instances} 时长={result.playback_duration_seconds:.2f}s 播放={playback_message}"
-            )
-        self._sync_preview_transport_state()
+        self._preview_playback().preview_current_event(silent_log=silent_log)
 
     def preview_selected_clip(self, clip_id: str) -> None:
-        event = self.current_event
-        if event is None:
-            return
-        clip = next((item for item in event.clips if item.id == clip_id), None)
-        if clip is None:
-            return
-        if not clip.source_path:
-            self.window.clear_preview_audio_metrics("当前片段没有可分析的源文件。")
-            self._clear_audition_session(event.id)
-            self.window.append_log(f"试听片段被拒绝：{clip_id} 没有源文件。")
-            self._sync_preview_transport_state()
-            return
-        resolved_volume_db, resolved_pitch_cents, is_muted = self._resolve_preview_event_mix(event)
-        if is_muted:
-            self.window.clear_preview_audio_metrics("当前事件被 State Override 静音。")
-            self._clear_audition_session(event.id)
-            self.window.append_log(f"试听片段被拒绝：{event.id} 当前被 State Override 静音。")
-            self._sync_preview_transport_state()
-            return
-        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, resolved_volume_db, preview_gamesync=self._current_preview_gamesync_context())
-        session = self._create_audition_session(
-            event=event,
-            clip=clip,
-            target_kind="clip",
-            effective_volume_db=effective_volume_db,
-            tracked_base_volume_db=resolved_volume_db,
-            pitch_cents=0,
-            preserve_timing_pitch_cents=resolved_pitch_cents,
-            trim_start_ms=clip.trim_start_ms,
-            trim_end_ms=clip.trim_end_ms,
-            fade_in_ms=clip.fade_in_ms,
-            fade_out_ms=clip.fade_out_ms,
-        )
-        playback_message = self._start_audition_session(session)
-        self.window.append_log(
-            f"试听片段 {clip.id}：资源={clip.asset_key} 事件={event.id} 总线后={effective_volume_db:.2f}dB 播放={playback_message}"
-        )
-        self._sync_preview_transport_state()
+        self._preview_playback().preview_selected_clip(clip_id)
 
     def preview_selected_clip_segment(self, clip_id: str, start_ms: int, end_ms: int) -> None:
-        event = self.current_event
-        if event is None:
-            return
-        clip = next((item for item in event.clips if item.id == clip_id), None)
-        if clip is None:
-            return
-        if not clip.source_path:
-            self.window.clear_preview_audio_metrics("当前片段没有可分析的源文件。")
-            self._clear_audition_session(event.id)
-            self.window.append_log(f"局部试听被拒绝：{clip_id} 没有源文件。")
-            self._sync_preview_transport_state()
-            return
-        segment_start_ms = max(MIN_CLIP_TIME_MS, int(start_ms))
-        segment_end_ms = max(segment_start_ms + 1, int(end_ms))
-        segment_length_ms = max(1, segment_end_ms - segment_start_ms)
-        segment_fade_ms = min(40, max(8, segment_length_ms // 12))
-        resolved_volume_db, resolved_pitch_cents, is_muted = self._resolve_preview_event_mix(event)
-        if is_muted:
-            self.window.clear_preview_audio_metrics("当前事件被 State Override 静音。")
-            self._clear_audition_session(event.id)
-            self.window.append_log(f"局部试听被拒绝：{event.id} 当前被 State Override 静音。")
-            self._sync_preview_transport_state()
-            return
-        effective_volume_db = self._resolve_effective_preview_volume_db(event.bus, resolved_volume_db, preview_gamesync=self._current_preview_gamesync_context())
-        session = self._create_audition_session(
-            event=event,
-            clip=clip,
-            target_kind="segment",
-            effective_volume_db=effective_volume_db,
-            tracked_base_volume_db=resolved_volume_db,
-            pitch_cents=0,
-            preserve_timing_pitch_cents=resolved_pitch_cents,
-            trim_start_ms=segment_start_ms,
-            trim_end_ms=segment_end_ms,
-            fade_in_ms=segment_fade_ms,
-            fade_out_ms=segment_fade_ms,
-        )
-        playback_message = self._start_audition_session(session)
-        self.window.append_log(
-            f"局部试听片段 {clip.id}：资源={clip.asset_key} 区间={segment_start_ms}-{segment_end_ms} ms 总线后={effective_volume_db:.2f}dB 播放={playback_message}"
-        )
-        self._sync_preview_transport_state()
+        self._preview_playback().preview_selected_clip_segment(clip_id, start_ms, end_ms)
 
     def play_recent_preview_transport(self) -> None:
-        self._refresh_recent_preview_session()
-        session = self._current_audition_session()
-        if session is None:
-            self.preview_current_event()
-            return
-        if self.playback_service.has_active_event(session.playback_owner_id):
-            self.window.append_log(f"最近试听已在播放：{session.title}")
-            self._sync_preview_transport_state()
-            return
-        playback_message = self._play_audition_session(session)
-        self._publish_audition_session(session)
-        self.window.append_log(f"已播放最近试听：{session.title} 播放={playback_message}")
-        self._sync_preview_transport_state()
+        self._preview_playback().play_recent_preview_transport()
 
     def pause_current_event_preview(self) -> None:
-        session = self._current_audition_session()
-        if session is None:
-            QMessageBox.information(self.window, "暂停试听", "当前没有可暂停的试听会话。")
-            return
-        if not self.playback_service.pause_event(session.playback_owner_id):
-            self.window.append_log(f"暂停试听被忽略：{session.title} 当前没有可暂停的播放。")
-            self._sync_preview_transport_state()
-            return
-        self.window.append_log(f"已暂停试听：{session.title}")
-        self._sync_preview_transport_state()
+        self._preview_playback().pause_current_event_preview()
 
     def resume_current_event_preview(self) -> None:
-        session = self._current_audition_session()
-        if session is None:
-            QMessageBox.information(self.window, "继续试听", "当前没有暂停中的试听会话。")
-            return
-        if not self.playback_service.resume_event(session.playback_owner_id):
-            self.window.append_log(f"继续试听被忽略：{session.title} 当前没有暂停中的播放。")
-            self._sync_preview_transport_state()
-            return
-        self.window.append_log(f"已继续试听：{session.title}")
-        self._sync_preview_transport_state()
+        self._preview_playback().resume_current_event_preview()
 
     def restart_current_event_preview(self) -> None:
-        session = self._current_audition_session()
-        if session is None:
-            QMessageBox.information(self.window, "从头播放", "当前对象还没有可重播的试听内容。")
-            return
-        self.playback_service.stop_event(session.playback_owner_id)
-        if session.event_id is not None:
-            self.preview_service.stop_event(session.event_id)
-        playback_message = self._play_audition_session(session)
-        self._publish_audition_session(session)
-        self.window.append_log(
-            f"从头播放 {session.title}：片段={session.clip_id} 资源={session.asset_key} 播放={playback_message}"
-        )
-        self._sync_preview_transport_state()
+        self._preview_playback().restart_current_event_preview()
 
     def stop_current_event_preview(self) -> None:
-        session = self._current_audition_session()
-        if session is None:
-            QMessageBox.information(self.window, "停止试听", "当前没有可停止的试听会话。")
-            return
-        self.playback_service.stop_event(session.playback_owner_id)
-        if session.event_id is not None:
-            self.preview_service.stop_event(session.event_id)
-        self.window.append_log(f"已停止试听：{session.title}")
-        self._sync_preview_transport_state()
+        self._preview_playback().stop_current_event_preview()
 
     def stop_current_bus_preview(self) -> None:
-        session = self._current_audition_session()
-        event = self.current_event
-        if event is None and session is not None and session.event_id is not None:
-            event = self.project.events.get(session.event_id)
-        if event is None:
-            QMessageBox.information(self.window, "停止总线试听", "请先选择一个事件，以确定要停止的总线。")
-            return
-        affected_bus_names = {
-            bus_name
-            for bus_name in self.project.settings.buses
-            if self._bus_routes_through(bus_name, event.bus)
-        }
-        affected_bus_names.add(event.bus)
-        bus_event_ids = [item.id for item in self.project.events.values() if item.bus in affected_bus_names]
-        self.playback_service.stop_buses(affected_bus_names)
-        self.preview_service.stop_events(bus_event_ids)
-        self.window.append_log(
-            f"已停止总线试听：{event.bus}（覆盖总线 {len(affected_bus_names)} 个，事件 {len(bus_event_ids)} 个）"
-        )
-        self._sync_preview_transport_state()
+        self._preview_playback().stop_current_bus_preview()
 
     def _bus_routes_through(self, bus_name: str, target_bus_name: str) -> bool:
         config_map = self._project_bus_config_map()
@@ -3803,7 +3930,7 @@ class MainController(QObject):
             return None
         return ExportRequest(
             scope=scope,
-            selected_event_ids=tuple(selected_event_ids if scope == "selection" else ()),
+            selected_event_ids=tuple(selected_event_ids if scope in {"selection", "incremental"} else ()),
             selection_label=selection_label,
         )
 
@@ -3932,6 +4059,11 @@ class MainController(QObject):
         return list(reversed(names))
 
     def _apply_mutation(self, description: str, mutation, merge_key: str | None = None) -> bool:
+        if self._current_experiment_is_read_only_baseline():
+            self.window.present_notification(
+                UserNotification(level="info", title="只读基线", message="当前加载的是 default 基线，只允许查看和复制，不能直接修改。")
+            )
+            return False
         before = self._capture_snapshot()
         changed = bool(mutation())
         after = self._capture_snapshot()
@@ -3983,110 +4115,148 @@ class MainController(QObject):
         return self.save_project()
 
     def _save_recovery_snapshot(self) -> None:
-        try:
-            self.recovery_service.save_snapshot(self.project)
-        except Exception as exc:
-            self.window.append_log(f"自动恢复快照保存失败：{type(exc).__name__}: {exc}")
-            try:
-                self.recovery_service.clear_snapshot()
-            except Exception as cleanup_exc:
-                self.window.append_log(f"自动恢复快照清理失败：{type(cleanup_exc).__name__}: {cleanup_exc}")
+        result = self.recovery_autosave_controller.save_recovery_snapshot(self.project)
+        self._apply_result_notifications(result, present=False)
 
-    def _clear_recovery_snapshot(self) -> None:
-        try:
-            self.recovery_service.clear_snapshot()
-        except Exception as exc:
-            self.window.append_log(f"自动恢复快照清理失败：{exc}")
+    def _restore_autosave_preferences(self) -> None:
+        preferences = self.recovery_autosave_controller.restore_preferences()
+        self._autosave_enabled = preferences.enabled
+        self._autosave_interval_minutes = preferences.interval_minutes
+        self.window.set_autosave_preferences(enabled=preferences.enabled, interval_minutes=preferences.interval_minutes)
+        self._apply_autosave_settings()
+        self._refresh_autosave_history()
 
-    def _restore_recovery_snapshot_if_available(self) -> None:
-        if not self.recovery_service.has_snapshot():
+    def _apply_autosave_settings(self) -> None:
+        if not self._autosave_enabled:
+            self._autosave_timer.stop()
             return
-        try:
-            snapshot = self.recovery_service.load_snapshot()
-        except Exception as exc:
-            self.window.append_log(f"自动恢复快照损坏，已忽略：{exc}")
-            self._clear_recovery_snapshot()
-            return
+        self._autosave_timer.setInterval(self._autosave_interval_minutes * 60 * 1000)
+        self._autosave_timer.start()
 
-        prompt = (
-            f"检测到未保存的自动恢复快照。\n\n"
-            f"工程路径：{snapshot.original_project_path or '未保存工程'}\n"
-            f"快照时间：{snapshot.saved_at}\n\n"
-            f"是否恢复这份快照？"
+    def _on_autosave_settings_changed(self) -> None:
+        preferences = self.recovery_autosave_controller.update_preferences(self.window.current_autosave_preferences())
+        self._autosave_enabled = preferences.enabled
+        self._autosave_interval_minutes = preferences.interval_minutes
+        self.window.set_autosave_preferences(enabled=self._autosave_enabled, interval_minutes=self._autosave_interval_minutes)
+        self._apply_autosave_settings()
+
+    def _build_autosave_history_entries(self) -> list[dict[str, object]]:
+        return self.recovery_autosave_controller.build_history_entries()
+
+    def _current_project_autosave_entries(self) -> list[dict[str, object]]:
+        return self.recovery_autosave_controller.current_project_history_entries(
+            self.project.file_path,
+            self._current_loaded_variant_path,
         )
-        result = QMessageBox.question(self.window, "恢复自动保存快照", prompt)
-        if result != QMessageBox.StandardButton.Yes:
-            self._clear_recovery_snapshot()
+
+    def _refresh_autosave_history(self) -> None:
+        entries = self._build_autosave_history_entries()
+        self.window.set_autosave_history(entries)
+        self.window.set_experiment_autosave_history(self._current_project_autosave_entries() if self.experiment_controller.workspace is not None else [])
+
+    def _perform_autosave(self) -> None:
+        result = self.recovery_autosave_controller.perform_autosave(
+            self.project,
+            enabled=self._autosave_enabled,
+            is_dirty=self.is_dirty,
+        )
+        if result.cancelled:
+            return
+        self._apply_result_notifications(result, present=False)
+        if not result.success or result.value is None:
+            return
+        self.window.append_log(f"已自动保存工程快照：{result.value}")
+        self._refresh_autosave_history()
+
+    def _restore_autosave_snapshot(self, snapshot_path: str) -> None:
+        prepare_result = self.recovery_autosave_controller.prepare_autosave_restore(snapshot_path)
+        self._apply_result_notifications(prepare_result)
+        if not prepare_result.success or prepare_result.value is None:
+            self._refresh_autosave_history()
+            return
+        if not self.window.confirm_request(prepare_result.value):
             return
 
-        self.project = snapshot.project
+        restore_result = self.recovery_autosave_controller.restore_autosave_snapshot(snapshot_path)
+        self._apply_result_notifications(restore_result)
+        if not restore_result.success or restore_result.value is None:
+            return
+        self._apply_project_session_state(restore_result.value)
         self.preview_service.clear()
         self.history.clear()
         self.is_dirty = True
         self._reset_diagnostic_snapshot()
-        self.selected_event_id = next(iter(self.project.events), None)
-        self.selected_event_ids = [self.selected_event_id] if self.selected_event_id else []
-        self.selected_folder_id = self.project.find_event_folder_id(self.selected_event_id) if self.selected_event_id else next(iter(self.project.root_folder_ids), None)
+        self.window.append_log(f"已恢复自动保存快照：{Path(snapshot_path).name}")
+        self._refresh_ui()
+
+    def _clear_recovery_snapshot(self) -> None:
+        result = self.recovery_autosave_controller.clear_snapshot()
+        self._apply_result_notifications(result, present=False)
+
+    def _restore_recovery_snapshot_if_available(self) -> None:
+        prepare_result = self.recovery_autosave_controller.prepare_recovery_restore()
+        self._apply_result_notifications(prepare_result, present=False)
+        if prepare_result.cancelled:
+            return
+        if not prepare_result.success or prepare_result.value is None:
+            self._clear_recovery_snapshot()
+            return
+        if not self.window.confirm_request(prepare_result.value):
+            self._clear_recovery_snapshot()
+            return
+
+        restore_result = self.recovery_autosave_controller.restore_recovery_snapshot()
+        self._apply_result_notifications(restore_result, present=False)
+        if not restore_result.success or restore_result.value is None:
+            self._clear_recovery_snapshot()
+            return
+        self._apply_project_session_state(restore_result.value)
+        self.preview_service.clear()
+        self.history.clear()
+        self.is_dirty = True
+        self._reset_diagnostic_snapshot()
         self.window.append_log("已恢复自动保存快照。")
         self._refresh_ui()
 
     def _recent_projects(self) -> list[str]:
-        value = self.settings.value("recentProjects", [])
-        if isinstance(value, str):
-            return [value] if value else []
-        return [str(item) for item in value or []]
+        return self.project_lifecycle_controller.recent_projects()
 
     def _remember_recent_project(self, file_path: str) -> None:
-        recent = [item for item in self._recent_projects() if item != file_path]
-        recent.insert(0, file_path)
-        self.settings.setValue("recentProjects", recent[:10])
-        self._sync_recent_projects_ui()
+        self.window.set_recent_projects(self.project_lifecycle_controller.remember_recent_project(file_path))
 
     def _remove_recent_project(self, file_path: str) -> None:
-        recent = [item for item in self._recent_projects() if item != file_path]
-        self.settings.setValue("recentProjects", recent)
-        self._sync_recent_projects_ui()
+        self.window.set_recent_projects(self.project_lifecycle_controller.remove_recent_project(file_path))
 
     def _sync_recent_projects_ui(self) -> None:
         self.window.set_recent_projects(self._recent_projects())
 
     def _restore_window_preferences(self) -> None:
-        default_preferences = self.window.ui_preferences()
-        preferences = dict(default_preferences)
-        stored_preferences = self.settings.value("uiPreferencesJson", "")
-        if isinstance(stored_preferences, str) and stored_preferences.strip():
-            try:
-                parsed_preferences = json.loads(stored_preferences)
-            except json.JSONDecodeError:
-                parsed_preferences = None
-            if isinstance(parsed_preferences, dict):
-                preferences.update(parsed_preferences)
-        else:
-            preferences.update(
-                {
-                    "ui_scale": self.settings.value("uiScale", default_preferences["ui_scale"]),
-                    "workspace_splitter_sizes": self.settings.value("workspaceSplitterSizes", default_preferences["workspace_splitter_sizes"]),
-                    "main_splitter_sizes": self.settings.value("mainSplitterSizes", default_preferences["main_splitter_sizes"]),
-                    "active_editor_tab": self.settings.value("activeEditorTab", default_preferences["active_editor_tab"]),
-                    "inspector_splitter_sizes": self.settings.value("inspectorSplitterSizes", default_preferences["inspector_splitter_sizes"]),
-                    "content_top_splitter_sizes": self.settings.value("contentTopSplitterSizes", default_preferences["content_top_splitter_sizes"]),
-                    "active_contents_tab": self.settings.value("activeContentsTab", default_preferences["active_contents_tab"]),
-                    "event_import_template": self.settings.value("eventImportTemplate", default_preferences["event_import_template"]),
-                }
-            )
+        preferences = self.project_lifecycle_controller.restore_ui_preferences(self.window.ui_preferences())
         self.window.apply_ui_preferences(preferences)
 
     def _save_window_preferences(self) -> None:
-        preferences = self.window.ui_preferences()
-        self.settings.setValue("uiPreferencesJson", json.dumps(preferences, ensure_ascii=False))
-        self.settings.setValue("uiScale", preferences["ui_scale"])
-        self.settings.setValue("workspaceSplitterSizes", preferences["workspace_splitter_sizes"])
-        self.settings.setValue("mainSplitterSizes", preferences["main_splitter_sizes"])
-        self.settings.setValue("activeEditorTab", preferences["active_editor_tab"])
-        self.settings.setValue("inspectorSplitterSizes", preferences["inspector_splitter_sizes"])
-        self.settings.setValue("contentTopSplitterSizes", preferences["content_top_splitter_sizes"])
-        self.settings.setValue("activeContentsTab", preferences["active_contents_tab"])
-        self.settings.setValue("eventImportTemplate", preferences["event_import_template"])
+        self.project_lifecycle_controller.save_ui_preferences(self.window.ui_preferences())
+
+    def _apply_project_session_state(self, session_state: ProjectSessionState) -> None:
+        self.project = session_state.project
+        self.selected_event_id = session_state.selected_event_id
+        self.selected_event_ids = list(session_state.selected_event_ids)
+        self.selected_folder_id = session_state.selected_folder_id
+        self.selected_audio_id = session_state.selected_audio_id
+        self.selected_source_binding_tokens = list(session_state.selected_source_binding_tokens)
+
+    def _apply_result_notifications(self, result: WorkflowResult[object], *, present: bool = True) -> None:
+        for notification in result.notifications:
+            if notification.log_message:
+                self.window.append_log(notification.log_message)
+            if present:
+                self.window.present_notification(notification)
+
+    def _sync_recent_projects_ui_from_result(self, result: WorkflowResult[object]) -> None:
+        payload = result.value
+        if payload is None or not hasattr(payload, "recent_projects"):
+            return
+        self.window.set_recent_projects(list(getattr(payload, "recent_projects")))
 
     def validate_project(self) -> None:
         issues = self.validator.validate(self.project)
@@ -4098,121 +4268,10 @@ class MainController(QObject):
         self._publish_diagnostic_snapshot()
 
     def build_project(self) -> None:
-        if self._is_build_running():
-            logger.warning("Build request ignored because another build is already running.")
-            self.window.append_log("构建请求已忽略：当前已有构建任务在执行。")
-            self.window.set_build_status(
-                "构建正在进行中。",
-                "请等待当前构建完成后再发起新的构建请求。",
-                activate_results=True,
-            )
-            self._set_build_diagnostic_summary(
-                "构建正在进行中。",
-                "请等待当前构建完成后再发起新的构建请求。",
-                status="warning",
-            )
-            self._publish_diagnostic_snapshot()
-            return
-
-        build_request = self._current_build_request()
-        if build_request is None:
-            message = self._selection_build_unavailable_message()
-            self.window.set_build_plan_summary("选中构建未就绪。", message)
-            self.window.set_build_status("选中构建无法开始。", message, activate_results=True)
-            self.window.set_build_report("构建未开始\n\n原因：当前选区没有可导出的事件。\n请先选择事件或包含事件的文件夹。")
-            self.window.show_report_tab(2)
-            self.window.append_log(f"选中构建已中止：{message}")
-            self._set_build_diagnostic_summary("选中构建无法开始。", message, status="warning")
-            self._publish_diagnostic_snapshot()
-            return
-
-        requested_scope_label = self._build_scope_label(build_request.scope)
-        project_snapshot = copy.deepcopy(self.project)
-        log_config = get_runtime_log_config()
-        self.window.build_execute_button.setEnabled(False)
-        self.window.build_button.setEnabled(False)
-        self.window.set_build_status(
-            "正在构建导出，请稍候。",
-            f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 正在导出到：{self.project.settings.export_root}",
-            activate_results=True,
-        )
-        self.window.set_build_plan_summary(
-            "正在生成构建计划。",
-            f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 已切换到后台构建，界面保持可响应。",
-        )
-        self.window.append_log(f"已开始构建导出：模式={requested_scope_label} 目标={build_request.selection_label}")
-        self._set_build_diagnostic_summary(
-            "正在构建导出，请稍候。",
-            f"模式：{requested_scope_label} | 目标：{build_request.selection_label} | 正在导出到：{self.project.settings.export_root}",
-            status="info",
-            metadata={
-                "requested_scope": build_request.scope,
-                "requested_scope_label": requested_scope_label,
-                "selection_label": build_request.selection_label,
-                "export_root": self.project.settings.export_root,
-            },
-        )
-        if log_config is not None:
-            self.window.append_log(f"诊断日志路径：{log_config.latest_log}")
-        logger.info(
-            "Build requested scope=%s selection=%s export_root=%s project_name=%s",
-            build_request.scope,
-            build_request.selection_label,
-            self.project.settings.export_root,
-            self.project.name,
-        )
-        self.window.show_report_tab(2)
-        self._publish_diagnostic_snapshot()
-
-        export_root = self._resolve_project_relative_path(self.project.settings.export_root)
-        self._active_build_scope_label = requested_scope_label
-        self._active_build_export_root = export_root
-        self._start_build_worker(project_snapshot, export_root, build_request)
+        self._build_export().build_project()
 
     def preview_export_diff(self) -> None:
-        self.window.clear_build_status()
-        build_request = self._current_build_request()
-        if build_request is None:
-            message = self._selection_build_unavailable_message()
-            self.window.set_build_plan_summary("选中构建未就绪。", message)
-            self.window.set_build_report("构建计划不可用\n\n原因：当前选区没有可导出的事件。\n请先选择事件或包含事件的文件夹。")
-            self.window.show_report_tab(2)
-            self.window.append_log(f"选中构建预览已中止：{message}")
-            self._set_build_diagnostic_summary("构建计划不可用。", message, status="warning")
-            self._publish_diagnostic_snapshot()
-            return
-        export_root = self._resolve_project_relative_path(self.project.settings.export_root)
-        try:
-            plan = self.exporter.plan_export(self.project, export_root, build_request)
-            plan_summary, plan_detail = self._format_build_plan_summary(plan)
-            self.window.set_build_plan_summary(plan_summary, plan_detail)
-            self._set_build_diagnostic_summary(
-                plan_summary,
-                plan_detail,
-                status="info",
-                metadata={
-                    "requested_scope": plan.requested_scope,
-                    "requested_scope_label": self._build_scope_label(plan.requested_scope),
-                    "effective_scope": plan.effective_scope,
-                    "effective_scope_label": self._build_scope_label(plan.effective_scope),
-                    "selection_label": plan.selection_label,
-                    "rebuilt_asset_count": len(plan.rebuilt_asset_keys),
-                    "reused_asset_count": len(plan.reused_asset_keys),
-                    "removed_asset_count": len(plan.removed_asset_keys),
-                    "out_of_scope_dirty_count": len(plan.out_of_scope_dirty_asset_keys),
-                    "export_root": str(export_root),
-                },
-            )
-            report = self._format_export_diff_preview(export_root, plan)
-        except Exception as exc:
-            self.window.set_build_plan_summary("构建计划生成失败。", str(exc))
-            self._set_build_diagnostic_summary("构建计划生成失败。", str(exc), status="error")
-            report = f"导出差异预览失败\n\n导出目录：{export_root}\n原因：{exc}"
-            self.window.append_log(f"导出差异预览失败：{exc}")
-        self.window.set_build_report(report)
-        self.window.show_report_tab(2)
-        self.window.append_log("已生成导出差异预览。")
-        self._publish_diagnostic_snapshot()
+        self._build_export().preview_export_diff()
 
     def _create_build_validator(self) -> ProjectValidator:
         return ProjectValidator()
@@ -4243,139 +4302,19 @@ class MainController(QObject):
 
     @Slot(object, int)
     def _handle_build_validation_blocked(self, issues: list[ValidationIssue], error_count: int) -> None:
-        requested_scope_label = self._active_build_scope_label or "当前构建"
-        logger.info(
-            "Build blocked by validation scope=%s errors=%d",
-            requested_scope_label,
-            error_count,
-        )
-        self.window.set_validation_report(self._format_validation_report(issues), issues)
-        self.window.append_log(f"构建已中止，存在 {error_count} 个错误。")
-        self.window.set_build_plan_summary(
-            "构建已中止。",
-            f"{requested_scope_label} 在校验阶段被拦截：存在 {error_count} 个错误。",
-        )
-        self.window.set_build_status(
-            "构建已中止。",
-            f"校验阶段发现 {error_count} 个错误，请先在校验修复页处理后再重新构建。",
-        )
-        self.window.show_report_tab(1)
-        self.window.show_validation_summary(issues)
-        self._set_validation_diagnostic_summary(issues)
-        self._set_build_diagnostic_summary(
-            "构建已中止。",
-            f"{requested_scope_label} 在校验阶段被拦截：存在 {error_count} 个错误。",
-            status="error",
-            metadata={
-                "error_count": error_count,
-                "requested_scope_label": requested_scope_label,
-                "export_root": str(self._active_build_export_root or self.project.settings.export_root),
-            },
-        )
-        self._publish_diagnostic_snapshot()
+        self._build_export().handle_build_validation_blocked(issues, error_count)
 
     @Slot(str, object)
     def _handle_build_failure(self, error_message: str, plan: ExportPlan | None) -> None:
-        requested_scope_label = self._active_build_scope_label or "当前构建"
-        export_root = self._active_build_export_root or self._resolve_project_relative_path(self.project.settings.export_root)
-        logger.error(
-            "Build failed scope=%s export_root=%s error=%s",
-            requested_scope_label,
-            export_root,
-            error_message,
-        )
-        failure_message = f"构建失败：{error_message}"
-        self.window.append_log(failure_message)
-        self.window.set_build_status(
-            "构建失败。",
-            f"模式：{requested_scope_label} | 导出目录：{export_root} | 原因：{error_message}",
-            activate_results=True,
-        )
-        if plan is not None:
-            plan_summary, plan_detail = self._format_build_plan_summary(plan)
-            self.window.set_build_plan_summary(plan_summary, plan_detail)
-        self.window.set_build_report(
-            "\n".join(
-                [
-                    "构建失败",
-                    "",
-                    f"工程：{self.project.name}",
-                    f"请求范围：{requested_scope_label}",
-                    f"导出目录：{export_root}",
-                    f"原因：{error_message}",
-                ]
-            )
-        )
-        self.window.show_report_tab(2)
-        self._set_build_diagnostic_summary(
-            "构建失败。",
-            f"模式：{requested_scope_label} | 导出目录：{export_root} | 原因：{error_message}",
-            status="error",
-            metadata={
-                "requested_scope_label": requested_scope_label,
-                "export_root": str(export_root),
-                "selection_label": self._active_build_scope_label or requested_scope_label,
-            },
-        )
-        self._publish_diagnostic_snapshot()
-        QMessageBox.critical(self.window, "构建失败", error_message)
+        self._build_export().handle_build_failure(error_message, plan)
 
     @Slot(object, object)
     def _handle_build_success(self, result, issues: list[ValidationIssue]) -> None:
-        logger.info(
-            "Build succeeded export_root=%s report_file=%s rebuilt_assets=%d reused_assets=%d",
-            result.export_root,
-            result.report_file,
-            len(result.plan.rebuilt_asset_keys),
-            len(result.plan.reused_asset_keys),
-        )
-        requested_scope_label = self._active_build_scope_label or self._build_scope_label(result.plan.requested_scope)
-        build_report = self._format_build_report(result.report_file, result.manifest_file)
-        self.window.set_validation_report(self._format_validation_report(issues), issues)
-        self.window.append_log(f"构建完成：{result.data_file}")
-        self.window.append_log(f"已生成清单：{result.manifest_file}")
-        effective_scope_label = self._build_scope_label(result.plan.effective_scope)
-        scope_display = requested_scope_label if effective_scope_label == requested_scope_label else f"{requested_scope_label} -> {effective_scope_label}"
-        plan_summary, plan_detail = self._format_build_plan_summary(result.plan)
-        self.window.set_build_plan_summary(plan_summary, plan_detail)
-        self.window.set_build_status(
-            "构建完成。",
-            f"模式：{scope_display} | 已导出到：{result.data_file} | 清单：{result.manifest_file}",
-            activate_results=True,
-        )
-        self.window.set_build_report(build_report)
-        self.window.show_report_tab(2)
-        self._set_validation_diagnostic_summary(issues)
-        self._set_build_diagnostic_summary(
-            "构建完成。",
-            f"模式：{scope_display} | 已导出到：{result.data_file} | 清单：{result.manifest_file}",
-            status="success",
-            metadata={
-                "requested_scope": result.plan.requested_scope,
-                "requested_scope_label": requested_scope_label,
-                "effective_scope": result.plan.effective_scope,
-                "effective_scope_label": effective_scope_label,
-                "selection_label": result.plan.selection_label,
-                "rebuilt_asset_count": len(result.plan.rebuilt_asset_keys),
-                "reused_asset_count": len(result.plan.reused_asset_keys),
-                "removed_asset_count": len(result.plan.removed_asset_keys),
-                "out_of_scope_dirty_count": len(result.plan.out_of_scope_dirty_asset_keys),
-                "export_root": str(result.export_root),
-                "data_file": str(result.data_file),
-                "manifest_file": str(result.manifest_file),
-            },
-        )
-        self._publish_diagnostic_snapshot()
+        self._build_export().handle_build_success(result, issues)
 
     @Slot()
     def _finalize_build_worker(self) -> None:
-        logger.info("Build worker cleanup finished.")
-        self.window.build_execute_button.setEnabled(True)
-        self.window.build_button.setEnabled(True)
-        self._build_thread = None
-        self._build_worker = None
-        self._active_build_scope_label = None
-        self._active_build_export_root = None
+        self._build_export().finalize_build_worker()
 
     def navigate_to_report_target(self, target_type: str, target_id: str) -> None:
         if not target_id:

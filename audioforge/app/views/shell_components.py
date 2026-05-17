@@ -69,6 +69,22 @@ class TaskSidebar(QFrame):
             self._buttons[mode] = button
             layout.addWidget(button)
 
+        experiment_title = QLabel("实验")
+        experiment_title.setProperty("role", "sidebarTitle")
+        layout.addWidget(experiment_title)
+
+        experiment_specs = [
+            ("experiment", "AB 实验"),
+        ]
+        for mode, label in experiment_specs:
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty("role", "taskNavButton")
+            button.clicked.connect(lambda checked=False, target_mode=mode: self.modeRequested.emit(target_mode))
+            self._button_group.addButton(button)
+            self._buttons[mode] = button
+            layout.addWidget(button)
+
         results_title = QLabel("结果回看")
         results_title.setProperty("role", "sidebarTitle")
         layout.addWidget(results_title)

@@ -346,7 +346,8 @@ class ProjectValidator:
                 )
 
             for clip in event.clips:
-                clip_path = Path(clip.source_path)
+                normalized_source_path = str(clip.source_path).strip()
+                clip_path = Path(normalized_source_path) if normalized_source_path else None
                 if not MIN_CLIP_WEIGHT <= clip.weight <= MAX_CLIP_WEIGHT:
                     issues.append(
                         ValidationIssue(
@@ -356,7 +357,16 @@ class ProjectValidator:
                             event_id,
                         )
                     )
-                if clip_path.suffix.lower() and clip_path.suffix.lower() not in {".wav", ".mp3", ".ogg"}:
+                if clip.enabled and not normalized_source_path:
+                    issues.append(
+                        ValidationIssue(
+                            "Error",
+                            "CLIP_SOURCE_EMPTY",
+                            f"Clip '{clip.id}' is enabled but has no source path.",
+                            event_id,
+                        )
+                    )
+                if clip_path is not None and clip_path.suffix.lower() and clip_path.suffix.lower() not in {".wav", ".mp3", ".ogg"}:
                     issues.append(
                         ValidationIssue(
                             "Warning",
@@ -365,7 +375,7 @@ class ProjectValidator:
                             event_id,
                         )
                     )
-                if clip.source_path and not clip_path.exists():
+                if normalized_source_path and clip_path is not None and not clip_path.exists():
                     issues.append(
                         ValidationIssue(
                             "Error",
@@ -392,7 +402,7 @@ class ProjectValidator:
                             event_id,
                         )
                     )
-                actual_duration_ms = self._clip_duration_ms(clip_path) if clip.source_path and clip_path.exists() else None
+                actual_duration_ms = self._clip_duration_ms(clip_path) if clip_path is not None and clip_path.exists() else None
                 if actual_duration_ms is not None:
                     if clip.trim_start_ms > actual_duration_ms or clip.loop_start_ms > actual_duration_ms or (clip.trim_end_ms > 0 and clip.trim_end_ms > actual_duration_ms) or (clip.loop_end_ms > 0 and clip.loop_end_ms > actual_duration_ms):
                         issues.append(

@@ -1,6 +1,6 @@
 # AudioForge 文档总索引
 
-当前文档同步日期：2026-05-14
+当前文档同步日期：2026-05-17
 
 ## 1. 第一次进入仓库先看什么
 
@@ -31,6 +31,9 @@
 
 - 总体边界：`../开发文档.md`
 - 发布执行：`operations/internal_release_execution_plan.md`
+- 开发完成定义：`internal/architecture/audioforge_开发完成定义与文档同步基线.md`
+- Harness 基线：`internal/architecture/audioforge_Harness环境与迭代基线.md`
+- Harness 准入规则：`internal/architecture/audioforge_Harness准入规则与场景矩阵.md`
 - Schema 3 设计：`internal/architecture/audioforge_Audio对象层Schema3迁移设计.md`
 - GameSync 路线：`internal/architecture/audioforge_第三期RTPC-State-Switch路线图.md`
 - 桌面工具产品化：`internal/product/audioforge_桌面工具产品化路线图.md`
@@ -50,12 +53,18 @@
 - `operations/AudioForge日志与诊断暴露清单.md`
 - `operations/AudioForge容量评估与优化方案.md`
 - `operations/internal_release_execution_plan.md`
+- `internal/architecture/audioforge_开发完成定义与文档同步基线.md`
 
 ### 架构与设计
 
+- `internal/architecture/audioforge_开发完成定义与文档同步基线.md`
+- `internal/architecture/audioforge_Harness环境与迭代基线.md`
+- `internal/architecture/audioforge_Harness准入规则与场景矩阵.md`
 - `internal/architecture/audioforge_Audio对象层Schema3迁移设计.md`
 - `internal/architecture/audioforge_第三期RTPC-State-Switch路线图.md`
 - `internal/product/audioforge_底部结果坞极简重构专项开发说明.md`
+- `internal/product/audioforge_AB实验联动专项开发计划.md`
+- `internal/product/audioforge_AB实验逐页交互设计稿.md`
 - `unity/architecture/UnityRuntime三期GameSync设计.md`
 
 ### 历史与归档

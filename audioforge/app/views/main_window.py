@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from typing import TYPE_CHECKING
 
 from audioforge.app.models.audio_project import (
     BusConfig,
@@ -68,7 +69,7 @@ from audioforge.app.models.audio_project import (
     SwitchVariantModel,
     ValidationIssue,
 )
-from audioforge.app.services.audio_meter_service import AudioMeterSnapshot, LoudnessReading
+from audioforge.app.models.audio_meter_dto import AudioMeterSnapshot, LoudnessReading
 from audioforge.app.utils.icons import load_app_icon
 from audioforge.app.utils.constants import (
     APP_NAME,
@@ -108,6 +109,9 @@ from audioforge.app.utils.constants import (
     WWISE_TARGET_BUS_LABEL,
     WWISE_TRANSPORT_TITLE,
 )
+
+if TYPE_CHECKING:
+    from audioforge.app.application.contracts import ChoiceRequest, ConfirmationRequest, FileDialogRequest, UserNotification
 from audioforge.app.widgets.clip_table import ClipTableWidget
 from audioforge.app.widgets.clip_waveform_editor import ClipWaveformEditor
 from audioforge.app.widgets.audio_tree import AudioTreeWidget
@@ -564,6 +568,7 @@ class MainWindow(QMainWindow):
     eventPropertiesChanged = Signal()
     audioPropertiesChanged = Signal()
     projectSettingsChanged = Signal()
+    autosaveSettingsChanged = Signal()
     gameSyncChanged = Signal()
     previewGameSyncChanged = Signal()
     previewBusSelectionChanged = Signal()
@@ -573,6 +578,10 @@ class MainWindow(QMainWindow):
     validationReportUpdated = Signal(object)
     buildStatusUpdated = Signal(str, str)
     loudnessReportUpdated = Signal(str)
+    restoreAutosaveRequested = Signal(str)
+    previewBaseRequested = Signal()
+    compareCurrentExperimentRequested = Signal()
+    restoreLatestExperimentSnapshotRequested = Signal()
     createFolderRequested = Signal()
     createEventRequested = Signal()
     renameSelectedRequested = Signal()
@@ -676,6 +685,7 @@ class MainWindow(QMainWindow):
         }
         self._source_browser_entries: list[dict[str, object]] = []
         self._audio_browser_entries: list[dict[str, object]] = []
+        self._workspace_origin_hint_text = ""
         self._gamesync_entries: dict[str, list[dict[str, object]]] = {
             "game_parameters": [],
             "state_groups": [],
@@ -717,8 +727,15 @@ class MainWindow(QMainWindow):
         self.object_event_bus_chip = QLabel(f"{WWISE_OUTPUT_BUS_LABEL} -")
         self.object_bus_browser_chip = QLabel(f"{WWISE_BUS_VIEW_LABEL} -")
         self.object_context_hint_label = QLabel("当前浏览与编辑状态会在这里显示。")
+        self.experiment_status_summary_label = QLabel("")
+        self.experiment_status_detail_label = QLabel("")
+        self.experiment_status_summary_label.setWordWrap(True)
+        self.experiment_status_detail_label.setWordWrap(True)
         self.object_parent_button = QToolButton()
         self.object_preview_button = QPushButton("试听对象")
+        self.object_preview_base_button = QPushButton("试听底板")
+        self.object_compare_experiment_button = QPushButton("查看差异")
+        self.object_restore_snapshot_button = QPushButton("恢复最近快照")
         self.object_contents_button = QPushButton("片段列表")
         self.object_follow_bus_button = QPushButton(f"跟随 {WWISE_OUTPUT_BUS_LABEL}")
         self.object_report_button = QPushButton("问题中心")
@@ -1357,6 +1374,8 @@ class MainWindow(QMainWindow):
         self.open_recent_project_button = QPushButton("打开最近工程")
         self.recent_projects_list = QListWidget()
         self.recent_projects_list.setMaximumHeight(120)
+        self.autosave_history_list = QListWidget()
+        self.autosave_history_list.setMaximumHeight(160)
         self.import_template_bus_combo = QComboBox()
         self.import_template_asset_prefix_edit = QLineEdit()
         self.import_template_asset_prefix_edit.setPlaceholderText("ui/click")
@@ -1458,6 +1477,10 @@ class MainWindow(QMainWindow):
 
 
     def _build_ui(self) -> None:
+        # 在 top bar 构建之前创建实验切换器，以便 top bar 可以引用它
+        from audioforge.app.widgets.experiment_switcher import ExperimentSwitcher
+        self.experiment_switcher = ExperimentSwitcher()
+
         self.top_app_bar = self._build_top_app_bar()
 
         self.hero_panel = QFrame()
@@ -1497,6 +1520,22 @@ class MainWindow(QMainWindow):
         object_bus_row.addWidget(self.object_bus_browser_chip)
         object_bus_row.addWidget(self.object_context_hint_label, 1)
         object_header_layout.addLayout(object_bus_row)
+        self.experiment_status_frame = QFrame()
+        experiment_status_layout = QVBoxLayout(self.experiment_status_frame)
+        experiment_status_layout.setContentsMargins(0, 0, 0, 0)
+        experiment_status_layout.setSpacing(4)
+        experiment_status_layout.addWidget(self.experiment_status_summary_label)
+        experiment_status_layout.addWidget(self.experiment_status_detail_label)
+        experiment_status_actions = QHBoxLayout()
+        experiment_status_actions.setContentsMargins(0, 0, 0, 0)
+        experiment_status_actions.setSpacing(8)
+        experiment_status_actions.addWidget(self.object_preview_base_button)
+        experiment_status_actions.addWidget(self.object_compare_experiment_button)
+        experiment_status_actions.addWidget(self.object_restore_snapshot_button)
+        experiment_status_actions.addStretch(1)
+        experiment_status_layout.addLayout(experiment_status_actions)
+        self.experiment_status_frame.setVisible(False)
+        object_header_layout.addWidget(self.experiment_status_frame)
         object_action_row = QHBoxLayout()
         object_action_row.setContentsMargins(0, 0, 0, 0)
         object_action_row.setSpacing(8)
@@ -2192,6 +2231,7 @@ class MainWindow(QMainWindow):
             ("validation", "校验修复", "直接进入问题中心，按校验结果修复对象与资源。"),
             ("build", "构建交付", "将导出设置、交付预览和构建入口收口到专门页面。"),
             ("results", "结果中心", "统一回看日志、构建输出和响度扫描；校验修复仍在专门工作区完成。"),
+            ("experiment", "AB 实验", "创建实验任务与方案，对比底板差异，导出增量 JSON 供 Unity 端 AB 实验。"),
         ]:
             page, host_layout = self._build_workspace_mode_page(mode, title, description)
             self._workspace_mode_pages[mode] = page
@@ -2202,6 +2242,11 @@ class MainWindow(QMainWindow):
         self._workspace_mode_hosts["gamesync"].addWidget(self.gamesync_workspace)
         self._workspace_mode_hosts["buses"].addWidget(self.buses_workspace)
         self._workspace_mode_hosts["build"].addWidget(self.build_workspace)
+
+        # ── AB 实验工作区 ──
+        from audioforge.app.widgets.experiment_panel import ExperimentPanel
+        self.experiment_panel = ExperimentPanel()
+        self._workspace_mode_hosts["experiment"].addWidget(self.experiment_panel)
 
         self.workspace_status_bar = QFrame()
         self.workspace_status_bar.setObjectName("WorkspaceStatusBar")
@@ -2452,6 +2497,7 @@ class MainWindow(QMainWindow):
             primary_actions_layout.addWidget(button)
         self.toolbar_dirty_label.setProperty("role", "topStatusChip")
         primary_actions_layout.addWidget(self.toolbar_dirty_label)
+        primary_actions_layout.addWidget(self.experiment_switcher)
 
         layout.addWidget(branding)
         layout.addSpacing(8)
@@ -4090,6 +4136,20 @@ class MainWindow(QMainWindow):
         recent_layout.addLayout(recent_top_layout)
         recent_layout.addWidget(self.recent_projects_list)
 
+        autosave_group = QGroupBox("自动保存")
+        autosave_layout = QFormLayout(autosave_group)
+        self.autosave_enabled_check = QCheckBox("启用自动保存")
+        self.autosave_interval_spin = QSpinBox()
+        self.autosave_interval_spin.setRange(1, 120)
+        self.autosave_interval_spin.setSuffix(" 分钟")
+        self.restore_autosave_button = QPushButton("恢复选中自动保存")
+        autosave_history_layout = QVBoxLayout()
+        autosave_history_layout.addWidget(self.autosave_history_list)
+        autosave_history_layout.addWidget(self.restore_autosave_button)
+        autosave_layout.addRow("开关", self.autosave_enabled_check)
+        autosave_layout.addRow("间隔", self.autosave_interval_spin)
+        autosave_layout.addRow("历史", autosave_history_layout)
+
         close_button = QPushButton("关闭")
         close_button.clicked.connect(self.settings_dialog.close)
         footer_layout = QHBoxLayout()
@@ -4102,6 +4162,7 @@ class MainWindow(QMainWindow):
         dialog_layout.addWidget(intro_label)
         dialog_layout.addWidget(preview_bus_group)
         dialog_layout.addWidget(import_template_group)
+        dialog_layout.addWidget(autosave_group)
         dialog_layout.addWidget(recent_group)
         dialog_layout.addLayout(footer_layout)
 
@@ -4291,6 +4352,7 @@ class MainWindow(QMainWindow):
             "validation": "校验修复",
             "build": "构建交付",
             "results": "结果中心",
+            "experiment": "AB 实验",
         }
         self._active_workspace_mode = mode
         self.task_sidebar.set_active_mode(mode)
@@ -4357,6 +4419,9 @@ class MainWindow(QMainWindow):
         elif mode == "results":
             self._mount_workspace_surface("results")
             self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["results"])
+        elif mode == "experiment":
+            self._mount_workspace_surface("experiment")
+            self.workspace_mode_stack.setCurrentWidget(self._workspace_mode_pages["experiment"])
         current_page = self.workspace_mode_stack.currentWidget()
         if current_page is not None:
             current_page.updateGeometry()
@@ -5317,9 +5382,12 @@ class MainWindow(QMainWindow):
         bus_name = str(entry.get("bus", "")).strip() or "-"
         clip_count = int(entry.get("clip_count", 0))
         event_ids = [str(value) for value in entry.get("event_ids", []) if str(value).strip()]
+        origin_label = str(entry.get("origin_label", "")).strip()
         preview_events = "、".join(event_ids[:4]) if event_ids else "-"
         self.audio_browser_status_label.setText(
-            f"{audio_id}\n模式 {play_mode} | {WWISE_OUTPUT_BUS_LABEL} {bus_name} | 片段 {clip_count}\n引用 Event：{preview_events}"
+            f"{audio_id}\n模式 {play_mode} | {WWISE_OUTPUT_BUS_LABEL} {bus_name} | 片段 {clip_count}"
+            + (f" | 归属 {origin_label}" if origin_label else "")
+            + f"\n引用 Event：{preview_events}"
         )
         self.audio_browser_locate_event_button.setEnabled(bool(event_ids))
         self.audio_browser_open_bindings_button.setEnabled(bool(event_ids))
@@ -6100,7 +6168,10 @@ class MainWindow(QMainWindow):
         else:
             self.object_bus_browser_chip.setText(f"{WWISE_BUS_VIEW_LABEL} {current_project_bus}")
             bus_hint = f"当前 {WWISE_BUS_VIEW_LABEL} 跟随 {WWISE_OUTPUT_BUS_LABEL} {current_project_bus}。"
-        self.object_context_hint_label.setText(f"{self._current_workspace_context_text()} | {bus_hint}")
+        workspace_hint = self._current_workspace_context_text()
+        if self._workspace_origin_hint_text:
+            workspace_hint = f"{workspace_hint} | {self._workspace_origin_hint_text}"
+        self.object_context_hint_label.setText(f"{workspace_hint} | {bus_hint}")
         self._update_workspace_summary_labels()
         self.diagnosticContextChanged.emit()
 
@@ -7082,6 +7153,64 @@ class MainWindow(QMainWindow):
     def ask_export_root_path(self, initial_path: str) -> str:
         return QFileDialog.getExistingDirectory(self, "选择导出目录", initial_path or "")
 
+    def execute_file_dialog_request(self, request: FileDialogRequest) -> str:
+        if request.mode == "open_file":
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                request.title,
+                request.initial_path,
+                request.file_filter,
+            )
+            return file_path
+        if request.mode == "save_file":
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                request.title,
+                request.default_name or request.initial_path,
+                request.file_filter,
+            )
+            return file_path
+        return QFileDialog.getExistingDirectory(self, request.title, request.initial_path or "")
+
+    def execute_choice_request(self, request: ChoiceRequest) -> str | None:
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle(request.title)
+        message_box.setText(request.message)
+        if request.informative_text:
+            message_box.setInformativeText(request.informative_text)
+
+        button_map: dict[QAbstractButton, str] = {}
+        for option in request.options:
+            role = QMessageBox.ButtonRole.RejectRole if option.is_cancel else QMessageBox.ButtonRole.AcceptRole
+            button = message_box.addButton(option.label, role)
+            button_map[button] = option.value
+
+        message_box.exec()
+        clicked = message_box.clickedButton()
+        if clicked is None:
+            return None
+        return button_map.get(clicked)
+
+    def present_notification(self, notification: UserNotification) -> None:
+        if notification.level == "info":
+            QMessageBox.information(self, notification.title, notification.message)
+            return
+        if notification.level == "warning":
+            QMessageBox.warning(self, notification.title, notification.message)
+            return
+        QMessageBox.critical(self, notification.title, notification.message)
+
+    def confirm_request(self, request: ConfirmationRequest) -> bool:
+        default_button = QMessageBox.StandardButton.Yes if request.default_accept else QMessageBox.StandardButton.No
+        result = QMessageBox.question(
+            self,
+            request.title,
+            request.message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            default_button,
+        )
+        return result == QMessageBox.StandardButton.Yes
+
     def set_project_title(self, project_name: str, file_path: str | None) -> None:
         suffix = file_path if file_path else "未保存"
         self.project_title_label.setText(project_name)
@@ -7092,6 +7221,61 @@ class MainWindow(QMainWindow):
         self.shell_project_path_label.setText(suffix)
         self.setWindowTitle(f"{APP_NAME} - {project_name} [{suffix}]")
         self._update_workspace_summary_labels()
+
+    def set_project_badge_text(self, text: str) -> None:
+        self.project_badge.setText(text)
+
+    def set_experiment_status_strip(
+        self,
+        *,
+        summary: str,
+        detail: str,
+        preview_base_enabled: bool,
+        compare_enabled: bool,
+        restore_enabled: bool,
+    ) -> None:
+        visible = bool(summary.strip() or detail.strip())
+        self.experiment_status_frame.setVisible(visible)
+        self.experiment_status_summary_label.setText(summary.strip())
+        self.experiment_status_detail_label.setText(detail.strip())
+        self.object_preview_base_button.setEnabled(preview_base_enabled)
+        self.object_compare_experiment_button.setEnabled(compare_enabled)
+        self.object_restore_snapshot_button.setEnabled(restore_enabled)
+
+    def set_experiment_autosave_history(self, entries: list[dict[str, object]]) -> None:
+        if hasattr(self.experiment_panel, "set_autosave_history"):
+            self.experiment_panel.set_autosave_history(entries)
+
+    def set_workspace_origin_hint(self, text: str) -> None:
+        self._workspace_origin_hint_text = text.strip()
+        self._update_object_bus_status()
+
+    def set_autosave_preferences(self, *, enabled: bool, interval_minutes: int) -> None:
+        self.autosave_enabled_check.blockSignals(True)
+        self.autosave_interval_spin.blockSignals(True)
+        self.autosave_enabled_check.setChecked(enabled)
+        self.autosave_interval_spin.setValue(max(1, int(interval_minutes)))
+        self.autosave_interval_spin.setEnabled(enabled)
+        self.autosave_enabled_check.blockSignals(False)
+        self.autosave_interval_spin.blockSignals(False)
+
+    def current_autosave_preferences(self) -> dict[str, object]:
+        return {
+            "enabled": self.autosave_enabled_check.isChecked(),
+            "interval_minutes": int(self.autosave_interval_spin.value()),
+        }
+
+    def set_autosave_history(self, entries: list[dict[str, object]]) -> None:
+        self.autosave_history_list.clear()
+        for entry in entries:
+            item = QListWidgetItem(str(entry.get("label", "自动保存记录")))
+            item.setData(Qt.ItemDataRole.UserRole, str(entry.get("path", "")))
+            item.setToolTip(str(entry.get("detail", "")))
+            self.autosave_history_list.addItem(item)
+
+    def set_experiment_export_history(self, entries: list[dict[str, object]]) -> None:
+        if hasattr(self.experiment_panel, "set_export_history"):
+            self.experiment_panel.set_export_history(entries)
 
     def ui_preferences(self) -> dict[str, object]:
         return {
@@ -8203,6 +8387,11 @@ class MainWindow(QMainWindow):
             self._activate_workspace_mode("results")
         self._update_object_bus_status()
 
+    @property
+    def report_tabs(self):
+        """兼容属性：返回 report_pages（QStackedWidget），支持 currentIndex() 调用。"""
+        return self.report_pages
+
     def ask_import_clip_paths(self) -> list[str]:
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
@@ -8761,6 +8950,8 @@ class MainWindow(QMainWindow):
 
     def _bind_internal_signals(self) -> None:
         self.task_sidebar.modeRequested.connect(self._activate_workspace_mode)
+        if hasattr(self.experiment_panel, "restoreSnapshotRequested"):
+            self.experiment_panel.restoreSnapshotRequested.connect(self.restoreAutosaveRequested.emit)
         self.zoom_in_button.clicked.connect(self.increase_ui_scale)
         self.zoom_out_button.clicked.connect(self.decrease_ui_scale)
         self.zoom_reset_button.clicked.connect(self.reset_ui_scale)
@@ -8778,6 +8969,9 @@ class MainWindow(QMainWindow):
         self.reference_assets_value_button.clicked.connect(lambda: self.set_active_contents_category("片段"))
         self.reference_generation_value_button.clicked.connect(lambda: self.set_active_property_category("生成"))
         self.object_preview_button.clicked.connect(self.previewRequested.emit)
+        self.object_preview_base_button.clicked.connect(self.previewBaseRequested.emit)
+        self.object_compare_experiment_button.clicked.connect(self.compareCurrentExperimentRequested.emit)
+        self.object_restore_snapshot_button.clicked.connect(self.restoreLatestExperimentSnapshotRequested.emit)
         self.object_contents_button.clicked.connect(lambda: self._activate_workspace_mode("resources"))
         self.object_follow_bus_button.clicked.connect(self._follow_current_event_bus)
         self.object_report_button.clicked.connect(lambda: self._activate_workspace_mode("validation"))
@@ -8956,6 +9150,11 @@ class MainWindow(QMainWindow):
         self.import_template_bus_combo.currentIndexChanged.connect(self._update_event_import_template_defaults_from_controls)
         self.import_template_asset_prefix_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
         self.import_template_tags_edit.editingFinished.connect(self._update_event_import_template_defaults_from_controls)
+        self.autosave_enabled_check.toggled.connect(self.autosave_interval_spin.setEnabled)
+        self.autosave_enabled_check.toggled.connect(lambda _checked: self.autosaveSettingsChanged.emit())
+        self.autosave_interval_spin.valueChanged.connect(lambda _value: self.autosaveSettingsChanged.emit())
+        self.restore_autosave_button.clicked.connect(self._request_restore_selected_autosave)
+        self.autosave_history_list.itemDoubleClicked.connect(lambda item: self._request_restore_autosave_item(item))
         self.export_root_browse_button.clicked.connect(self._request_export_root_browse)
         self.export_root_edit.editingFinished.connect(self._emit_project_settings_changed)
         self.volume_spin.valueChanged.connect(self._emit_audio_properties_changed)
@@ -10863,8 +11062,11 @@ class MainWindow(QMainWindow):
         if bool(entry.get("unreferenced", False)):
             state_fragments.append("当前未被 Audio 引用")
         audio_ids = [str(value) for value in entry.get("audio_ids", []) if str(value).strip()]
+        origin_label = str(entry.get("origin_label", "")).strip()
         if current_audio_id and current_audio_id in audio_ids:
             state_fragments.append("当前 Audio 已绑定")
+        if origin_label:
+            state_fragments.append(f"归属 {origin_label}")
         state_text = "；".join(state_fragments) if state_fragments else "状态正常"
         audio_preview = "、".join(audio_ids[:4]) if audio_ids else "-"
         if len(selected_entries) > 1:
@@ -10881,6 +11083,16 @@ class MainWindow(QMainWindow):
         self.source_browser_add_to_event_button.setEnabled(
             any(str(item.get("source_path", "")).strip() for item in selected_entries) and bool(current_audio_id)
         )
+
+    def _request_restore_selected_autosave(self) -> None:
+        self._request_restore_autosave_item(self.autosave_history_list.currentItem())
+
+    def _request_restore_autosave_item(self, item: QListWidgetItem | None) -> None:
+        if item is None:
+            return
+        snapshot_path = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+        if snapshot_path:
+            self.restoreAutosaveRequested.emit(snapshot_path)
 
     def _locate_selected_source_asset(self) -> None:
         entry = self.source_tree.current_source_entry()

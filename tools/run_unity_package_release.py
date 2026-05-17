@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--report-root", type=Path)
     parser.add_argument("--export-dir", type=Path)
     parser.add_argument("--skip-pytest", action="store_true")
+    parser.add_argument("--skip-harness", action="store_true")
     return parser.parse_args()
 
 
@@ -41,6 +42,8 @@ def main() -> int:
     ]
     if args.skip_pytest:
         full_chain_command.append("--skip-pytest")
+    if args.skip_harness:
+        full_chain_command.append("--skip-harness")
     package_command = [sys.executable, str(workspace / "tools" / "package_unity_integration_package.py")]
 
     sync_result = run_command(sync_command, workspace)
@@ -58,6 +61,8 @@ def main() -> int:
         "sync": command_to_summary(sync_result),
         "full_chain": command_to_summary(full_chain_result),
         "package": command_to_summary(package_result),
+        "harness_report": str(report_root / "checks" / "harness_smoke" / "harness_report.json"),
+        "harness_report_exists": (report_root / "checks" / "harness_smoke" / "harness_report.json").exists(),
         "release_root": str(release_root),
         "archive_path": str(archive_path),
         "release_root_exists": release_root.exists(),
@@ -124,6 +129,7 @@ def write_signoff(report_root: Path, summary: dict[str, object]) -> None:
         "",
         f"- Result: {summary['overall']}",
         f"- Version: {summary['version']}",
+        f"- Harness Report: {summary['harness_report']}",
         f"- Release Directory: {summary['release_root']}",
         f"- Release Archive: {summary['archive_path']}",
         "",
