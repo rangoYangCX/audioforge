@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import os
+import uuid
+from datetime import datetime
+from pathlib import Path
 
 try:
     import soundfile as sf
 except Exception:  # pragma: no cover - optional runtime dependency fallback
     sf = None
 
-from PySide6.QtCore import QByteArray, QItemSelectionModel, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QByteArray, QItemSelectionModel, QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QCloseEvent, QDesktopServices, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
@@ -70,7 +74,10 @@ from audioforge.app.models.audio_project import (
     ValidationIssue,
 )
 from audioforge.app.models.audio_meter_dto import AudioMeterSnapshot, LoudnessReading
+from audioforge.app.models.log_entry_dto import ExperimentLogContext, LogEntry
+from audioforge.app.services.log_store import LogQuery, LogStore
 from audioforge.app.utils.icons import load_app_icon
+from audioforge.app.utils.runtime_logging import get_runtime_log_config
 from audioforge.app.utils.constants import (
     APP_NAME,
     CLIP_WEIGHT_PRESETS,
@@ -574,6 +581,7 @@ class MainWindow(QMainWindow):
     previewBusSelectionChanged = Signal()
     previewBusStateChanged = Signal()
     logAppended = Signal(str)
+    logEntryAppended = Signal(object)
     diagnosticContextChanged = Signal()
     validationReportUpdated = Signal(object)
     buildStatusUpdated = Signal(str, str)
@@ -1287,6 +1295,46 @@ class MainWindow(QMainWindow):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("运行日志、导入反馈和交付链路输出会显示在这里。")
+        self._log_session_id = uuid.uuid4().hex[:12]
+        self._log_store = LogStore(max_entries=1000)
+        self._latest_log_failure_id = ""
+        self.log_summary_label = QLabel("等待新的运行日志。")
+        self.log_summary_label.setWordWrap(True)
+        self.log_session_path_label = QLabel("当前会话日志：等待运行时日志初始化。")
+        self.log_session_path_label.setWordWrap(True)
+        self.log_latest_path_label = QLabel("latest.log：等待运行时日志初始化。")
+        self.log_latest_path_label.setWordWrap(True)
+        self.log_fault_path_label = QLabel("latest.fault.log：等待故障日志初始化。")
+        self.log_fault_path_label.setWordWrap(True)
+        self.log_latest_failure_label = QLabel("最近关键失败：暂无。")
+        self.log_latest_failure_label.setWordWrap(True)
+        self.log_filter_level_combo = QComboBox()
+        self.log_filter_level_combo.addItem("全部级别", ())
+        self.log_filter_level_combo.addItem("错误", ("ERROR", "CRITICAL"))
+        self.log_filter_level_combo.addItem("警告", ("WARNING",))
+        self.log_filter_level_combo.addItem("信息", ("INFO",))
+        self.log_filter_level_combo.addItem("调试", ("DEBUG",))
+        self.log_filter_subsystem_combo = QComboBox()
+        self.log_filter_subsystem_combo.addItem("全部子系统", "")
+        self.log_filter_source_combo = QComboBox()
+        self.log_filter_source_combo.addItem("全部来源", "")
+        self.log_filter_keyword_edit = QLineEdit()
+        self.log_filter_keyword_edit.setPlaceholderText("按摘要、对象、关联 ID、任务或方案过滤")
+        self.log_filter_experiment_combo = QComboBox()
+        self.log_filter_experiment_combo.addItem("全部日志", "all")
+        self.log_filter_experiment_combo.addItem("仅实验日志", "only")
+        self.log_filter_experiment_combo.addItem("排除实验日志", "exclude")
+        self.log_filter_reset_button = QPushButton("清空筛选")
+        self.log_export_button = QPushButton("导出当前日志")
+        self.open_session_log_button = QPushButton("打开会话日志")
+        self.open_fault_log_button = QPushButton("打开故障日志")
+        self.copy_log_correlation_button = QPushButton("复制关联 ID")
+        self.copy_log_correlation_button.setEnabled(False)
+        self.log_entry_list = QListWidget()
+        self.log_entry_detail_output = QPlainTextEdit()
+        self.log_entry_detail_output.setReadOnly(True)
+        self.log_entry_detail_output.setPlaceholderText("选择左侧日志条目后，这里会显示结构化上下文、实验信息和导出定位线索。")
+        self._update_log_runtime_metadata_labels()
         self.validation_summary_label = QLabel("等待校验。")
         self.validation_filter_status_label = QLabel("显示全部校验问题。")
         self.validation_filter_severity_combo = QComboBox()
@@ -1315,6 +1363,7 @@ class MainWindow(QMainWindow):
         self.diagnostic_log_summary_label = QLabel("最近日志：等待运行输出。")
         self.diagnostic_validation_summary_label = QLabel(self.validation_summary_label.text())
         self.diagnostic_build_summary_label = QLabel(self.build_summary_label.text())
+        self.diagnostic_experiment_summary_label = QLabel("等待实验日志。")
         self.diagnostic_loudness_summary_label = QLabel(self.loudness_summary_label.text())
         self.diagnostic_bus_summary_label = QLabel("等待 Bus 上下文。")
         self.diagnostic_section_list = QListWidget()
@@ -1326,6 +1375,7 @@ class MainWindow(QMainWindow):
             "log_summary": self.diagnostic_log_summary_label.text(),
             "validation_summary": self.diagnostic_validation_summary_label.text(),
             "build_summary": self.diagnostic_build_summary_label.text(),
+            "experiment_summary": self.diagnostic_experiment_summary_label.text(),
             "loudness_summary": self.diagnostic_loudness_summary_label.text(),
             "bus_summary": self.diagnostic_bus_summary_label.text(),
             "sections": [],
@@ -3681,27 +3731,70 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
         layout.addWidget(self._build_mode_surface_card("日志中心", "集中查看运行日志、导入反馈和交付链路输出；当没有问题时，这里主要承担追踪和回溯职责。"))
-        results_splitter = QSplitter()
-        results_splitter.setObjectName("LogResultsSplitter")
-        results_splitter.setOrientation(Qt.Orientation.Horizontal)
-        results_splitter.setChildrenCollapsible(False)
-        results_splitter.addWidget(
+        layout.addWidget(
             self._build_workspace_note_card(
                 "日志用途",
                 [
-                    "导入反馈、构建输出和异常日志都统一在这里回看。",
-                    "如果日志已经定位到对象，可从左侧导航切回对应工作区继续修订。",
+                    "先看最近发生了什么，再按条目详情判断是否需要回到对象或导出给维护同学。",
+                    "实验日志、构建日志和后续 Unity 联调日志都走同一条结构化链路。",
                 ],
             )
         )
-        log_group = QGroupBox("运行日志")
-        log_layout = QVBoxLayout(log_group)
-        log_layout.addWidget(self.log_output)
-        results_splitter.addWidget(log_group)
-        results_splitter.setStretchFactor(0, 2)
-        results_splitter.setStretchFactor(1, 5)
-        layout.addWidget(results_splitter, 1)
-        layout.addWidget(self._build_empty_state_card("日志区当前为空", "这通常意味着你刚打开工程，或者当前操作还没有触发导入、校验或构建链路。"))
+
+        status_group = QGroupBox("当前日志状态")
+        status_layout = QVBoxLayout(status_group)
+        status_layout.setContentsMargins(12, 10, 12, 10)
+        status_layout.setSpacing(8)
+        status_layout.addWidget(self.log_summary_label)
+        status_layout.addWidget(self.log_latest_failure_label)
+        status_layout.addWidget(self.log_session_path_label)
+        status_layout.addWidget(self.log_latest_path_label)
+        status_layout.addWidget(self.log_fault_path_label)
+        status_actions = QHBoxLayout()
+        status_actions.setContentsMargins(0, 0, 0, 0)
+        status_actions.setSpacing(8)
+        status_actions.addWidget(self.log_export_button)
+        status_actions.addWidget(self.open_session_log_button)
+        status_actions.addWidget(self.open_fault_log_button)
+        status_actions.addWidget(self.copy_log_correlation_button)
+        status_actions.addStretch(1)
+        status_layout.addLayout(status_actions)
+
+        filter_group = QGroupBox("筛选")
+        filter_layout = QGridLayout(filter_group)
+        filter_layout.setContentsMargins(12, 10, 12, 10)
+        filter_layout.setHorizontalSpacing(8)
+        filter_layout.setVerticalSpacing(8)
+        filter_layout.addWidget(QLabel("级别"), 0, 0)
+        filter_layout.addWidget(self.log_filter_level_combo, 0, 1)
+        filter_layout.addWidget(QLabel("子系统"), 0, 2)
+        filter_layout.addWidget(self.log_filter_subsystem_combo, 0, 3)
+        filter_layout.addWidget(QLabel("来源"), 1, 0)
+        filter_layout.addWidget(self.log_filter_source_combo, 1, 1)
+        filter_layout.addWidget(QLabel("实验"), 1, 2)
+        filter_layout.addWidget(self.log_filter_experiment_combo, 1, 3)
+        filter_layout.addWidget(QLabel("关键词"), 2, 0)
+        filter_layout.addWidget(self.log_filter_keyword_edit, 2, 1, 1, 3)
+        filter_layout.addWidget(self.log_filter_reset_button, 0, 4, 3, 1)
+
+        detail_splitter = QSplitter()
+        detail_splitter.setObjectName("LogResultsSplitter")
+        detail_splitter.setOrientation(Qt.Orientation.Horizontal)
+        detail_splitter.setChildrenCollapsible(False)
+        detail_splitter.addWidget(self.log_entry_list)
+        detail_splitter.addWidget(self.log_entry_detail_output)
+        detail_splitter.setStretchFactor(0, 2)
+        detail_splitter.setStretchFactor(1, 3)
+
+        raw_group = QGroupBox("原始文本输出")
+        raw_layout = QVBoxLayout(raw_group)
+        raw_layout.setContentsMargins(12, 10, 12, 10)
+        raw_layout.addWidget(self.log_output)
+
+        layout.addWidget(status_group)
+        layout.addWidget(filter_group)
+        layout.addWidget(detail_splitter, 1)
+        layout.addWidget(raw_group, 1)
         return page
 
     def _build_diagnostic_results_page(self) -> QWidget:
@@ -3712,7 +3805,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(
             self._build_mode_surface_card(
                 "诊断概览",
-                "把最近日志、校验、构建、响度和 Bus 上下文统一收口到同一页；这里只做汇总和导航，不复制原有模块。",
+                "把最近日志、校验、构建、实验、响度和 Bus 上下文统一收口到同一页；这里只做汇总和导航，不复制原有模块。",
             )
         )
         layout.addWidget(
@@ -3721,6 +3814,7 @@ class MainWindow(QMainWindow):
                 [
                     "不改 Unity 对接 SDK，也不改既有导出契约语义。",
                     "诊断页只复用现有结果中心、结果坞和 Bus 状态，不新起平行模块。",
+                    "实验日志单独成节，但仍回到同一日志中心查看条目级细节。",
                 ],
             )
         )
@@ -3753,7 +3847,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(summary_group)
         layout.addWidget(sections_group, 1)
-        layout.addWidget(self._build_empty_state_card("诊断页已就绪", "这里默认显示最近一次日志、校验、构建、响度和 Bus 上下文；后续只在现有链路上继续加深，不扩成第二套系统。"))
+        layout.addWidget(self._build_empty_state_card("诊断页已就绪", "这里默认显示最近一次日志、校验、构建、实验、响度和 Bus 上下文；后续只在现有链路上继续加深，不扩成第二套系统。"))
         return page
 
     def _build_validation_results_page(self) -> QWidget:
@@ -3876,6 +3970,7 @@ class MainWindow(QMainWindow):
         snapshot = getattr(self, "_diagnostic_snapshot_data", {})
         validation = str(snapshot.get("validation_summary", "") or "")
         build = str(snapshot.get("build_summary", "") or "")
+        experiment = str(snapshot.get("experiment_summary", "") or "")
         log_text = str(snapshot.get("log_summary", "") or "")
 
         parts: list[str] = []
@@ -3883,10 +3978,12 @@ class MainWindow(QMainWindow):
             parts.append(validation)
         if build:
             parts.append(build)
+        if experiment:
+            parts.append(experiment)
         if not parts and log_text:
             parts.append(log_text)
         if not parts:
-            parts.append("等待校验、构建或日志结果。")
+            parts.append("等待校验、构建、实验或日志结果。")
 
         summary = " · ".join(parts)
         display = summary if len(summary) <= 96 else f"{summary[:93]}..."
@@ -3931,6 +4028,11 @@ class MainWindow(QMainWindow):
             fallback="等待构建或差异预览。",
         )
         self._set_activity_summary_text(
+            self.diagnostic_experiment_summary_label,
+            str(snapshot.get("experiment_summary", "")),
+            fallback="等待实验日志。",
+        )
+        self._set_activity_summary_text(
             self.diagnostic_loudness_summary_label,
             str(snapshot.get("loudness_summary", "")),
             fallback="等待响度扫描。",
@@ -3943,7 +4045,7 @@ class MainWindow(QMainWindow):
         self._set_activity_summary_text(
             self.diagnostic_summary_label,
             str(snapshot.get("summary", "")),
-            fallback="诊断概览已接入结果中心；这里统一汇总日志、校验、构建、响度和 Bus 状态。",
+            fallback="诊断概览已接入结果中心；这里统一汇总日志、校验、构建、实验、响度和 Bus 状态。",
         )
         self._update_activity_panel_status()
 
@@ -3974,6 +4076,7 @@ class MainWindow(QMainWindow):
             "log_summary": str(snapshot.get("log_summary", self._diagnostic_snapshot_data.get("log_summary", ""))),
             "validation_summary": str(snapshot.get("validation_summary", self._diagnostic_snapshot_data.get("validation_summary", ""))),
             "build_summary": str(snapshot.get("build_summary", self._diagnostic_snapshot_data.get("build_summary", ""))),
+            "experiment_summary": str(snapshot.get("experiment_summary", self._diagnostic_snapshot_data.get("experiment_summary", ""))),
             "loudness_summary": str(snapshot.get("loudness_summary", self._diagnostic_snapshot_data.get("loudness_summary", ""))),
             "bus_summary": str(snapshot.get("bus_summary", self._diagnostic_snapshot_data.get("bus_summary", ""))),
             "sections": [dict(item) for item in section_items] if isinstance(section_items, list) else [],
@@ -6089,6 +6192,7 @@ class MainWindow(QMainWindow):
             "property_scroll": self._scrollable_widget_state(self._current_property_scroll_widget()),
             "contents_scroll": self._scrollable_widget_state(self.contents_tabs.currentWidget()),
             "log_scroll": self._scrollable_widget_state(self.log_output),
+            "log_report_panel": self._capture_report_panel_state(self.log_entry_list, self.log_entry_detail_output),
             "validation_report_panel": self._capture_report_panel_state(self.validation_issue_list, self.validation_report_output),
             "build_report_panel": self._capture_report_panel_state(self.build_issue_list, self.build_report_output),
             "loudness_report_panel": self._capture_report_panel_state(self.loudness_issue_list, self.loudness_report_output),
@@ -6152,6 +6256,7 @@ class MainWindow(QMainWindow):
         self._apply_scrollable_widget_state(self._current_property_scroll_widget(), state.get("property_scroll"))
         self._apply_scrollable_widget_state(self.contents_tabs.currentWidget(), state.get("contents_scroll"))
         self._apply_scrollable_widget_state(self.log_output, state.get("log_scroll"))
+        self._restore_report_panel_state(self.log_entry_list, self.log_entry_detail_output, state.get("log_report_panel"))
         self._restore_report_panel_state(self.validation_issue_list, self.validation_report_output, state.get("validation_report_panel"))
         self._restore_report_panel_state(self.build_issue_list, self.build_report_output, state.get("build_report_panel"))
         self._restore_report_panel_state(self.loudness_issue_list, self.loudness_report_output, state.get("loudness_report_panel"))
@@ -7111,17 +7216,249 @@ class MainWindow(QMainWindow):
         self.bulk_weight_button.setEnabled(bool(event.clips))
         self.batch_rename_button.setEnabled(bool(event.clips))
 
-    def append_log(self, message: str, *, level: str = "INFO", context: dict[str, object] | None = None) -> None:
-        """Append a structured log entry. level: FATAL/ERROR/WARNING/INFO/DEBUG."""
-        prefix_map = {"FATAL": "🔴 ", "ERROR": "🔴 ", "WARNING": "🟡 ", "DEBUG": ""}
-        prefix = prefix_map.get(level, "")
-        formatted = f"{prefix}{message}"
-        self.log_output.appendPlainText(formatted)
-        self._latest_log_message = message.strip()
-        self.report_detail_label.setText(f"最近日志：{message[:80]}")
-        self.report_detail_label.setToolTip(message)
+    def _update_log_runtime_metadata_labels(self) -> None:
+        runtime_config = get_runtime_log_config()
+        if runtime_config is None:
+            self.log_session_path_label.setText("当前会话日志：等待运行时日志初始化。")
+            self.log_latest_path_label.setText("latest.log：等待运行时日志初始化。")
+            self.log_fault_path_label.setText("latest.fault.log：等待故障日志初始化。")
+            return
+        self.log_session_path_label.setText(f"当前会话日志：{runtime_config.session_log}")
+        self.log_latest_path_label.setText(f"latest.log：{runtime_config.latest_log}")
+        self.log_fault_path_label.setText(f"latest.fault.log：{runtime_config.fault_log}")
+
+    def _refresh_log_filter_options(self) -> None:
+        selected_subsystem = str(self.log_filter_subsystem_combo.currentData() or "")
+        selected_source = str(self.log_filter_source_combo.currentData() or "")
+
+        self.log_filter_subsystem_combo.blockSignals(True)
+        self.log_filter_subsystem_combo.clear()
+        self.log_filter_subsystem_combo.addItem("全部子系统", "")
+        for subsystem in self._log_store.available_subsystems():
+            self.log_filter_subsystem_combo.addItem(subsystem, subsystem)
+        subsystem_index = max(0, self.log_filter_subsystem_combo.findData(selected_subsystem))
+        self.log_filter_subsystem_combo.setCurrentIndex(subsystem_index)
+        self.log_filter_subsystem_combo.blockSignals(False)
+
+        self.log_filter_source_combo.blockSignals(True)
+        self.log_filter_source_combo.clear()
+        self.log_filter_source_combo.addItem("全部来源", "")
+        for source in self._log_store.available_sources():
+            self.log_filter_source_combo.addItem(source, source)
+        source_index = max(0, self.log_filter_source_combo.findData(selected_source))
+        self.log_filter_source_combo.setCurrentIndex(source_index)
+        self.log_filter_source_combo.blockSignals(False)
+
+    def _current_log_query(self) -> LogQuery:
+        raw_levels = self.log_filter_level_combo.currentData()
+        levels = set(raw_levels) if isinstance(raw_levels, (tuple, list, set)) and raw_levels else None
+        return LogQuery(
+            levels=levels,
+            subsystem=str(self.log_filter_subsystem_combo.currentData() or ""),
+            source=str(self.log_filter_source_combo.currentData() or ""),
+            keyword=self.log_filter_keyword_edit.text().strip(),
+            experiment_mode=str(self.log_filter_experiment_combo.currentData() or "all"),
+        )
+
+    def _selected_log_entry(self) -> LogEntry | None:
+        item = self.log_entry_list.currentItem()
+        if item is None:
+            return None
+        payload = item.data(Qt.ItemDataRole.UserRole) or {}
+        entry = payload.get("entry")
+        return entry if isinstance(entry, LogEntry) else None
+
+    def _log_entry_payload(self, entry: LogEntry) -> dict[str, object]:
+        time_text = entry.timestamp[11:19] if len(entry.timestamp) >= 19 else entry.timestamp
+        title = f"{time_text} | {entry.level} | {entry.subsystem} | {entry.summary}"
+        if entry.experiment_context is not None and entry.experiment_context.summary_text():
+            title = f"{title} | {entry.experiment_context.summary_text()}"
+        return {
+            "title": title,
+            "detail": entry.detail_text(),
+            "severity": entry.severity_state,
+            "state": entry.severity_state,
+            "target_type": entry.target_type,
+            "target_id": entry.target_id,
+            "entry": entry,
+        }
+
+    def _update_log_latest_failure_label(self) -> None:
+        latest_failure = self._log_store.latest(failures_only=True)
+        if latest_failure is None:
+            self.log_latest_failure_label.setText("最近关键失败：暂无。")
+            self.log_latest_failure_label.setToolTip("最近关键失败：暂无。")
+            return
+        summary = f"最近关键失败：{latest_failure.summary}"
+        self.log_latest_failure_label.setText(summary)
+        self.log_latest_failure_label.setToolTip(latest_failure.detail_text())
+
+    def _refresh_log_results_view(self) -> None:
+        query = self._current_log_query()
+        entries = self._log_store.query(query)
+        panel_state = self._capture_report_panel_state(self.log_entry_list, self.log_entry_detail_output)
+        self._set_report_items(self.log_entry_list, [self._log_entry_payload(entry) for entry in entries])
+        self._restore_report_panel_state(self.log_entry_list, self.log_entry_detail_output, panel_state)
+        if self.log_entry_list.count():
+            if self.log_entry_list.currentRow() < 0:
+                self.log_entry_list.setCurrentRow(0)
+            self._update_report_detail_from_item(self.log_entry_list, self.log_entry_detail_output)
+        elif self._log_store.entries():
+            self.log_entry_detail_output.setPlainText("当前筛选没有匹配日志。请调整级别、子系统、实验或关键词条件。")
+        else:
+            self.log_entry_detail_output.setPlainText("当前还没有日志条目。执行一次导入、试听、构建或实验操作后，这里会出现结构化详情。")
+        self.copy_log_correlation_button.setEnabled(bool(self._selected_log_entry() and self._selected_log_entry().correlation_id))
+        total_count = len(self._log_store.entries())
+        visible_count = len(entries)
+        summary_text = self._latest_log_message or "等待新的运行日志。"
+        self.log_summary_label.setText(f"当前显示 {visible_count} / {total_count} 条日志。最近摘要：{summary_text}")
+        self.log_summary_label.setToolTip(summary_text)
+        self._update_log_latest_failure_label()
+
+    def _open_log_path(self, raw_path: str, *, title: str) -> None:
+        path = Path(raw_path)
+        if not raw_path or not path.exists():
+            QMessageBox.warning(self, title, "当前日志文件还不存在，请先执行一次会写日志的操作。")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            QMessageBox.warning(self, title, f"无法打开日志文件：{path}")
+
+    def _copy_selected_log_correlation(self) -> None:
+        entry = self._selected_log_entry()
+        if entry is None or not entry.correlation_id:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(entry.correlation_id)
+
+    def export_current_logs(self) -> None:
+        query = self._current_log_query()
+        entries = self._log_store.query(query)
+        suggested_name = f"audioforge-log-export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出当前日志",
+            suggested_name,
+            "JSON (*.json);;Text (*.txt)",
+        )
+        if not file_path:
+            return
+        path = Path(file_path)
+        if not path.suffix:
+            path = path.with_suffix(".txt" if "Text" in selected_filter else ".json")
+        if path.suffix.lower() == ".txt":
+            payload_text = "\n".join(entry.raw_line() for entry in entries) or "当前没有可导出的日志。"
+        else:
+            levels = sorted(query.levels) if query.levels else []
+            payload_text = json.dumps(
+                {
+                    "generated_at": datetime.now().isoformat(timespec="seconds"),
+                    "session_id": self._log_session_id,
+                    "filters": {
+                        "levels": levels,
+                        "subsystem": query.subsystem,
+                        "source": query.source,
+                        "keyword": query.keyword,
+                        "experiment_mode": query.experiment_mode,
+                    },
+                    "entries": [entry.as_dict() for entry in entries],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        path.write_text(payload_text, encoding="utf-8")
+        self.append_log(
+            f"已导出当前日志快照：{path}",
+            subsystem="log-ui",
+            summary="已导出当前日志快照。",
+            context={"entry_count": len(entries), "export_path": str(path)},
+        )
+
+    def _normalize_experiment_log_context(self, raw_context: object) -> ExperimentLogContext | None:
+        if isinstance(raw_context, ExperimentLogContext):
+            return raw_context
+        if not isinstance(raw_context, dict):
+            return None
+        return ExperimentLogContext(
+            workspace_path=str(raw_context.get("workspace_path") or ""),
+            task_id=str(raw_context.get("task_id") or ""),
+            task_name=str(raw_context.get("task_name") or ""),
+            variant_id=str(raw_context.get("variant_id") or ""),
+            variant_name=str(raw_context.get("variant_name") or ""),
+            lifecycle=str(raw_context.get("lifecycle") or ""),
+            action=str(raw_context.get("action") or ""),
+            base_project_path=str(raw_context.get("base_project_path") or ""),
+            variant_project_path=str(raw_context.get("variant_project_path") or ""),
+            baseline_variant_id=str(raw_context.get("baseline_variant_id") or ""),
+            baseline_variant_name=str(raw_context.get("baseline_variant_name") or ""),
+        )
+
+    def _append_structured_log_entry(self, entry: LogEntry) -> None:
+        self._update_log_runtime_metadata_labels()
+        self._log_store.append(entry)
+        self.log_output.appendPlainText(entry.raw_line())
+        self._latest_log_message = entry.summary
+        self.report_detail_label.setText(f"最近日志：{entry.summary[:80]}")
+        self.report_detail_label.setToolTip(entry.detail_text())
+        self._refresh_log_filter_options()
+        self._refresh_log_results_view()
         self._update_workspace_summary_labels()
-        self.logAppended.emit(message)
+        self.logEntryAppended.emit(entry)
+        self.logAppended.emit(entry.message)
+
+    def append_external_log_entry(self, entry: LogEntry) -> None:
+        self._append_structured_log_entry(entry)
+
+    def append_log(
+        self,
+        message: str,
+        *,
+        level: str = "INFO",
+        context: dict[str, object] | None = None,
+        subsystem: str = "general",
+        source: str = "desktop",
+        target_type: str = "",
+        target_id: str = "",
+        summary: str | None = None,
+        correlation_id: str = "",
+        operation_id: str = "",
+        parent_operation_id: str = "",
+        experiment_context: ExperimentLogContext | dict[str, object] | None = None,
+        project_name: str = "",
+        project_path: str = "",
+    ) -> None:
+        normalized_context = dict(context or {})
+        if not subsystem:
+            subsystem = str(normalized_context.pop("subsystem", "") or "general")
+        if not source:
+            source = str(normalized_context.pop("source", "") or "desktop")
+        if not target_type:
+            target_type = str(normalized_context.pop("target_type", "") or "")
+        if not target_id:
+            target_id = str(normalized_context.pop("target_id", "") or "")
+        if summary is None:
+            raw_summary = normalized_context.pop("summary", "")
+            summary = str(raw_summary or message).strip() or str(message).strip()
+        experiment_payload = experiment_context if experiment_context is not None else normalized_context.pop("experiment_context", None)
+        entry = LogEntry(
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            level=level,
+            subsystem=subsystem,
+            message=message,
+            summary=summary or message,
+            session_id=self._log_session_id,
+            correlation_id=correlation_id or uuid.uuid4().hex[:12],
+            source=source,
+            project_name=project_name or self.project_title_label.text().strip(),
+            project_path=project_path or self.project_path_label.text().strip(),
+            target_type=target_type,
+            target_id=target_id,
+            operation_id=operation_id,
+            parent_operation_id=parent_operation_id,
+            context=normalized_context,
+            experiment_context=self._normalize_experiment_log_context(experiment_payload),
+        )
+        self._append_structured_log_entry(entry)
 
     def show_validation_summary(self, issues: list[ValidationIssue]) -> None:
         if not issues:
@@ -9277,16 +9614,36 @@ class MainWindow(QMainWindow):
         self.validation_issue_list.itemSelectionChanged.connect(self._sync_validation_issue_actions)
         self.build_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.build_issue_list, self.build_report_output))
         self.loudness_issue_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.loudness_issue_list, self.loudness_report_output))
+        self.log_entry_list.itemSelectionChanged.connect(lambda: self._update_report_detail_from_item(self.log_entry_list, self.log_entry_detail_output))
+        self.log_entry_list.itemSelectionChanged.connect(
+            lambda: self.copy_log_correlation_button.setEnabled(bool(self._selected_log_entry() and self._selected_log_entry().correlation_id))
+        )
         self.diagnostic_section_list.itemSelectionChanged.connect(
             lambda: self._update_report_detail_from_item(self.diagnostic_section_list, self.diagnostic_section_detail_output)
         )
         self.build_profile_list.itemSelectionChanged.connect(
             lambda: self._update_report_detail_from_item(self.build_profile_list, self.build_profile_detail_output)
         )
+        self.log_entry_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.log_entry_list))
         self.validation_issue_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.validation_issue_list))
         self.loudness_issue_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.loudness_issue_list))
         self.diagnostic_section_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.diagnostic_section_list))
         self.build_profile_list.itemDoubleClicked.connect(lambda item: self._activate_report_item(self.build_profile_list))
+        self.log_filter_level_combo.currentIndexChanged.connect(lambda _index: self._refresh_log_results_view())
+        self.log_filter_subsystem_combo.currentIndexChanged.connect(lambda _index: self._refresh_log_results_view())
+        self.log_filter_source_combo.currentIndexChanged.connect(lambda _index: self._refresh_log_results_view())
+        self.log_filter_experiment_combo.currentIndexChanged.connect(lambda _index: self._refresh_log_results_view())
+        self.log_filter_keyword_edit.textChanged.connect(lambda _text: self._refresh_log_results_view())
+        self.log_filter_reset_button.clicked.connect(lambda: self.log_filter_level_combo.setCurrentIndex(0))
+        self.log_filter_reset_button.clicked.connect(lambda: self.log_filter_subsystem_combo.setCurrentIndex(0))
+        self.log_filter_reset_button.clicked.connect(lambda: self.log_filter_source_combo.setCurrentIndex(0))
+        self.log_filter_reset_button.clicked.connect(lambda: self.log_filter_experiment_combo.setCurrentIndex(0))
+        self.log_filter_reset_button.clicked.connect(lambda: self.log_filter_keyword_edit.setText(""))
+        self.log_filter_reset_button.clicked.connect(self._refresh_log_results_view)
+        self.log_export_button.clicked.connect(self.export_current_logs)
+        self.open_session_log_button.clicked.connect(lambda: self._open_log_path(self.log_session_path_label.text().partition("：")[2].strip(), title="打开会话日志"))
+        self.open_fault_log_button.clicked.connect(lambda: self._open_log_path(self.log_fault_path_label.text().partition("：")[2].strip(), title="打开故障日志"))
+        self.copy_log_correlation_button.clicked.connect(self._copy_selected_log_correlation)
         self.explorer_tabs.currentChanged.connect(lambda _index: self._sync_explorer_browser_state())
         self.tree_filter_edit.textChanged.connect(self._apply_explorer_filter)
         self.tree_filter_edit.returnPressed.connect(self._advance_explorer_search)

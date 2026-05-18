@@ -13,13 +13,15 @@ DIAGNOSTIC_SECTION_DEFAULTS = {
     "log": "最近日志：等待运行输出。",
     "validation": "等待校验。",
     "build": "等待构建或差异预览。",
+    "experiment": "等待实验日志。",
     "loudness": "等待响度扫描。",
     "bus": "等待 Bus 上下文。",
 }
-DIAGNOSTIC_PRIORITY_ORDER = ("validation", "build", "loudness", "bus", "log")
+DIAGNOSTIC_PRIORITY_ORDER = ("validation", "build", "experiment", "loudness", "bus", "log")
 DIAGNOSTIC_SECTION_TITLES = {
     "validation": "校验",
     "build": "构建",
+    "experiment": "实验",
     "loudness": "响度",
     "bus": "Bus 状态",
     "log": "日志",
@@ -92,6 +94,7 @@ class DiagnosticSnapshot:
             "log_summary": self.section("log").summary,
             "validation_summary": self.section("validation").summary,
             "build_summary": self.section("build").summary,
+            "experiment_summary": self.section("experiment").summary,
             "loudness_summary": self.section("loudness").summary,
             "bus_summary": self.section("bus").summary,
         }

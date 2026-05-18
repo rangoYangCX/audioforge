@@ -128,7 +128,15 @@ class ExperimentIntegrationController:
             save_path = self._host.project_repository.save(self._host.project, self._host.project.file_path)
             self._host.is_dirty = False
             self._host._clear_recovery_snapshot()
-            self._host.window.append_log(f"已自动保存方案工程：{save_path}")
+            loaded_indices = self.current_loaded_indices()
+            self._append_experiment_log(
+                f"已自动保存方案工程：{save_path}",
+                summary="已自动保存实验方案工程。",
+                task_index=loaded_indices[0] if loaded_indices else None,
+                variant_index=loaded_indices[1] if loaded_indices else None,
+                action=action_name,
+                context={"save_path": str(save_path)},
+            )
             return True
         except Exception as exc:
             confirmed = self._host.window.confirm_request(
@@ -142,7 +150,15 @@ class ExperimentIntegrationController:
                 return False
             self._host.is_dirty = False
             self._host._clear_recovery_snapshot()
-            self._host.window.append_log(f"自动保存方案失败，已放弃未保存修改并继续{action_name}：{exc}")
+            loaded_indices = self.current_loaded_indices()
+            self._append_experiment_log(
+                f"自动保存方案失败，已放弃未保存修改并继续{action_name}：{exc}",
+                level="WARNING",
+                summary="自动保存方案失败后已放弃未保存修改。",
+                task_index=loaded_indices[0] if loaded_indices else None,
+                variant_index=loaded_indices[1] if loaded_indices else None,
+                action=action_name,
+            )
             return True
 
     def run_action_with_saved_variant(self, action_name: str, action: Callable[[], object]) -> object | None:
@@ -154,7 +170,7 @@ class ExperimentIntegrationController:
         result = self._host.experiment_controller.activate_variant(task_index, variant_index)
         if result.success:
             return True
-        self.notify_warning("切换方案失败", result.error or "无法加载所选方案。")
+        self.notify_warning("切换方案失败", result.error or "无法加载所选方案。", task_index=task_index, variant_index=variant_index, action="切换方案")
         return False
 
     def reset_loaded_variant_context(self) -> None:
@@ -207,12 +223,83 @@ class ExperimentIntegrationController:
             return task.name
         return f"{task.name} / {task.variants[variant_index].name}"
 
-    def notify_warning(self, title: str, message: str) -> None:
-        self._host.window.append_log(f"{title}：{message}")
+    def _experiment_log_context(self, task_index: int | None = None, variant_index: int | None = None, *, action: str = "") -> dict[str, object] | None:
+        workspace = self._host.experiment_controller.workspace
+        if workspace is None:
+            return None
+        task = workspace.active_task
+        if task_index is not None and 0 <= task_index < len(workspace.tasks):
+            task = workspace.tasks[task_index]
+        if task is None:
+            return None
+        variant = task.active_variant
+        if variant_index is not None and 0 <= variant_index < len(task.variants):
+            variant = task.variants[variant_index]
+        baseline_variant = task.baseline_variant
+        return {
+            "workspace_path": str(workspace.file_path or ""),
+            "task_id": task.id,
+            "task_name": task.name,
+            "variant_id": variant.id if variant is not None else "",
+            "variant_name": variant.name if variant is not None else "",
+            "lifecycle": variant.lifecycle.value if variant is not None else "",
+            "action": action,
+            "base_project_path": str(workspace.base_project_abs_path),
+            "variant_project_path": str(getattr(getattr(self._host, "project", None), "file_path", "") or self._host._current_loaded_variant_path or ""),
+            "baseline_variant_id": baseline_variant.id if baseline_variant is not None else "",
+            "baseline_variant_name": baseline_variant.name if baseline_variant is not None else "",
+        }
+
+    def _append_experiment_log(
+        self,
+        message: str,
+        *,
+        level: str = "INFO",
+        summary: str | None = None,
+        task_index: int | None = None,
+        variant_index: int | None = None,
+        action: str = "",
+        context: dict[str, object] | None = None,
+    ) -> None:
+        self._host.window.append_log(
+            message,
+            level=level,
+            subsystem="experiment",
+            summary=summary or message,
+            experiment_context=self._experiment_log_context(task_index, variant_index, action=action),
+            context=context,
+        )
+
+    def notify_warning(self, title: str, message: str, *, task_index: int | None = None, variant_index: int | None = None, action: str = "") -> None:
+        self._append_experiment_log(
+            f"{title}：{message}",
+            level="WARNING",
+            summary=title,
+            task_index=task_index,
+            variant_index=variant_index,
+            action=action,
+        )
         self._host.window.present_notification(UserNotification(level="warning", title=title, message=message))
 
-    def notify_info(self, title: str, message: str, *, log_message: str | None = None) -> None:
-        self._host.window.append_log(log_message or message)
+    def notify_info(
+        self,
+        title: str,
+        message: str,
+        *,
+        log_message: str | None = None,
+        task_index: int | None = None,
+        variant_index: int | None = None,
+        action: str = "",
+        context: dict[str, object] | None = None,
+    ) -> None:
+        self._append_experiment_log(
+            log_message or message,
+            summary=title,
+            task_index=task_index,
+            variant_index=variant_index,
+            action=action,
+            context=context,
+        )
         self._host.window.present_notification(UserNotification(level="info", title=title, message=message))
 
     def on_create_task_requested(self, name: str) -> None:
@@ -304,7 +391,7 @@ class ExperimentIntegrationController:
         from audioforge.app.models.experiment_workspace import ExperimentLifecycle
 
         if self.is_read_only_variant(task_index, variant_index):
-            self.notify_info("只读基线", "default 基线为只读版本，不支持修改生命周期。")
+            self.notify_info("只读基线", "default 基线为只读版本，不支持修改生命周期。", task_index=task_index, variant_index=variant_index, action="修改生命周期")
             return
 
         try:
@@ -325,7 +412,7 @@ class ExperimentIntegrationController:
         if variant_index < 0:
             return
         if self.is_read_only_variant(task_index, variant_index):
-            self.notify_info("只读基线", "default 基线为只读版本，不能删除。")
+            self.notify_info("只读基线", "default 基线为只读版本，不能删除。", task_index=task_index, variant_index=variant_index, action="删除方案")
             return
         self.run_action_with_saved_variant(
             "删除方案",
@@ -344,7 +431,7 @@ class ExperimentIntegrationController:
         if variant_index < 0:
             return
         if self.is_read_only_variant(task_index, variant_index):
-            self.notify_info("只读基线", "default 基线为只读版本，不需要执行同步。")
+            self.notify_info("只读基线", "default 基线为只读版本，不需要执行同步。", task_index=task_index, variant_index=variant_index, action="同步底板")
             return
 
         def _sync_from_base() -> None:
@@ -352,18 +439,29 @@ class ExperimentIntegrationController:
             try:
                 backup_path = self._host.experiment_controller.sync_variant_from_base(task_index, variant_index)
             except (FileNotFoundError, ValueError) as exc:
-                self.notify_warning("同步底板失败", str(exc))
+                self.notify_warning("同步底板失败", str(exc), task_index=task_index, variant_index=variant_index, action="同步底板")
                 return
             if self.current_loaded_indices() == (task_index, variant_index):
                 if not self.activate_variant(task_index, variant_index):
                     return
             if backup_path is not None:
-                self._host.window.append_log(f"已备份被覆盖的方案副本：{backup_path}")
+                self._append_experiment_log(
+                    f"已备份被覆盖的方案副本：{backup_path}",
+                    summary="已备份被覆盖的实验方案副本。",
+                    task_index=task_index,
+                    variant_index=variant_index,
+                    action="同步底板",
+                    context={"backup_path": str(backup_path)},
+                )
             backup_hint = f"\n备份文件：{backup_path}" if backup_path is not None else ""
             self.notify_info(
                 "同步完成",
                 f"已将 {label} 同步到任务基线最新内容。{backup_hint}",
                 log_message=f"已同步实验方案：{label}" + (f"；备份：{backup_path}" if backup_path is not None else ""),
+                task_index=task_index,
+                variant_index=variant_index,
+                action="同步底板",
+                context={"backup_path": str(backup_path) if backup_path is not None else ""},
             )
 
         self.run_action_with_saved_variant("同步底板", _sync_from_base)
@@ -385,7 +483,14 @@ class ExperimentIntegrationController:
         self._host._current_loaded_variant_id = active_variant.id if active_variant else None
         self._host._current_loaded_variant_path = project_path
         if active_task is not None and active_variant is not None:
-            self._host.window.append_log(f"已加载实验方案工程：{active_task.name} / {active_variant.name}")
+            self._append_experiment_log(
+                f"已加载实验方案工程：{active_task.name} / {active_variant.name}",
+                summary="已加载实验方案工程。",
+                task_index=workspace.active_task_index,
+                variant_index=active_task.active_variant_index,
+                action="加载方案",
+                context={"project_path": project_path},
+            )
 
     def on_workspace_changed(self, workspace) -> None:
         self.refresh_ui(workspace)
@@ -395,7 +500,7 @@ class ExperimentIntegrationController:
 
     def compare_delta(self, task_index: int, variant_index: int) -> None:
         if self.is_read_only_variant(task_index, variant_index):
-            self.notify_info("只读基线", "default 基线用于承载对比基准，不需要再生成差异预览。")
+            self.notify_info("只读基线", "default 基线用于承载对比基准，不需要再生成差异预览。", task_index=task_index, variant_index=variant_index, action="对比差异")
             return
 
         def _compare() -> None:
@@ -408,7 +513,7 @@ class ExperimentIntegrationController:
                     serializer=self._host.project_repository,
                 )
             except Exception as exc:
-                self.notify_warning("对比失败", str(exc))
+                self.notify_warning("对比失败", str(exc), task_index=task_index, variant_index=variant_index, action="对比差异")
                 return
 
             if hasattr(self._host.window, "experiment_panel"):
@@ -419,13 +524,17 @@ class ExperimentIntegrationController:
                 "对比完成",
                 f"已生成 {label} 相对任务基线的差异预览，共 {len(preview_data.preview)} 项。",
                 log_message=f"已生成实验方案差异预览：{label}，差异项 {len(preview_data.preview)} 个。",
+                task_index=task_index,
+                variant_index=variant_index,
+                action="对比差异",
+                context={"preview_count": len(preview_data.preview)},
             )
 
         self.run_action_with_saved_variant("对比差异", _compare)
 
     def export_delta(self, task_index: int, variant_index: int) -> None:
         if self.is_read_only_variant(task_index, variant_index):
-            self.notify_info("只读基线", "default 基线用于承载对比基准，不支持导出增量。")
+            self.notify_info("只读基线", "default 基线用于承载对比基准，不支持导出增量。", task_index=task_index, variant_index=variant_index, action="导出增量")
             return
 
         def _export() -> None:
@@ -438,7 +547,7 @@ class ExperimentIntegrationController:
                     serializer=self._host.project_repository,
                 )
             except Exception as exc:
-                self.notify_warning("导出失败", f"增量预览失败:\n{exc}")
+                self.notify_warning("导出失败", f"增量预览失败:\n{exc}", task_index=task_index, variant_index=variant_index, action="导出增量")
                 return
 
             if hasattr(self._host.window, "experiment_panel"):
@@ -469,7 +578,14 @@ class ExperimentIntegrationController:
                 )
             )
             if not confirmed:
-                self._host.window.append_log(f"已取消实验增量导出：{label}")
+                self._append_experiment_log(
+                    f"已取消实验增量导出：{label}",
+                    level="WARNING",
+                    summary="已取消实验增量导出。",
+                    task_index=task_index,
+                    variant_index=variant_index,
+                    action="导出增量",
+                )
                 return
 
             try:
@@ -480,7 +596,7 @@ class ExperimentIntegrationController:
                     serializer=self._host.project_repository,
                 )
             except Exception as exc:
-                self.notify_warning("导出失败", f"增量导出失败:\n{exc}")
+                self.notify_warning("导出失败", f"增量导出失败:\n{exc}", task_index=task_index, variant_index=variant_index, action="导出增量")
                 return
 
             if hasattr(self._host.window, "experiment_panel"):
@@ -507,6 +623,10 @@ class ExperimentIntegrationController:
                 "导出完成",
                 f"已导出 {label} 的增量结果。\n输出目录：{export_data.export_root}\n{summary}",
                 log_message=f"已导出实验增量：{label} -> {export_data.export_root}（{summary}）",
+                task_index=task_index,
+                variant_index=variant_index,
+                action="导出增量",
+                context={"export_root": str(export_data.export_root), "summary": summary},
             )
 
         self.run_action_with_saved_variant("导出增量", _export)

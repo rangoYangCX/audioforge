@@ -76,7 +76,7 @@ class _DummyWindow:
         self.experiment_switcher = _DummySwitcher()
         self.logs: list[str] = []
 
-    def append_log(self, message: str) -> None:
+    def append_log(self, message: str, **_: object) -> None:
         self.logs.append(message)
 
     def present_notification(self, notification: UserNotification) -> None:

@@ -78,6 +78,7 @@ from audioforge.app.models.diagnostic_dto import (
     DiagnosticSection,
     DiagnosticSnapshot,
 )
+from audioforge.app.models.log_entry_dto import LogEntry
 
 
 LOUDNESS_SCAN_THRESHOLDS = {
@@ -485,7 +486,7 @@ class MainController(QObject):
         self.window.source_tree.sourceSelected.connect(lambda _source_path: self._sync_browser_action_affordances())
         self.window.audio_tree.audioSelected.connect(lambda _audio_id: self._sync_browser_action_affordances())
         self.window.explorer_tabs.currentChanged.connect(lambda _index: self._sync_browser_action_affordances())
-        self.window.logAppended.connect(self._handle_log_appended)
+        self.window.logEntryAppended.connect(self._handle_log_appended)
         self.window.diagnosticContextChanged.connect(self._publish_diagnostic_snapshot)
         self.window.validationReportUpdated.connect(self._handle_validation_report_updated)
         self.window.buildStatusUpdated.connect(self._handle_build_status_updated)
@@ -1177,17 +1178,63 @@ class MainController(QObject):
             section = self._diagnostic_snapshot.section(section_name)
             if section.summary != section.default_summary:
                 return section.summary
-        return "诊断概览已接入结果中心；这里统一汇总日志、校验、构建、响度和 Bus 状态。"
+        return "诊断概览已接入结果中心；这里统一汇总日志、校验、构建、实验、响度和 Bus 状态。"
 
-    @Slot(str)
-    def _handle_log_appended(self, message: str) -> None:
-        normalized = message.strip()
+    def _set_experiment_diagnostic_summary(self, entry: LogEntry) -> None:
+        if entry.experiment_context is None and entry.subsystem != "experiment":
+            return
+        experiment_summary = entry.summary
+        if entry.experiment_context is not None and entry.experiment_context.summary_text():
+            experiment_summary = f"{entry.experiment_context.summary_text()} | {entry.summary}"
+        self._diagnostic_snapshot.section("experiment").update(
+            summary=experiment_summary,
+            detail=entry.detail_text(),
+            status=entry.severity_state,
+            target_type=entry.target_type,
+            target_id=entry.target_id,
+            metadata={
+                "message": entry.message,
+                "summary": entry.summary,
+                "correlation_id": entry.correlation_id,
+                "subsystem": entry.subsystem,
+                "source": entry.source,
+                "context": dict(entry.context),
+                "experiment_context": entry.experiment_context.as_dict() if entry.experiment_context is not None else {},
+            },
+        )
+
+    @Slot(object)
+    def _handle_log_appended(self, payload: object) -> None:
+        if isinstance(payload, LogEntry):
+            normalized = payload.summary.strip() or payload.message.strip()
+            detail = payload.message.strip() or DIAGNOSTIC_SECTION_DEFAULTS["log"]
+            status = payload.severity_state if normalized else "idle"
+            metadata = {
+                "message": payload.message,
+                "summary": payload.summary,
+                "correlation_id": payload.correlation_id,
+                "subsystem": payload.subsystem,
+                "source": payload.source,
+                "target_type": payload.target_type,
+                "target_id": payload.target_id,
+                "context": dict(payload.context),
+                "detail": payload.detail_text(),
+            }
+            if payload.experiment_context is not None:
+                metadata["experiment_context"] = payload.experiment_context.as_dict()
+        else:
+            normalized = str(payload or "").strip()
+            detail = normalized or DIAGNOSTIC_SECTION_DEFAULTS["log"]
+            status = "info" if normalized else "idle"
+            metadata = {"message": normalized}
         self._diagnostic_snapshot.section("log").update(
             summary=f"最近日志：{normalized}" if normalized else DIAGNOSTIC_SECTION_DEFAULTS["log"],
-            detail=normalized or DIAGNOSTIC_SECTION_DEFAULTS["log"],
-            status="info" if normalized else "idle",
-            metadata={"message": normalized},
+            detail=detail,
+            status=status,
+            metadata=metadata,
         )
+        if isinstance(payload, LogEntry):
+            self._set_experiment_diagnostic_summary(payload)
         self._publish_diagnostic_snapshot()
 
     @Slot(object)

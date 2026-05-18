@@ -2222,7 +2222,7 @@ def test_diagnostic_results_page_reuses_existing_report_state(monkeypatch) -> No
     assert "响度扫描完成" in controller.window.diagnostic_loudness_summary_label.toolTip()
     assert controller.window.current_project_bus_name() in controller.window.diagnostic_bus_summary_label.toolTip()
     assert controller.window.activity_status_indicator.text().strip()
-    assert controller.window.diagnostic_section_list.count() == 5
+    assert controller.window.diagnostic_section_list.count() == 6
     current_item = controller.window.diagnostic_section_list.currentItem()
     assert current_item is not None
     current_payload = current_item.data(0x0100)
@@ -2284,6 +2284,9 @@ def test_controller_tracks_structured_diagnostic_sections(monkeypatch) -> None:
     assert bus_section.status == "info"
     assert bus_section.metadata["default_bus"] == controller.project.settings.default_bus
     assert bus_section.metadata["current_project_bus"] == controller.window.current_project_bus_name()
+
+    experiment_section = snapshot.section("experiment")
+    assert experiment_section.summary == "等待实验日志。"
 
     controller._set_build_diagnostic_summary(
         "构建完成。",
